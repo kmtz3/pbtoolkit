@@ -965,6 +965,48 @@ input:focus, select:focus, textarea:focus {
   .ent-options-grid { grid-template-columns: 1fr; }
 }
 
+/* ── Mobile layout: stack sidebar above content ─────────── */
+@media (max-width: 768px) {
+  body { overflow-x: hidden; }
+
+  .topbar {
+    padding: 0 16px;
+    gap: 8px;
+  }
+  .topbar-breadcrumb { display: none; }
+  .topbar-right      { gap: 6px; }
+  .dc-btn            { padding: 4px 8px; font-size: 11px; }
+  .conn-label        { display: none; }
+
+  .main-content {
+    grid-template-columns: 1fr;
+    padding: 12px 16px 24px;
+    gap: 16px;
+  }
+
+  .panel-body { overflow-x: auto; }
+
+  /* sidebar-nav is just a pass-through block; grid goes on the wrapper divs */
+  .sidebar-nav { display: block; }
+
+  #sidebar-companies,
+  #sidebar-notes,
+  #sidebar-entities {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .nav-section-label { display: none; }
+
+  .nav-item {
+    width: auto;
+    white-space: normal;
+    font-size: 13px;
+  }
+
+}
+
 /* ── Entities: validation error panels ──────────────────── */
 .ent-error-panel {
   border: 1px solid var(--c-border);
@@ -1048,4 +1090,19 @@ input:focus, select:focus, textarea:focus {
 .attribution a:hover {
   color: var(--c-muted);
   text-decoration: underline;
+}
+
+/* footer override must come after the .bottom-left base rule to win source order */
+@media (max-width: 768px) {
+  .bottom-left {
+    position: static;
+    bottom: auto;
+    left: auto;
+    z-index: auto;
+    padding: 16px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
 }
