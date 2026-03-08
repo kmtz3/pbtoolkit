@@ -42,4 +42,15 @@ function generateCSV(rows, fields, headers) {
   return Papa.unparse({ fields: headers, data: dataRows });
 }
 
-module.exports = { parseCSV, generateCSV };
+/**
+ * Generate a CSV string from row objects using column definitions.
+ * Convenience wrapper around generateCSV for the common [{key, label}] pattern.
+ * @param {object[]} rows
+ * @param {Array<{key: string, label: string}>} colDefs
+ * @returns {string} CSV string
+ */
+function generateCSVFromColumns(rows, colDefs) {
+  return generateCSV(rows, colDefs.map((c) => c.key), colDefs.map((c) => c.label));
+}
+
+module.exports = { parseCSV, generateCSV, generateCSVFromColumns };

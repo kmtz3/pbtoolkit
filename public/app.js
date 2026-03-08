@@ -120,7 +120,7 @@ document.querySelectorAll('.tool-card:not(.tool-card-soon)').forEach((card) => {
 });
 
 function loadTool(toolName) {
-  const names = { companies: 'Companies', notes: 'Notes', entities: 'Entities' };
+  const names = { companies: 'Companies', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity' };
   setText('topbar-tool-name', names[toolName] || toolName);
   showScreen('tool');
 
@@ -128,6 +128,7 @@ function loadTool(toolName) {
   $('sidebar-companies').classList.toggle('hidden', toolName !== 'companies');
   $('sidebar-notes').classList.toggle('hidden', toolName !== 'notes');
   $('sidebar-entities').classList.toggle('hidden', toolName !== 'entities');
+  $('sidebar-member-activity').classList.toggle('hidden', toolName !== 'member-activity');
 
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
 
@@ -144,6 +145,12 @@ function loadTool(toolName) {
   if (toolName === 'entities') {
     $('nav-entities-templates').classList.add('active');
     showView('entities-templates');
+  }
+
+  if (toolName === 'member-activity') {
+    $('nav-member-activity-export').classList.add('active');
+    showView('member-activity-export');
+    if (typeof initMemberActivityModule === 'function') initMemberActivityModule();
   }
 
   updateConnectionStatus();
@@ -251,6 +258,7 @@ function showView(view) {
     'companies-delete-csv', 'companies-delete-all',
     'notes-export', 'notes-import', 'notes-delete-csv', 'notes-delete-all', 'notes-migrate',
     'entities-templates', 'entities-export', 'entities-import',
+    'member-activity-export',
   ].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', v !== view);
@@ -405,20 +413,15 @@ function loadCSVFile(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     const text = e.target.result;
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) {
+    const rowCount = countCSVDataRows(text);
+    if (rowCount === 0) {
       alert('CSV file appears empty or has no data rows.');
       return;
     }
-    parsedCSV = { raw: text, headers: parseCSVHeaders(text), rowCount: lines.length - 1 };
+    parsedCSV = { raw: text, headers: parseCSVHeaders(text), rowCount };
     showMappingStep();
   };
   reader.readAsText(file);
-}
-
-function parseCSVHeaders(csvText) {
-  const firstLine = csvText.split('\n')[0];
-  return firstLine.split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
 }
 
 // ══════════════════════════════════════════════════════════
@@ -529,7 +532,7 @@ function buildCustomFieldTable() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${esc(field.name)}</td>
-      <td><span class="badge badge-muted">${field.type}</span></td>
+      <td><span class="badge badge-muted">${esc(field.type)}</span></td>
       <td>${buildColumnSelect(`cf-${field.id}`, true)}</td>
     `;
     tbody.appendChild(tr);
@@ -1003,9 +1006,9 @@ function loadNotesCSV(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     const text = e.target.result;
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) { alert('CSV file appears empty or has no data rows.'); return; }
-    notesParsedCSV = { raw: text, headers: parseCSVHeaders(text), rowCount: lines.length - 1 };
+    const rowCount = countCSVDataRows(text);
+    if (rowCount === 0) { alert('CSV file appears empty or has no data rows.'); return; }
+    notesParsedCSV = { raw: text, headers: parseCSVHeaders(text), rowCount };
     showNotesMappingStep();
   };
   reader.readAsText(file);
@@ -1350,10 +1353,10 @@ function loadNotesDeleteCSV(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     const text = e.target.result;
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) { alert('CSV appears empty.'); return; }
     const headers = parseCSVHeaders(text);
-    notesDeleteParsedCSV = { raw: text, headers, rowCount: lines.length - 1 };
+    const rowCount = countCSVDataRows(text);
+    if (rowCount === 0) { alert('CSV appears empty.'); return; }
+    notesDeleteParsedCSV = { raw: text, headers, rowCount };
 
     // Populate column picker
     const sel = $('notes-delete-uuid-column');
@@ -1585,10 +1588,10 @@ function loadCompaniesDeleteCSV(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     const text = e.target.result;
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) { alert('CSV appears empty.'); return; }
     const headers = parseCSVHeaders(text);
-    companiesDeleteParsedCSV = { raw: text, headers, rowCount: lines.length - 1 };
+    const rowCount = countCSVDataRows(text);
+    if (rowCount === 0) { alert('CSV appears empty.'); return; }
+    companiesDeleteParsedCSV = { raw: text, headers, rowCount };
 
     // Populate column picker
     const sel = $('companies-delete-uuid-column');
@@ -1821,11 +1824,11 @@ function loadNotesMigrateCSV(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     const text = e.target.result;
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) { alert('CSV appears empty.'); return; }
-    notesMigrateParsedCSV = { raw: text, rowCount: lines.length - 1 };
+    const rowCount = countCSVDataRows(text);
+    if (rowCount === 0) { alert('CSV appears empty.'); return; }
+    notesMigrateParsedCSV = { raw: text, rowCount };
     show('notes-migrate-form');
-    notesMigrateDropzone.querySelector('.dropzone-label').textContent = `${file.name} (${lines.length - 1} rows)`;
+    notesMigrateDropzone.querySelector('.dropzone-label').textContent = `${file.name} (${rowCount} rows)`;
   };
   reader.readAsText(file);
 }

@@ -4,7 +4,5 @@ node_modules/
 .DS_Store
 .claude/
 CLAUDE.md
-ENTITY_IMPORTER_PLAN.md
-member-activity-export-plan.md
-team-membership-plan.md
 openapi v2 public API/
+implementation_notes/

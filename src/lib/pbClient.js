@@ -125,7 +125,25 @@ function createClient(token, useEu = false) {
     }
   }
 
-  return { pbFetch, withRetry, rl };
+  /**
+   * Fetch all pages of a cursor-paginated v2 API endpoint.
+   * Follows links.next (full URL) until null.
+   * @param {string} path - Initial URL path or full URL
+   * @param {string} [label] - Label for retry logging
+   * @returns {Promise<object[]>} All items across all pages
+   */
+  async function fetchAllPages(path, label) {
+    const items = [];
+    let nextUrl = path;
+    while (nextUrl) {
+      const r = await withRetry(() => pbFetch('get', nextUrl), label || path);
+      if (r.data?.length) items.push(...r.data);
+      nextUrl = r.links?.next || null;
+    }
+    return items;
+  }
+
+  return { pbFetch, withRetry, fetchAllPages, rl };
 }
 
 function sleep(ms) {

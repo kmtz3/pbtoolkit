@@ -3,7 +3,57 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PBToolkit</title>
+
+  <!-- Primary SEO -->
+  <title>PBToolkit — Productboard Importer, Exporter &amp; Migration Tool</title>
+  <meta name="description" content="Import, export, and migrate Productboard data via CSV. Bulk-manage entities, notes, and companies across workspaces. Free, open-source, browser-based tool." />
+  <link rel="canonical" href="https://pbtoolkit.com/" />
+  <meta name="robots" content="index, follow" />
+
+  <!-- Open Graph (og:image omitted — add later with og-image.png 1200×630px) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://pbtoolkit.com/" />
+  <meta property="og:title" content="PBToolkit — Productboard Importer, Exporter &amp; Migration Tool" />
+  <meta property="og:description" content="Import, export, and migrate Productboard data via CSV. Bulk-manage entities, notes, and companies across workspaces." />
+  <meta property="og:site_name" content="PBToolkit" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="PBToolkit — Productboard Importer, Exporter &amp; Migration Tool" />
+  <meta name="twitter:description" content="Import, export, and migrate Productboard data via CSV. Bulk-manage entities, notes, and companies across workspaces." />
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "PBToolkit",
+    "url": "https://pbtoolkit.com/",
+    "description": "Import, export, and migrate Productboard data via CSV. Bulk-manage entities, notes, and companies across Productboard workspaces.",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Web",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "featureList": [
+      "Productboard entity import from CSV",
+      "Productboard entity export to CSV",
+      "Productboard notes import and export",
+      "Productboard companies import and export",
+      "Cross-workspace data migration"
+    ],
+    "keywords": "Productboard importer, Productboard exporter, Productboard CSV, import Productboard data, export Productboard CSV, Productboard entity migration"
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "PBToolkit",
+    "url": "https://pbtoolkit.com/",
+    "description": "A free, open-source toolkit for importing, exporting, and migrating Productboard data."
+  }
+  </script>
+
+  <!-- Assets -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -77,26 +127,33 @@
   <!-- ── HOME VIEW ── -->
   <div id="home-view" class="home-shell hidden">
     <div class="home-content">
-      <h1 class="home-title">Tools</h1>
-      <p class="home-subtitle">Select a tool to get started.</p>
+      <h1 class="home-title">Productboard Data Tools</h1>
+      <p class="home-subtitle">Import, export, and migrate Productboard data. Select a tool to get started.</p>
       <div class="tool-grid">
 
         <div class="tool-card" data-tool="entities">
           <span class="tool-card-icon">📦</span>
-          <div class="tool-card-name">Entities</div>
+          <h2 class="tool-card-name">Entities</h2>
           <div class="tool-card-desc">Import, export, and migrate product and strategic entities across workspaces.</div>
         </div>
 
         <div class="tool-card" data-tool="notes">
           <span class="tool-card-icon">📝</span>
-          <div class="tool-card-name">Notes</div>
+          <h2 class="tool-card-name">Notes</h2>
           <div class="tool-card-desc">Export, import, delete, and migrate notes across workspaces.</div>
         </div>
 
         <div class="tool-card" data-tool="companies">
           <span class="tool-card-icon">🏢</span>
-          <div class="tool-card-name">Companies</div>
+          <h2 class="tool-card-name">Companies</h2>
           <div class="tool-card-desc">Export and import companies, including custom fields and UUID-based patching.</div>
+        </div>
+
+        <div class="tool-card" data-tool="member-activity">
+          <span class="tool-card-icon">📈</span>
+          <div class="tool-card-name">Member Activity</div>
+          <div class="tool-card-desc">Export member activity data for license auditing and enablement planning.</div>
+          <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
         </div>
 
         <div class="tool-card tool-card-soon">
@@ -110,13 +167,6 @@
           <span class="tool-card-icon">👥</span>
           <div class="tool-card-name">Teams membership</div>
           <div class="tool-card-desc">Bulk-manage team – member assignments and more.</div>
-          <div class="tool-card-footer"><span class="badge badge-muted">Soon</span></div>
-        </div>
-
-        <div class="tool-card tool-card-soon">
-          <span class="tool-card-icon">📈</span>
-          <div class="tool-card-name">Member activity</div>
-          <div class="tool-card-desc">Export member activity reports.</div>
           <div class="tool-card-footer"><span class="badge badge-muted">Soon</span></div>
         </div>
 
@@ -185,6 +235,13 @@
           </button>
         </div>
 
+        <!-- Member Activity nav items -->
+        <div id="sidebar-member-activity" class="hidden">
+          <button class="nav-item active" data-view="member-activity-export" id="nav-member-activity-export">
+            <span class="icon">📈</span> Export activity
+          </button>
+        </div>
+
       </nav>
 
       <!-- Right panel area -->
@@ -194,7 +251,7 @@
         <div id="view-export">
           <div class="panel">
             <div class="panel-header">
-              <div class="panel-title">Export companies</div>
+              <h2 class="panel-title">Export companies</h2>
               <div class="panel-subtitle">Download all Productboard companies as a CSV file, including custom fields.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -244,7 +301,7 @@
           <!-- Step 1: Upload CSV -->
           <div class="panel" id="import-step-upload">
             <div class="panel-header">
-              <div class="panel-title">Import companies</div>
+              <h2 class="panel-title">Import companies</h2>
               <div class="panel-subtitle">Upload a CSV, map columns to Productboard fields, then run the import.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -263,7 +320,7 @@
             <div class="panel-header">
               <div class="flex items-center justify-between">
                 <div>
-                  <div class="panel-title">Map columns</div>
+                  <h3 class="panel-title">Map columns</h3>
                   <div class="panel-subtitle" id="map-subtitle"></div>
                 </div>
                 <button class="btn btn-ghost btn-sm" id="btn-reupload">↩ Re-upload</button>
@@ -315,7 +372,7 @@
           <!-- Step 3: Options + actions -->
           <div class="panel mt-16 hidden" id="import-step-options">
             <div class="panel-header">
-              <div class="panel-title">Options</div>
+              <h3 class="panel-title">Options</h3>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -335,7 +392,7 @@
           <!-- Step 4: Validation results -->
           <div class="panel mt-16 hidden" id="import-step-validate">
             <div class="panel-header">
-              <div class="panel-title">Validation results</div>
+              <h3 class="panel-title">Validation results</h3>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -371,7 +428,7 @@
           <!-- Step 6: Log — progress + summary + live log -->
           <div class="panel mt-16 hidden" id="import-step-run">
             <div class="panel-header">
-              <div class="panel-title" id="import-run-title">Importing…</div>
+              <h3 class="panel-title" id="import-run-title">Importing…</h3>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -412,7 +469,7 @@
           <!-- Step 1: Upload -->
           <div class="panel" id="companies-delete-csv-step-upload">
             <div class="panel-header">
-              <div class="panel-title">Delete companies from CSV</div>
+              <h2 class="panel-title">Delete companies from CSV</h2>
               <div class="panel-subtitle">Upload a CSV containing company UUIDs and permanently delete those companies.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -435,7 +492,7 @@
             <div class="panel-header">
               <div class="flex items-center justify-between">
                 <div>
-                  <div class="panel-title">Confirm deletion</div>
+                  <h3 class="panel-title">Confirm deletion</h3>
                   <div class="panel-subtitle" id="companies-delete-csv-subtitle"></div>
                 </div>
                 <button class="btn btn-ghost btn-sm" id="btn-companies-delete-reupload">↩ Re-upload</button>
@@ -456,7 +513,7 @@
           <div class="panel mt-16 hidden" id="companies-delete-csv-step-run">
             <div class="panel-header">
               <div class="flex items-center justify-between">
-                <div class="panel-title" id="companies-delete-csv-run-title">Deleting companies…</div>
+                <h3 class="panel-title" id="companies-delete-csv-run-title">Deleting companies…</h3>
                 <button class="btn btn-danger btn-sm hidden" id="btn-stop-companies-delete-csv">⏹ Stop</button>
               </div>
             </div>
@@ -488,7 +545,7 @@
         <div id="view-companies-delete-all" class="hidden">
           <div class="panel">
             <div class="panel-header">
-              <div class="panel-title">Delete all companies</div>
+              <h2 class="panel-title">Delete all companies</h2>
               <div class="panel-subtitle">Permanently delete every company in your Productboard workspace.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -536,7 +593,7 @@
         <div id="view-notes-export" class="hidden">
           <div class="panel">
             <div class="panel-header">
-              <div class="panel-title">Export notes</div>
+              <h2 class="panel-title">Export notes</h2>
               <div class="panel-subtitle">Download all Productboard notes as a CSV file.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -625,7 +682,7 @@
           <!-- Step 1: Upload -->
           <div class="panel" id="notes-import-step-upload">
             <div class="panel-header">
-              <div class="panel-title">Import notes</div>
+              <h2 class="panel-title">Import notes</h2>
               <div class="panel-subtitle">Upload a CSV, map columns to Productboard note fields, then run the import.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -648,7 +705,7 @@
             <div class="panel-header">
               <div class="flex items-center justify-between">
                 <div>
-                  <div class="panel-title">Map columns</div>
+                  <h3 class="panel-title">Map columns</h3>
                   <div class="panel-subtitle" id="notes-map-subtitle"></div>
                 </div>
                 <button class="btn btn-ghost btn-sm" id="btn-notes-reupload">↩ Re-upload</button>
@@ -670,7 +727,7 @@
           <!-- Step 3: Options + actions -->
           <div class="panel mt-16 hidden" id="notes-import-step-options">
             <div class="panel-header">
-              <div class="panel-title">Options</div>
+              <h3 class="panel-title">Options</h3>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -702,7 +759,7 @@
           <!-- Step 4: Validation results -->
           <div class="panel mt-16 hidden" id="notes-import-step-validate">
             <div class="panel-header">
-              <div class="panel-title">Validation results</div>
+              <h3 class="panel-title">Validation results</h3>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -749,7 +806,7 @@
           <!-- Step 6: Log — progress + summary + live log -->
           <div class="panel mt-16 hidden" id="notes-import-step-run">
             <div class="panel-header">
-              <div class="panel-title" id="notes-import-run-title">Importing notes…</div>
+              <h3 class="panel-title" id="notes-import-run-title">Importing notes…</h3>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -786,7 +843,7 @@
           <!-- Step 1: Upload -->
           <div class="panel" id="notes-delete-csv-step-upload">
             <div class="panel-header">
-              <div class="panel-title">Delete notes from CSV</div>
+              <h2 class="panel-title">Delete notes from CSV</h2>
               <div class="panel-subtitle">Upload a CSV containing PB Note IDs and permanently delete those notes.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -809,7 +866,7 @@
             <div class="panel-header">
               <div class="flex items-center justify-between">
                 <div>
-                  <div class="panel-title">Confirm deletion</div>
+                  <h3 class="panel-title">Confirm deletion</h3>
                   <div class="panel-subtitle" id="notes-delete-csv-subtitle"></div>
                 </div>
                 <button class="btn btn-ghost btn-sm" id="btn-notes-delete-reupload">↩ Re-upload</button>
@@ -830,7 +887,7 @@
           <div class="panel mt-16 hidden" id="notes-delete-csv-step-run">
             <div class="panel-header">
               <div class="flex items-center justify-between">
-                <div class="panel-title" id="notes-delete-csv-run-title">Deleting notes…</div>
+                <h3 class="panel-title" id="notes-delete-csv-run-title">Deleting notes…</h3>
                 <button class="btn btn-danger btn-sm hidden" id="btn-stop-notes-delete-csv">⏹ Stop</button>
               </div>
             </div>
@@ -862,7 +919,7 @@
         <div id="view-notes-delete-all" class="hidden">
           <div class="panel">
             <div class="panel-header">
-              <div class="panel-title">Delete all notes</div>
+              <h2 class="panel-title">Delete all notes</h2>
               <div class="panel-subtitle">Permanently delete every note in your Productboard workspace.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -906,7 +963,7 @@
         <div id="view-notes-migrate" class="hidden">
           <div class="panel">
             <div class="panel-header">
-              <div class="panel-title">Migration prep</div>
+              <h2 class="panel-title">Migration prep</h2>
               <div class="panel-subtitle">Transform an export CSV to make notes ready for import into a new workspace.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -971,7 +1028,7 @@
         <div id="view-entities-templates" class="hidden">
           <div class="panel">
             <div class="panel-header">
-              <div class="panel-title">Entity templates</div>
+              <h2 class="panel-title">Entity templates</h2>
               <div class="panel-subtitle">Download CSV templates pre-populated with your workspace's custom fields.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -1008,7 +1065,7 @@
         <div id="view-entities-export" class="hidden">
           <div class="panel">
             <div class="panel-header">
-              <div class="panel-title">Export entities</div>
+              <h2 class="panel-title">Export entities</h2>
               <div class="panel-subtitle">Download entities as CSV files — single type or full workspace export.</div>
             </div>
             <!-- Tab bar -->
@@ -1100,7 +1157,7 @@
           <!-- Step 1: Upload files -->
           <div class="panel" id="ent-import-step-upload">
             <div class="panel-header">
-              <div class="panel-title">Import entities</div>
+              <h2 class="panel-title">Import entities</h2>
               <div class="panel-subtitle">Upload CSV files for the entity types you want to import. Process multiple types in one run — entities are created in dependency order.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -1118,7 +1175,7 @@
           <!-- Step 2: Map columns (appears once ≥1 file uploaded) -->
           <div class="panel mt-16 hidden" id="ent-import-step-map">
             <div class="panel-header">
-              <div class="panel-title">Map columns</div>
+              <h3 class="panel-title">Map columns</h3>
               <div class="panel-subtitle">Verify that each CSV column is mapped to the correct Productboard field. Template-format headers are auto-mapped.</div>
             </div>
             <hr class="panel-divider mt-12" />
@@ -1139,7 +1196,7 @@
           <!-- Step 3: Options + actions (appears with mapping panel) -->
           <div class="panel mt-16 hidden" id="ent-import-step-options">
             <div class="panel-header">
-              <div class="panel-title">Options</div>
+              <h3 class="panel-title">Options</h3>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -1199,7 +1256,7 @@
           <!-- Step 4: Log — progress + summary + live log (appears when import starts) -->
           <div class="panel mt-16 hidden" id="ent-import-step-log">
             <div class="panel-header">
-              <div class="panel-title" id="ent-import-run-title">Importing…</div>
+              <h3 class="panel-title" id="ent-import-run-title">Importing…</h3>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -1235,6 +1292,144 @@
 
         </div><!-- /view-entities-import -->
 
+        <!-- ── MEMBER ACTIVITY EXPORT ── -->
+        <div id="view-member-activity-export" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Export member activity</div>
+              <div class="panel-subtitle">Export activity data enriched with member profiles and team assignments. Use for license auditing and enablement planning.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ── IDLE STATE ── -->
+              <div id="ma-idle">
+
+                <!-- Obfuscated PII warning -->
+                <div id="ma-obfuscated-warn" class="alert alert-warn hidden" style="margin-bottom:16px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span>Member names and emails are obfuscated. Your token may lack PII access.</span>
+                </div>
+
+                <!-- Date range -->
+                <div class="form-row" style="margin-bottom:16px;">
+                  <label class="form-label">Date range</label>
+                  <select id="ma-date-preset" class="form-select">
+                    <option value="last30">Last 30 days</option>
+                    <option value="last7">Last 7 days</option>
+                    <option value="last90">Last 90 days</option>
+                    <option value="thisMonth">This month</option>
+                    <option value="lastMonth">Last month</option>
+                    <option value="custom">Custom…</option>
+                  </select>
+                  <div id="ma-custom-dates" class="hidden" style="display:flex;gap:8px;margin-top:8px;">
+                    <input type="date" id="ma-date-from" class="form-input" placeholder="From" />
+                    <input type="date" id="ma-date-to"   class="form-input" placeholder="To" />
+                  </div>
+                </div>
+
+                <!-- Role filter -->
+                <div class="form-row" style="margin-bottom:16px;">
+                  <label class="form-label">Roles</label>
+                  <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:4px;">
+                    <label class="checkbox-label"><input type="checkbox" id="ma-role-admin"       checked> Admin</label>
+                    <label class="checkbox-label"><input type="checkbox" id="ma-role-maker"       checked> Maker</label>
+                    <label class="checkbox-label"><input type="checkbox" id="ma-role-viewer"      checked> Viewer</label>
+                    <label class="checkbox-label"><input type="checkbox" id="ma-role-contributor" checked> Contributor</label>
+                  </div>
+                </div>
+
+                <!-- Team filter -->
+                <div class="form-row" style="margin-bottom:16px;">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <label class="form-label" style="margin:0;">Teams</label>
+                    <span class="info-icon" data-tip="Team assignments reflect current state in Productboard, not the member's team at the time of the activity.">i</span>
+                    <button id="btn-ma-refresh" class="btn btn-xs btn-ghost" style="margin-left:auto;" type="button">↺ Refresh data</button>
+                  </div>
+                  <input type="text" id="ma-team-search" class="form-input" placeholder="Search teams…" style="margin-bottom:6px;" />
+                  <div id="ma-team-list" class="checkbox-scroll-list">
+                    <span class="text-muted" style="padding:8px 12px;display:block;font-size:12px;">Loading teams…</span>
+                  </div>
+                  <div id="ma-team-error" class="hidden" style="margin-top:6px;">
+                    <span class="text-danger" id="ma-team-error-msg"></span>
+                  </div>
+                  <div id="ma-member-count" class="text-muted" style="font-size:12px;margin-top:4px;"></div>
+                </div>
+
+                <!-- Include zero-activity -->
+                <div class="form-row" style="margin-bottom:12px;">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="ma-include-zero" checked>
+                    Include members with no records
+                    <span class="info-icon" data-tip="The analytics API only returns data for members who had at least one tracked event in the selected period. Checking this adds a zero-row for every other workspace member so the export reflects your full member list. Use this when you want a complete roster — for example, to identify who has never used Productboard in the given period. Uncheck it to export only members the API returned data for.">i</span>
+                  </label>
+                </div>
+
+                <!-- Active / Inactive filter -->
+                <div class="form-row" style="margin-bottom:12px;">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:0;">
+                    <label class="form-label" style="margin:0;">Activity filter</label>
+                    <span class="info-icon" data-tip="Filters by whether Productboard counted a member as active on a given day. Active only: had at least 1 active day in the period. Inactive only: had records but 0 active days (logged some events but not enough for Productboard to flag as active). Note: members with no records at all are only included if 'Include members with no records' is checked — inactive only will include them too.">i</span>
+                  </div>
+                  <div style="display:flex;gap:16px;margin-top:4px;">
+                    <label class="checkbox-label"><input type="radio" name="ma-active-filter" value="all"      checked> All members</label>
+                    <label class="checkbox-label"><input type="radio" name="ma-active-filter" value="active">         Active only</label>
+                    <label class="checkbox-label"><input type="radio" name="ma-active-filter" value="inactive">       Inactive only</label>
+                  </div>
+                </div>
+
+                <!-- Raw mode -->
+                <div class="form-row" style="margin-bottom:20px;">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="ma-raw-mode">
+                    Export raw daily data
+                    <span class="info-icon" data-tip="By default, each member appears once with their activity totalled across the selected date range. Checking this box exports one row per member per day instead, preserving the daily breakdown. This will produce a much larger file for long date ranges.">i</span>
+                  </label>
+                </div>
+
+                <button class="btn btn-primary" id="btn-ma-export" disabled>Export activity</button>
+              </div><!-- /ma-idle -->
+
+              <!-- ── RUNNING STATE ── -->
+              <div id="ma-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="ma-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="ma-progress-msg">Starting…</span>
+                  <span id="ma-progress-pct">0%</span>
+                </div>
+              </div><!-- /ma-running -->
+
+              <!-- ── DONE STATE ── -->
+              <div id="ma-done" class="hidden">
+                <div class="alert alert-ok">
+                  <span class="alert-icon">✅</span>
+                  <span id="ma-done-msg"></span>
+                </div>
+                <div id="ma-zero-activity-alert" class="alert alert-warn hidden" style="margin-top:12px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="ma-zero-activity-msg"></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:16px;">
+                  <button class="btn btn-primary" id="btn-ma-download">⬇ Download CSV</button>
+                  <button class="btn btn-secondary" id="btn-ma-export-again">Export again</button>
+                </div>
+              </div><!-- /ma-done -->
+
+              <!-- ── ERROR STATE ── -->
+              <div id="ma-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="ma-error-msg"></span>
+                </div>
+                <button class="btn btn-secondary mt-12" id="btn-ma-export-retry">Try again</button>
+              </div><!-- /ma-error -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-member-activity-export -->
+
         <!-- ── ENTITIES RELATIONSHIPS (Phase 3) ── -->
 
       </div><!-- /view-area -->
@@ -1243,8 +1438,10 @@
 
 </div><!-- /app-screen -->
 
+<script src="csv-utils.js"></script>
 <script src="app.js"></script>
 <script src="entities-app.js"></script>
+<script src="member-activity-app.js"></script>
 
 <!-- ── BOTTOM-LEFT CLUSTER ── -->
 <div class="bottom-left">

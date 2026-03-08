@@ -197,6 +197,7 @@ body {
   color: var(--c-text);
 }
 
+
 .panel-subtitle {
   font-size: 13px;
   color: var(--c-muted);
@@ -289,6 +290,15 @@ textarea {
   transition: border-color .15s, box-shadow .15s;
 }
 
+select {
+  padding-right: 2.5rem;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+}
+
 input:focus, select:focus, textarea:focus {
   border-color: var(--c-border-focus);
   box-shadow: 0 0 0 3px rgba(53,94,59,.12);
@@ -357,6 +367,7 @@ input:focus, select:focus, textarea:focus {
 .badge-danger { background: var(--c-danger-bg); color: var(--c-danger); }
 .badge-info   { background: var(--c-info-bg);   color: var(--c-info); }
 .badge-muted  { background: var(--c-border);    color: var(--c-muted); }
+.badge-beta   { background: #f3e8ff;            color: #7c3aed; }
 
 /* ── Alert banners ── */
 .alert {
@@ -563,6 +574,43 @@ input:focus, select:focus, textarea:focus {
   border-left-color: var(--c-brand);
   background: var(--c-brand-light);
   box-shadow: 0 4px 12px rgba(0,0,0,.09);
+}
+
+/* WIP badge — inline chip on tool card name */
+.tool-card-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.tool-card-badge-wip {
+  background: var(--c-warn-bg);
+  color: var(--c-warn);
+  border: 1px solid var(--c-warn);
+}
+
+/* Scrollable checkbox list — used by team filter and reusable for future modules */
+.checkbox-scroll-list {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  padding: 6px 0;
+}
+.checkbox-scroll-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.checkbox-scroll-list label:hover {
+  background: var(--c-brand-light);
 }
 
 .tool-card-icon {
@@ -1009,7 +1057,8 @@ input:focus, select:focus, textarea:focus {
 
   #sidebar-companies,
   #sidebar-notes,
-  #sidebar-entities {
+  #sidebar-entities,
+  #sidebar-member-activity {
     display: grid;
     grid-template-columns: 1fr;
     gap: 4px;

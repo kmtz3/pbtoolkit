@@ -1,6 +1,6 @@
 # PBToolkit
 
-A web-based toolkit for bulk operations on Productboard data. Supports exporting, importing, and managing **Companies**, **Notes**, and **Entities** (features, initiatives, releases, and more).
+A web-based toolkit for bulk operations on Productboard data. Supports exporting, importing, and managing **Companies**, **Notes**, **Entities**, and **Member Activity**.
 
 ---
 
@@ -67,6 +67,7 @@ To disconnect, click **Disconnect** in the top-right corner. This clears the ses
 | Companies | ✅ Live | Export and import companies with custom fields |
 | Notes | ✅ Live | Export, import, delete, and migration-prep for notes |
 | Entities | 🔄 Polish | Templates, export, and import for all entity types (QA in progress) |
+| Member Activity | 🔄 WIP | Export member activity and license utilization data |
 
 ---
 
@@ -169,6 +170,43 @@ Covers all Productboard entity types: objectives, key results, initiatives, prod
 | Item | Description | Status |
 |---|---|---|
 | QA | End-to-end testing with real CSV fixtures across all 9 entity types | 🔜 Next |
+
+---
+
+## Member Activity *(WIP)*
+
+Exports member activity data from the Productboard Analytics API enriched with current member profiles and team assignments.
+
+### Features
+
+- **Two export modes**: Summary (one row per member, totals across the date range) or Raw (one row per member per day for trend analysis)
+- **Date range presets**: Last 7/30/90 days, this month, last month, or custom range
+- **Filters**: Role (admin/maker/viewer/contributor), team (scrollable checkbox list with search), active/inactive toggle
+- **Include members with no records**: Pads the export with zero-rows for workspace members the Analytics API returned no data for — useful for a complete roster audit
+- **Zero-activity alert**: After export, surfaces count of maker/admin seat holders with 0 active days with guidance on license review
+- **Session cache**: Member and team data is fetched once per session (30-min TTL) and reused across exports to minimise API calls
+
+### APIs used
+
+| API | Endpoint |
+|---|---|
+| Analytics | `GET /v2/analytics/member-activities` |
+| Members | `GET /v2/members` |
+| Teams | `GET /v2/teams`, `GET /v2/teams/{id}/relationships` |
+
+A single bearer token covers all three APIs.
+
+### Output
+
+Filename convention: `member-activity-{dateFrom}-{dateTo}[-{roles}][-{teams}][-{activeFilter}][-raw].csv`
+
+**Summary columns:** `member_id, name, email, role, teams, date_from, date_to, active_days_count,` + activity count columns (boards created/opened, features created, notes processed, insights, etc.)
+
+**Raw columns:** `date, member_id, name, email, role, teams, active_flag,` + same count columns.
+
+### Known limitations
+
+The `GET /v2/analytics/member-activities` endpoint has a bug in `links.next` (relative path instead of absolute URL, missing `/v2/analytics/` prefix). A workaround is in place in `src/routes/memberActivity.js` — see the `WORKAROUND` comment block for details and the cleanup TODO for when engineering ships a fix.
 
 ---
 

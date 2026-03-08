@@ -505,13 +505,8 @@ async function entHandleFile(entityType, file) {
   const csvText = await file.text();
 
   // Quick row count + header parse (client-side, for UI display)
-  const clean    = csvText.replace(/^\uFEFF/, '').trim();
-  const lines    = clean.split('\n');
-  const rowCount = Math.max(0, lines.length - 1);
-  // Parse header row respecting quoted commas
-  const headerLine = (lines[0] || '').replace(/\r/g, '');
-  const headers = headerLine.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
-    .map((h) => h.replace(/^"|"$/g, '').trim());
+  const rowCount = countCSVDataRows(csvText);
+  const headers  = parseCSVHeaders(csvText);
 
   entImport.files[entityType] = { filename: file.name, csvText, headers, rowCount };
 

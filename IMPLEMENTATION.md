@@ -20,7 +20,8 @@ pbtoolkit/
 │       ├── import.js          # POST /api/import/preview + /run
 │       ├── companies.js       # GET/POST /api/companies/*
 │       ├── notes.js           # POST /api/notes/* (export, import, delete, migrate)
-│       └── entities.js        # GET/POST /api/entities/* (templates, configs, preview, normalize-keys)
+│       ├── entities.js        # GET/POST /api/entities/* (templates, configs, preview, normalize-keys)
+│       └── memberActivity.js  # GET /api/member-activity/metadata + POST /api/member-activity/export (SSE)
 ├── src/services/
 │   └── entities/
 │       ├── meta.js            # ENTITY_ORDER, TYPE_CODE, labels, syntheticColumns(), relationshipColumns()
@@ -37,6 +38,7 @@ pbtoolkit/
 │   ├── index.html             # All HTML views, inline
 │   ├── app.js                 # Core + companies + notes frontend JS
 │   ├── entities-app.js        # Entities module frontend JS (separate script tag)
+│   ├── member-activity-app.js # Member Activity module frontend JS (separate script tag)
 │   └── style.css              # CSS custom properties design system
 ├── Dockerfile
 ├── .env.example           # Documented env vars (PORT, FEEDBACK_URL, ISSUE_URL)
@@ -554,6 +556,57 @@ All Notes routes live in `src/routes/notes.js`.
 - simple notes: `fields.content` is a plain string
 - conversation notes: `fields.content` is an array of message objects → **JSON.stringify** in CSV
 - On import: if content column is a JSON string starting with `[`, it is sent as-is to v1 (v1 accepts JSON string for conversation content)
+
+---
+
+## Member Activity module — API reference
+
+Routes in `src/routes/memberActivity.js`. Frontend JS in `public/member-activity-app.js`.
+
+### In-memory session cache
+
+Module-level `Map<token, CacheEntry>` with 30-min TTL and 200-entry cap. Cache is pruned on insert. Stores `members`, `teams`, and `memberTeams` Maps built from the PB Members + Teams APIs.
+
+### `GET /api/member-activity/metadata`
+
+Returns team list and member count for populating the export UI. Query param `?refresh=true` busts the cache.
+
+Response: `{ teams: [{id, name}…], memberCount, fetchedAt, obfuscated }`
+
+`obfuscated: true` when the first member's name is `'[obfuscated]'` — token lacks PII access.
+
+### `POST /api/member-activity/export` (SSE)
+
+Body: `{ dateFrom, dateTo, roles[], teamIds[], activeFilter, includeZeroActivity, rawMode }`
+
+Flow:
+1. Build cache if missing/stale (progress 0–20%)
+2. Fetch analytics (progress 20–80%) — uses custom pagination loop (see Known Bugs below)
+3. Aggregate: summary mode → `Map<memberId, RunningTotal>`; raw mode → array of rows (100k cap)
+4. Enrich from cache: name, email, current role, teams
+5. Pad zero-rows for members absent from analytics if `includeZeroActivity=true`
+6. Apply filters: role → team → activeFilter
+7. Build CSV with `generateCSV()`, emit `complete { csv, filename, count, zeroActivityPaidCount }`
+
+`zeroActivityPaidCount` = members in result with `active_days_count === 0` and role `admin` or `maker`.
+
+### Column order
+
+**Summary:** `member_id, name, email, role, teams, date_from, date_to, active_days_count, total_view_events, total_edit_events, board_created, board_opened, feature_created, subfeature_created, component_created, product_created, note_created, note_state_changed, insight_created, grid_board_created, timeline_board_created, insights_board_created, document_board_created, column_board_created, grid_board_opened, timeline_board_opened, insights_board_opened, document_board_opened, column_board_opened`
+
+`total_view_events` = sum of named board `*_opened` columns (grid/timeline/insights/document/column); `total_edit_events` = sum of `feature/subfeature/component/product/note_created` + `note_state_changed` + `insight_created` + named board `*_created` columns. `board_opened` and `board_created` are excluded from both totals — they appear to be generic aggregates that return 0 even when the named board-type counts have values.
+
+**Raw:** `date, member_id, name, email, role, teams, active_flag, total_view_events, total_edit_events,` + same count columns (no `date_from`/`date_to`/`active_days_count`).
+
+### Known bug — analytics pagination
+
+`GET /v2/analytics/member-activities` returns a broken `links.next`: relative path `/member-activities?pageCursor=...` instead of a full absolute URL with the correct `/v2/analytics/` prefix. **Cannot use `fetchAllPages()` for this endpoint.** A custom loop is in place that extracts `pageCursor` via `new URL(r.links.next, 'https://x').searchParams.get('pageCursor')` and reconstructs the correct URL. See `// ── WORKAROUND` comment block in `memberActivity.js` for the cleanup TODO.
+
+### "Include members with no records" vs Activity filter
+
+These two controls are independent:
+- **Include members with no records** (checkbox): pads zero-rows for members absent from the API response entirely. Use for a full roster audit.
+- **Activity filter** (radio — all/active/inactive): post-fetch filter. "Inactive only" catches members with records but `active_days_count === 0`; also includes padded zero-rows if the checkbox is checked.
 
 ---
 

@@ -13,7 +13,7 @@
  */
 const express = require('express');
 const { createClient } = require('../lib/pbClient');
-const { generateCSV } = require('../lib/csvUtils');
+const { generateCSVFromColumns } = require('../lib/csvUtils');
 const { startSSE } = require('../lib/sse');
 
 const router = express.Router();
@@ -215,11 +215,7 @@ function buildExportCSV(companies, customFields) {
     return row;
   });
 
-  return generateCSV(
-    rows,
-    cols.map((c) => c.key),
-    cols.map((c) => c.label)
-  );
+  return generateCSVFromColumns(rows, cols);
 }
 
 module.exports = router;

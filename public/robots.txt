@@ -1,0 +1,5 @@
+# If self-hosting, replace pbtoolkit.com with your own domain.
+User-agent: *
+Allow: /
+
+Sitemap: https://pbtoolkit.com/sitemap.xml

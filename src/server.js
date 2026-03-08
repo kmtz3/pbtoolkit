@@ -12,6 +12,7 @@ const importRouter = require('./routes/import');
 const notesRouter = require('./routes/notes');
 const companiesRouter = require('./routes/companies');
 const entitiesRouter = require('./routes/entities');
+const memberActivityRouter = require('./routes/memberActivity');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -73,6 +74,7 @@ app.use('/api/import', importRouter);
 app.use('/api/notes', notesRouter);
 app.use('/api/companies', companiesRouter);
 app.use('/api/entities', entitiesRouter);
+app.use('/api/member-activity', memberActivityRouter);
 
 // Fallback to index.html for client-side routing
 app.get('*', (_req, res) => {
