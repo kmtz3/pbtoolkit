@@ -218,6 +218,8 @@ $('auth-submit').addEventListener('click', async () => {
       _pendingTokenCallback = null;
       cb();
     }
+    // If the member activity module loaded before a token was set, reload now
+    if (typeof window.maReloadIfNeeded === 'function') window.maReloadIfNeeded();
   } catch (e) {
     showAuthError('Could not connect. Check your network and token.');
   } finally {
