@@ -1200,3 +1200,77 @@ input:focus, select:focus, textarea:focus {
     gap: 12px;
   }
 }
+
+/* ── Team Membership diff preview ── */
+
+.tm-diff-add       { color: var(--c-ok);     }
+.tm-diff-remove    { color: var(--c-danger);  }
+.tm-diff-unchanged { color: var(--c-muted);   }
+
+.tm-diff-summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--c-bg);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  font-size: 13px;
+}
+
+.tm-diff-legend {
+  display: flex;
+  gap: 20px;
+  font-size: 12px;
+}
+
+.tm-diff-team-block {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+.tm-diff-team-block > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--c-surface);
+  list-style: none;
+}
+.tm-diff-team-block > summary::-webkit-details-marker { display: none; }
+.tm-diff-team-block > summary::before { content: '▶'; margin-right: 8px; font-size: 10px; color: var(--c-muted); transition: transform .15s; }
+.tm-diff-team-block[open] > summary::before { transform: rotate(90deg); }
+.tm-diff-team-block > summary:hover { background: var(--c-bg); }
+
+.tm-diff-team-unchanged > summary { color: var(--c-muted); }
+
+.tm-diff-badges { display: flex; gap: 8px; font-size: 12px; font-weight: 600; }
+.tm-diff-team-name { flex: 1; }
+
+.tm-diff-member-rows {
+  padding: 8px 14px 10px 32px;
+  font-size: 13px;
+  line-height: 1.8;
+  border-top: 1px solid var(--c-border);
+  background: var(--c-bg);
+}
+
+/* Format preview snippet */
+.tm-format-preview { font-size: 12px; }
+.tm-format-snippet {
+  background: var(--c-bg);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-size: 11px;
+  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  color: var(--c-muted);
+  white-space: pre;
+  overflow-x: auto;
+}

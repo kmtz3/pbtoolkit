@@ -217,4 +217,42 @@ async function paginateOffset(pbFetch, withRetry, basePath, onPage, limit = 100)
   }
 }
 
-module.exports = { createClient, extractCursor, fetchAllEntitiesPost, paginateOffset };
+// ---------------------------------------------------------------------------
+// Team membership helpers — thin wrappers around fetchAllPages.
+// Used by src/routes/teamMembership.js.
+// memberActivity.js is NOT updated — it uses includeDisabled:true which differs.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch all teams in the workspace.
+ * @param {{ fetchAllPages: Function }} client - from createClient()
+ */
+function listTeams(client) {
+  return client.fetchAllPages('/v2/teams', 'list teams');
+}
+
+/**
+ * Fetch all members in the workspace.
+ * @param {{ fetchAllPages: Function }} client - from createClient()
+ * @param {{ includeDisabled?: boolean, includeInvited?: boolean }} [opts]
+ */
+function listMembers(client, { includeDisabled = false, includeInvited = false } = {}) {
+  return client.fetchAllPages(
+    `/v2/members?includeDisabled=${includeDisabled}&includeInvited=${includeInvited}`,
+    'list members'
+  );
+}
+
+/**
+ * Fetch all member relationships for a team.
+ * @param {{ fetchAllPages: Function }} client - from createClient()
+ * @param {string} teamId
+ */
+function listTeamMembers(client, teamId) {
+  return client.fetchAllPages(
+    `/v2/teams/${teamId}/relationships`,
+    `list team members ${teamId}`
+  );
+}
+
+module.exports = { createClient, extractCursor, fetchAllEntitiesPost, paginateOffset, listTeams, listMembers, listTeamMembers };

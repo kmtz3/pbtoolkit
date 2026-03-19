@@ -15,7 +15,11 @@ pbtoolkit/
 │   ├── companies.fields.test.js
 │   ├── companies.import.test.js
 │   ├── entities.dependencies.test.js
+│   ├── entities.exporter.test.js
+│   ├── entities.fieldBuilder.test.js
+│   ├── entities.importCoordinator.test.js
 │   ├── entities.validator.test.js
+│   ├── memberActivity.metadata.test.js
 │   ├── notes-import.test.js
 │   └── utils.test.js
 ├── src/
@@ -32,7 +36,8 @@ pbtoolkit/
 │       ├── companies.js       # GET /api/fields + POST /api/export + POST /api/import/* + POST /api/companies/* (unified)
 │       ├── notes.js           # POST /api/notes/* (export, import, delete, migrate)
 │       ├── entities.js        # GET/POST /api/entities/* (templates, configs, preview, normalize-keys)
-│       └── memberActivity.js  # GET /api/member-activity/metadata + POST /api/member-activity/export (SSE)
+│       ├── memberActivity.js  # GET /api/member-activity/metadata + POST /api/member-activity/export (SSE)
+│       └── teamMembership.js  # GET /api/team-membership/metadata + GET /api/team-membership/export + POST /api/team-membership/preview + POST /api/team-membership/import (SSE)
 ├── src/services/
 │   └── entities/
 │       ├── meta.js            # ENTITY_ORDER, TYPE_CODE, labels, syntheticColumns(), relationshipColumns()
@@ -47,9 +52,13 @@ pbtoolkit/
 │       └── importCoordinator.js # runImport() — orchestrates parse→seed→upsert→relations — Phase 4
 ├── public/
 │   ├── index.html             # All HTML views, inline
-│   ├── app.js                 # Core + companies + notes frontend JS
+│   ├── app.js                 # Shared utilities: auth, DOM helpers, SSE, makeLogAppender
+│   ├── companies-app.js       # Companies module frontend JS
+│   ├── notes-app.js           # Notes module frontend JS
 │   ├── entities-app.js        # Entities module frontend JS (separate script tag)
 │   ├── member-activity-app.js # Member Activity module frontend JS (separate script tag)
+│   ├── team-membership-app.js # Team Membership module frontend JS (separate script tag)
+│   ├── csv-utils.js           # Frontend CSV utilities (papaparse wrappers for browser)
 │   └── style.css              # CSS custom properties design system
 ├── Dockerfile
 ├── .env.example           # Documented env vars (PORT, FEEDBACK_URL, ISSUE_URL)
@@ -864,3 +873,69 @@ Renders a styled `.alert-ok` / `.alert-warn` summary into `el`.
 - Options panel and Map panel **always show together** once a file is loaded.
 - Log panel is only shown when import starts (`entImportSetRunning(true)` / `show('import-step-run')`).
 - Stop button lives in the Options panel; `btn-stop-*` is shown/hidden via JS during import.
+
+---
+
+## Team Membership module — API reference
+
+Routes in `src/routes/teamMembership.js`. Frontend JS in `public/team-membership-app.js`. UI has two tabs: **Export** and **Import**.
+
+### Endpoints
+
+| Method | Path | Type | Description |
+|---|---|---|---|
+| `GET` | `/api/team-membership/metadata` | JSON | Returns `{ teams, memberCount, fetchedAt }`. Builds/returns session cache. `?refresh=true` busts cache. |
+| `GET` | `/api/team-membership/export` | CSV download | Direct `text/csv` response (no SSE). Query params: `format=A\|B`, `teamIds=id1,id2,...` |
+| `POST` | `/api/team-membership/preview` | JSON | Body: `{ csvText, mode }`. Returns `{ diffs, unresolvableEmails, nameResolvedTeams, unrecognisedValues }`. Diffs include `{ id, email }` objects (not raw UUIDs) for human-readable preview. |
+| `POST` | `/api/team-membership/import` | SSE | Body: `{ csvText, mode }`. Executes the import. Events: `progress`, `log`, `complete`, `error`, `done`. |
+
+Import mode: `'add' | 'remove' | 'set'` (default `'set'`).
+
+### CSV formats
+
+Two formats are supported, auto-detected on upload:
+
+- **Format A** — one row per member, one column per team. Header: `email, name, role, "Team Name [team-uuid]", …`. Cell value `✓`/`1`/`yes`/`x`/`true`/`assigned` = assigned; empty = not assigned. First column header `email` is the detection signal.
+- **Format B** — one column per team, member emails stacked vertically. Header: `"Team Name [team-uuid]", …`. Detection signal: first header matches `[uuid]` pattern.
+
+### Session cache
+
+Server-side `Map<token, CacheEntry>` with 30-min TTL and 200-entry cap (same pattern as `memberActivity.js`). **Not shared** with member activity's cache. Stores:
+- `membersById: Map<memberId, { id, name, email, role }>`
+- `membersByEmail: Map<email, MemberProfile>`
+- `teamsById: Map<teamId, { id, name, handle }>`
+- `memberIdsByTeamId: Map<teamId, Set<memberId>>`
+
+Members fetched with `includeDisabled: false, includeInvited: false`. Cache is automatically invalidated and rebuilt after a successful import.
+
+### Diff preview
+
+`/preview` returns enriched `TeamDiff[]`:
+```js
+{
+  teamId: string,
+  teamName: string,
+  toAdd:     [{ id, email }],   // member objects, not raw IDs
+  toRemove:  [{ id, email }],
+  unchanged: [{ id, email }],
+}
+```
+The frontend renders `member.email` (not UUID) in the per-team collapsible blocks.
+
+### PB API calls
+
+| Operation | Endpoint |
+|---|---|
+| List teams | `GET /v2/teams` (via `listTeams` helper in `pbClient.js`) |
+| List members | `GET /v2/members` (via `listMembers` helper) |
+| List team members | `GET /v2/teams/{id}/relationships` (via `listTeamMembers` helper) |
+| Add member | `POST /v2/teams/{teamId}/relationships` — body: `{ data: { type: 'team_membership', target: { id: memberId, type: 'member' } } }` |
+| Remove member | `DELETE /v2/teams/{teamId}/relationships/member/{memberId}` |
+
+409 on add = already a member (skip, not an error). 404 on remove = not a member (skip, not an error).
+
+### Frontend pattern differences vs other import modules
+
+Team Membership does **not** use the four-panel upload/map/options/log layout. It uses a simpler state machine: `idle → uploading → diff preview → running → (results | stopped | error)`. The live log panel is inside `#tm-import-running` (hidden when running ends), so the log is copied to `#tm-results-log` in the results panel via `moveLogToResults()`. The download button appears in:
+- `#tm-results-log` header — after complete/abort
+- `#tm-import-error` panel — after error (if log has entries)

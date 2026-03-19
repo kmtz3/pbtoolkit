@@ -114,7 +114,7 @@ document.querySelectorAll('.tool-card:not(.tool-card-soon)').forEach((card) => {
 });
 
 function loadTool(toolName) {
-  const names = { companies: 'Companies', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity' };
+  const names = { companies: 'Companies', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', 'team-membership': 'Team Membership' };
   setText('topbar-tool-name', names[toolName] || toolName);
   showScreen('tool');
 
@@ -123,6 +123,7 @@ function loadTool(toolName) {
   $('sidebar-notes').classList.toggle('hidden', toolName !== 'notes');
   $('sidebar-entities').classList.toggle('hidden', toolName !== 'entities');
   $('sidebar-member-activity').classList.toggle('hidden', toolName !== 'member-activity');
+  $('sidebar-team-membership').classList.toggle('hidden', toolName !== 'team-membership');
 
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
 
@@ -145,6 +146,12 @@ function loadTool(toolName) {
     $('nav-member-activity-export').classList.add('active');
     showView('member-activity-export');
     if (typeof initMemberActivityModule === 'function') initMemberActivityModule();
+  }
+
+  if (toolName === 'team-membership') {
+    $('nav-team-membership-export').classList.add('active');
+    showView('team-membership-export');
+    if (typeof window.initTeamMembershipModule === 'function') window.initTeamMembershipModule();
   }
 
   updateConnectionStatus();
@@ -214,6 +221,8 @@ $('auth-submit').addEventListener('click', async () => {
     }
     // If the member activity module loaded before a token was set, reload now
     if (typeof window.maReloadIfNeeded === 'function') window.maReloadIfNeeded();
+    // If the team membership module loaded before a token was set, reload now
+    if (typeof window.tmReloadIfNeeded === 'function') window.tmReloadIfNeeded();
     // If the companies mapper is open and custom fields failed to load (no token), reload them now
     if (parsedCSV && !$('import-step-map').classList.contains('hidden')) {
       loadAndBuildCustomFieldTable();
@@ -262,6 +271,7 @@ function showView(view) {
     'notes-export', 'notes-import', 'notes-delete-csv', 'notes-delete-all', 'notes-migrate',
     'entities-templates', 'entities-export', 'entities-import', 'entities-delete',
     'member-activity-export',
+    'team-membership-export', 'team-membership-import',
   ].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', v !== view);

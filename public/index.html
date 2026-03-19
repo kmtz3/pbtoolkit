@@ -156,17 +156,17 @@
           <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
         </div>
 
+        <div class="tool-card" data-tool="team-membership">
+          <span class="tool-card-icon">👥</span>
+          <div class="tool-card-name">Team Membership</div>
+          <div class="tool-card-desc">Bulk-manage team–member assignments via CSV. Export current assignments, then add, remove, or reconcile with a diff preview.</div>
+          <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
+        </div>
+
         <div class="tool-card tool-card-soon">
           <span class="tool-card-icon">🏷️</span>
           <div class="tool-card-name">Teams</div>
           <div class="tool-card-desc">Create, update, and delete teams in bulk via CSV — manage names, handles, and descriptions.</div>
-          <div class="tool-card-footer"><span class="badge badge-muted">Soon</span></div>
-        </div>
-
-        <div class="tool-card tool-card-soon">
-          <span class="tool-card-icon">👥</span>
-          <div class="tool-card-name">Teams membership</div>
-          <div class="tool-card-desc">Bulk-manage team – member assignments and more.</div>
           <div class="tool-card-footer"><span class="badge badge-muted">Soon</span></div>
         </div>
 
@@ -245,6 +245,16 @@
         <div id="sidebar-member-activity" class="hidden">
           <button class="nav-item active" data-view="member-activity-export" id="nav-member-activity-export">
             <span class="icon">📈</span> Export activity
+          </button>
+        </div>
+
+        <!-- Team Membership nav items -->
+        <div id="sidebar-team-membership" class="hidden">
+          <button class="nav-item active" data-view="team-membership-export" id="nav-team-membership-export">
+            <span class="icon">📤</span> Export
+          </button>
+          <button class="nav-item" data-view="team-membership-import" id="nav-team-membership-import">
+            <span class="icon">📥</span> Import
           </button>
         </div>
 
@@ -1667,6 +1677,251 @@
 
         <!-- ── ENTITIES RELATIONSHIPS (Phase 3) ── -->
 
+        <!-- ══════════════════════════════════════════
+             TEAM MEMBERSHIP — EXPORT VIEW
+        ═══════════════════════════════════════════ -->
+        <div id="view-team-membership-export" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Export team assignments</div>
+              <div class="panel-subtitle">Download current team–member assignments as a CSV file.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ── IDLE STATE ── -->
+              <div id="tm-export-idle">
+
+                <!-- Format selector -->
+                <div class="form-row" style="margin-bottom:16px;">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <label class="form-label" style="margin:0;">CSV format</label>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label class="checkbox-label">
+                      <input type="radio" name="tm-export-format" id="tm-export-format-a" value="A" checked>
+                      Team columns
+                      <span class="info-icon" data-tip="One row per member. Each team is a column — tick marks show current assignments. Best for reviewing and editing who is on which team.">i</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="radio" name="tm-export-format" id="tm-export-format-b" value="B">
+                      Stacked by team
+                      <span class="info-icon" data-tip="One column per team, member emails listed vertically. Best for pasting in email lists from external tools like spreadsheets, HRIS exports, or Slack.">i</span>
+                    </label>
+                  </div>
+                  <!-- Format preview snippet -->
+                  <div id="tm-format-preview" class="tm-format-preview" style="margin-top:10px;"></div>
+                </div>
+
+                <!-- Team filter -->
+                <div class="form-row" style="margin-bottom:16px;">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <label class="form-label" style="margin:0;">Teams</label>
+                    <button id="btn-tm-export-teams-select-all"   class="btn btn-xs btn-ghost" type="button">Select all</button>
+                    <button id="btn-tm-export-teams-deselect-all" class="btn btn-xs btn-ghost" type="button">Deselect all</button>
+                    <button id="btn-tm-export-refresh" class="btn btn-xs btn-ghost" style="margin-left:auto;" type="button">↺ Refresh data</button>
+                  </div>
+                  <input type="text" id="tm-export-team-search" class="form-input" placeholder="Search teams…" style="margin-bottom:6px;" />
+                  <div id="tm-export-team-filter" class="checkbox-scroll-list">
+                    <span class="text-muted" style="padding:8px 12px;display:block;font-size:12px;">Loading teams…</span>
+                  </div>
+                  <div id="tm-export-team-error" class="hidden" style="margin-top:6px;">
+                    <span class="text-danger" id="tm-export-team-error-msg"></span>
+                  </div>
+                  <div id="tm-export-team-advisory" class="hidden" style="margin-top:6px;font-size:12px;color:var(--c-muted);"></div>
+                  <div id="tm-export-member-count" class="text-muted" style="font-size:12px;margin-top:4px;"></div>
+                </div>
+
+                <button class="btn btn-primary" id="tm-export-btn" disabled>Export CSV</button>
+
+              </div><!-- /tm-export-idle -->
+
+              <!-- ── DONE STATE ── -->
+              <div id="tm-export-done" class="hidden">
+                <div class="alert alert-ok">
+                  <span class="alert-icon">✅</span>
+                  <span>Export complete — <span id="tm-export-last-filename"></span></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:16px;">
+                  <button class="btn btn-primary" id="btn-tm-export-download">⬇ Download again</button>
+                  <button class="btn btn-secondary" id="btn-tm-export-again">New export</button>
+                </div>
+              </div><!-- /tm-export-done -->
+
+              <!-- ── ERROR STATE ── -->
+              <div id="tm-export-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="tm-export-error-msg"></span>
+                </div>
+                <button class="btn btn-secondary mt-12" id="btn-tm-export-retry">Adjust criteria</button>
+              </div><!-- /tm-export-error -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-team-membership-export -->
+
+        <!-- ══════════════════════════════════════════
+             TEAM MEMBERSHIP — IMPORT VIEW
+        ═══════════════════════════════════════════ -->
+        <div id="view-team-membership-import" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Import team assignments</div>
+              <div class="panel-subtitle">Upload a CSV to add, remove, or reconcile team–member assignments. A diff preview is required before any changes are applied.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ── IDLE STATE ── -->
+              <div id="tm-import-idle">
+
+                <!-- Mode selector -->
+                <div class="form-row" style="margin-bottom:16px;">
+                  <label class="form-label">Import mode</label>
+                  <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+                    <label class="checkbox-label">
+                      <input type="radio" name="tm-import-mode" id="tm-import-mode-set" value="set" checked>
+                      Set
+                      <span class="info-icon" data-tip="Treats your CSV as the source of truth for the teams listed as columns. Adds any missing assignments and removes any extras within those teams. Teams not present as columns in your CSV are left completely untouched. Review the diff carefully before confirming — this will delete assignments not present in your CSV.">i</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="radio" name="tm-import-mode" id="tm-import-mode-add" value="add">
+                      Add
+                      <span class="info-icon" data-tip="Assigns members to teams based on your CSV. Only adds new assignments — nothing will be removed. Safe to run multiple times. Already-assigned members are skipped automatically.">i</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="radio" name="tm-import-mode" id="tm-import-mode-remove" value="remove">
+                      Remove
+                      <span class="info-icon" data-tip="Removes the team assignments listed in your CSV. Only deletes — nothing will be added. Members not currently assigned to a listed team are skipped.">i</span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- File upload -->
+                <div class="form-row" style="margin-bottom:16px;">
+                  <label class="form-label" for="tm-import-file">CSV file</label>
+                  <input type="file" id="tm-import-file" accept=".csv" class="form-input" />
+                  <div id="tm-import-format-badge" class="hidden" style="margin-top:6px;font-size:12px;color:var(--c-muted);"></div>
+                </div>
+
+                <!-- Hard errors (block import) -->
+                <div id="tm-import-parse-error" class="alert alert-danger hidden" style="margin-bottom:12px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="tm-import-parse-error-msg"></span>
+                </div>
+
+                <button class="btn btn-primary" id="tm-import-preview-btn" disabled>Preview changes</button>
+
+              </div><!-- /tm-import-idle -->
+
+              <!-- ── UPLOADING / PREVIEWING STATE ── -->
+              <div id="tm-import-uploading" class="hidden">
+                <div class="text-muted" style="font-size:13px;">Computing diff preview…</div>
+              </div><!-- /tm-import-uploading -->
+
+              <!-- ── DIFF PREVIEW ── -->
+              <div id="tm-import-diff" class="hidden">
+
+                <!-- Global summary bar -->
+                <div id="tm-diff-summary" class="tm-diff-summary-bar" style="margin-bottom:12px;"></div>
+
+                <!-- Warnings -->
+                <div id="tm-diff-warnings" style="margin-bottom:12px;"></div>
+
+                <!-- Legend -->
+                <div class="tm-diff-legend" style="margin-bottom:12px;">
+                  <span class="tm-diff-add">+&nbsp;Will be added</span>
+                  <span class="tm-diff-remove">−&nbsp;Will be removed</span>
+                  <span class="tm-diff-unchanged">●&nbsp;No change</span>
+                </div>
+
+                <!-- Show unchanged toggle -->
+                <div style="margin-bottom:8px;">
+                  <label class="checkbox-label" style="font-size:12px;">
+                    <input type="checkbox" id="tm-diff-show-unchanged"> Show unchanged teams
+                  </label>
+                </div>
+
+                <!-- Per-team collapsible blocks -->
+                <div id="tm-diff-teams" style="margin-bottom:16px;"></div>
+
+                <!-- API call estimate -->
+                <div id="tm-diff-api-estimate" class="text-muted" style="font-size:12px;margin-bottom:16px;"></div>
+
+                <!-- Confirm / Cancel -->
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <button class="btn btn-primary" id="tm-confirm-btn" disabled></button>
+                  <button class="btn btn-secondary" id="tm-cancel-btn">Cancel</button>
+                </div>
+
+              </div><!-- /tm-import-diff -->
+
+              <!-- ── RUNNING STATE ── -->
+              <div id="tm-import-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="tm-import-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="tm-import-progress-msg">Starting…</span>
+                </div>
+
+                <!-- Live log -->
+                <div id="tm-import-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Live log</span>
+                    <span id="tm-import-log-counts" class="live-log-counts"></span>
+                  </div>
+                  <div id="tm-import-log-entries" class="live-log-scroll"></div>
+                </div>
+
+                <button class="btn btn-ghost mt-8" id="tm-import-stop">⏹ Stop</button>
+              </div><!-- /tm-import-running -->
+
+              <!-- ── STOPPED STATE ── -->
+              <div id="tm-import-stopped" class="hidden">
+                <div class="alert alert-warn">
+                  <span class="alert-icon">⏹</span>
+                  <span id="tm-import-stopped-msg">Import stopped by user.</span>
+                </div>
+                <button class="btn btn-secondary mt-16" id="btn-tm-import-stopped-again">Start over</button>
+              </div><!-- /tm-import-stopped -->
+
+              <!-- ── RESULTS STATE ── -->
+              <div id="tm-import-results" class="hidden">
+                <div id="tm-results-summary"></div>
+
+                <!-- Log (persists from running state) -->
+                <div id="tm-results-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Log</span>
+                    <span id="tm-results-log-counts" class="live-log-counts"></span>
+                    <button id="btn-tm-results-download-log" class="btn btn-ghost btn-sm hidden" style="margin-left:auto">↓ Download log</button>
+                  </div>
+                  <div id="tm-results-log-entries" class="live-log-scroll"></div>
+                </div>
+
+                <div style="margin-top:16px;">
+                  <button class="btn btn-secondary" id="btn-tm-import-again">New import</button>
+                </div>
+              </div><!-- /tm-import-results -->
+
+              <!-- ── ERROR STATE ── -->
+              <div id="tm-import-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="tm-import-error-msg"></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:12px;">
+                  <button class="btn btn-secondary" id="btn-tm-import-error-retry">Start over</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="btn-tm-error-download-log">↓ Download log</button>
+                </div>
+              </div><!-- /tm-import-error -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-team-membership-import -->
+
       </div><!-- /view-area -->
     </div><!-- /main-content -->
   </div><!-- /tool-view -->
@@ -1679,6 +1934,7 @@
 <script src="notes-app.js"></script>
 <script src="entities-app.js"></script>
 <script src="member-activity-app.js"></script>
+<script src="team-membership-app.js"></script>
 
 <!-- ── BOTTOM-LEFT CLUSTER ── -->
 <div class="bottom-left">

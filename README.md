@@ -67,7 +67,8 @@ To disconnect, click **Disconnect** in the top-right corner. This clears the ses
 | Companies | ✅ Live | Export and import companies with custom fields |
 | Notes | ✅ Live | Export, import, delete, and migration-prep for notes |
 | Entities | 🔄 Polish | Templates, export, and import for all entity types (QA in progress) |
-| Member Activity | 🔄 WIP | Export member activity and license utilization data |
+| Member Activity | ✅ Live | Export member activity and license utilization data |
+| Team Membership | ✅ Live | Export and bulk-import team assignments via CSV diff preview |
 
 ---
 
@@ -214,6 +215,43 @@ Filename convention: `member-activity-{dateFrom}-{dateTo}[-{roles}][-{teams}][-{
 ### Known limitations
 
 The `GET /v2/analytics/member-activities` endpoint has a bug in `links.next` (relative path instead of absolute URL, missing `/v2/analytics/` prefix). A workaround is in place in `src/routes/memberActivity.js` — see the `WORKAROUND` comment block for details and the cleanup TODO for when engineering ships a fix.
+
+---
+
+## Team Membership
+
+Bulk-manages team–member assignments via two tabs: **Export** (download current assignments as CSV) and **Import** (upload a CSV to add, remove, or reconcile assignments with a diff preview before any writes).
+
+### Export
+
+Fetches all teams and member assignments and generates a CSV in one of two formats:
+
+- **Format A** — one row per member, one column per team. Tick marks show current assignments. Best for reviewing and editing who is on which team.
+- **Format B** — one column per team, member emails stacked vertically. Best for pasting email lists from external tools (HRIS exports, Slack, spreadsheets).
+
+Filter to specific teams using the checkbox list. Output filename: `pb-team-assignments_YYYY-MM-DD[_stacked][_team-slug].csv`.
+
+### Import
+
+A four-step flow: **Upload → Preview diff → Confirm → Run**.
+
+Three import modes:
+
+| Mode | Behaviour |
+|---|---|
+| **Set** *(default)* | Treats the CSV as the source of truth for the listed teams. Adds missing assignments and removes extras. Teams not in the CSV are untouched. Review diff carefully — this removes assignments. |
+| **Add** | Only adds assignments from the CSV. Nothing is removed. Safe to run multiple times. |
+| **Remove** | Only removes the assignments listed in the CSV. Nothing is added. |
+
+**Diff preview** shows a per-team breakdown of what will be added (green `+`), removed (red `−`), and unchanged (grey `●`), plus the estimated API call count. Confirmation is required before any write operations execute.
+
+**Unresolved emails** (not found in the workspace member list) are shown as warnings — the import proceeds for all other rows.
+
+A **Stop** button is available during import. The results panel shows assignments added, removed, and skipped (already assigned / not a member).
+
+### Known limitations
+
+Every add/remove is a separate API call (no bulk endpoint). Large imports should be planned against the workspace rate limit (1,000 requests/hour) — the diff preview shows an estimate.
 
 ---
 
