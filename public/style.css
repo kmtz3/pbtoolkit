@@ -1274,3 +1274,54 @@ input:focus, select:focus, textarea:focus {
   white-space: pre;
   overflow-x: auto;
 }
+
+/* Format preview table */
+.tm-preview-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--c-muted);
+  margin-bottom: 4px;
+  opacity: .7;
+}
+.tm-preview-wrap {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  margin-top: 6px;
+}
+.tm-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.tm-preview-table th {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--c-muted);
+  padding: 5px 10px;
+  background: var(--c-bg);
+  border-bottom: 1px solid var(--c-border);
+  text-align: left;
+  white-space: nowrap;
+}
+.tm-preview-table th.col-team {
+  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  font-size: 10px;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.tm-preview-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--c-border);
+  color: var(--c-muted);
+  white-space: nowrap;
+}
+.tm-preview-table tr:last-child td { border-bottom: none; }
+.tm-preview-table .col-check {
+  text-align: center;
+  color: var(--c-ok);
+  font-size: 13px;
+}

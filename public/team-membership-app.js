@@ -45,12 +45,25 @@
   // ── Format preview snippet ────────────────────────────────────────────────
 
   const FORMAT_PREVIEW = {
-    A: `<pre class="tm-format-snippet">email,name,role,"Team Alpha [id]","Growth [id]"
-jane@…,Jane,maker,✓,
-bob@…, Bob, admin,✓,✓</pre>`,
-    B: `<pre class="tm-format-snippet">"Team Alpha [id]","Growth [id]"
-jane@…,jane@…
-bob@…,</pre>`,
+    A: `<div class="tm-preview-label">Example</div><div class="tm-preview-wrap"><table class="tm-preview-table">
+      <thead><tr>
+        <th>email</th><th>name</th><th>role</th>
+        <th class="col-team">Team Alpha [id]</th><th class="col-team">Growth [id]</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>jane@…</td><td>Jane</td><td>maker</td><td class="col-check">✓</td><td></td></tr>
+        <tr><td>bob@…</td><td>Bob</td><td>admin</td><td class="col-check">✓</td><td class="col-check">✓</td></tr>
+      </tbody>
+    </table></div>`,
+    B: `<div class="tm-preview-label">Example</div><div class="tm-preview-wrap"><table class="tm-preview-table">
+      <thead><tr>
+        <th class="col-team">Team Alpha [id]</th><th class="col-team">Growth [id]</th><th class="col-team">Platform [id]</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>jane@…</td><td>james@…</td><td>sarah@…</td></tr>
+        <tr><td>bob@…</td><td>maria@…</td><td></td></tr>
+      </tbody>
+    </table></div>`,
   };
 
   function updateFormatPreview() {
