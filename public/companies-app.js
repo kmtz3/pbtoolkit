@@ -47,10 +47,6 @@ function resetExport() {
   hide('export-error');
 }
 
-$('btn-export').addEventListener('click', () => requireToken(startExport));
-$('btn-export-again').addEventListener('click', resetExport);
-$('btn-export-stopped-again').addEventListener('click', resetExport);
-$('btn-export-retry').addEventListener('click', () => requireToken(startExport));
 
 function startExport() {
   show('export-running');
@@ -87,10 +83,6 @@ function startExport() {
   });
 }
 
-$('btn-stop-export').addEventListener('click', () => {
-  companyExportCtrl?.abort();
-  companyExportCtrl = null;
-});
 
 function setExportProgress(msg, pct) {
   setText('export-progress-msg', msg);
@@ -103,30 +95,10 @@ function showExportError(msg) {
   show('export-error');
 }
 
-$('btn-download-csv').addEventListener('click', () => {
-  if (!lastExportCSV) return;
-  triggerDownload(new Blob([lastExportCSV], { type: 'text/csv;charset=utf-8;' }), lastExportFilename);
-});
 
 // ══════════════════════════════════════════════════════════
 // IMPORT — Step 1: Upload
 // ══════════════════════════════════════════════════════════
-const dropzone  = $('dropzone');
-const fileInput = $('file-input');
-
-dropzone.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', (e) => {
-  if (e.target.files[0]) loadCSVFile(e.target.files[0]);
-});
-
-dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag-over'); });
-dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
-dropzone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropzone.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (file) loadCSVFile(file);
-});
 
 function loadCSVFile(file) {
   const reader = new FileReader();
@@ -283,14 +255,6 @@ function buildCustomFieldTable(fields) {
   }
 }
 
-$('btn-reupload').addEventListener('click', () => {
-  parsedCSV = null;
-  fileInput.value = '';
-  hide('import-step-map');
-  hide('import-step-options');
-  hide('import-step-validate');
-  hide('import-step-run');
-});
 
 // ── Check for unmapped custom fields ────────────────────────
 function checkUnmappedWarning() {
@@ -308,14 +272,6 @@ function checkUnmappedWarning() {
   }
 }
 
-$('btn-validate').addEventListener('click', () => requireToken(() => {
-  checkUnmappedWarning();
-  runValidation();
-}));
-$('btn-run-import').addEventListener('click', () => requireToken(() => {
-  checkUnmappedWarning();
-  runImport();
-}));
 
 // ══════════════════════════════════════════════════════════
 // IMPORT — Step 3: Validate
@@ -363,7 +319,6 @@ async function runValidation() {
   }
 }
 
-$('btn-back-to-map2').addEventListener('click', () => hide('import-step-validate'));
 
 // ══════════════════════════════════════════════════════════
 // IMPORT — Step 4: Run
@@ -447,27 +402,6 @@ function setImportProgress(msg, pct) {
   $('import-progress-bar').style.width = `${Math.min(100, pct)}%`;
 }
 
-$('btn-stop-import').addEventListener('click', () => {
-  if (importController) {
-    importController.abort();
-    importController = null;
-  }
-  hide('btn-stop-import');
-  setText('import-run-title', 'Import stopped');
-  const c = appendLogEntry.getCounts();
-  renderImportComplete($('import-summary-box'), {
-    stopped: true,
-    created: c.success,
-    updated: 0,
-    errors:  c.error,
-    extraText: '',
-  });
-  show('btn-import-download-log');
-});
-
-$('btn-import-download-log').addEventListener('click', () => {
-  downloadLogCsv(appendLogEntry, 'companies-import');
-});
 
 // ── Mapping helpers ─────────────────────────────────────────
 function buildMapping() {
@@ -607,19 +541,6 @@ function startCsmMigration(direction) {
   else csmV2V1Ctrl = ctrl;
 }
 
-$('btn-csm-v1v2-run').addEventListener('click', () => startCsmMigration('v1v2'));
-$('btn-stop-csm-v1v2').addEventListener('click', () => { csmV1V2Ctrl?.abort(); });
-$('btn-csm-v1v2-again').addEventListener('click', () => {
-  hide('csm-v1v2-results');
-  show('csm-v1v2-idle');
-});
-
-$('btn-csm-v2v1-run').addEventListener('click', () => startCsmMigration('v2v1'));
-$('btn-stop-csm-v2v1').addEventListener('click', () => { csmV2V1Ctrl?.abort(); });
-$('btn-csm-v2v1-again').addEventListener('click', () => {
-  hide('csm-v2v1-results');
-  show('csm-v2v1-idle');
-});
 
 // ══════════════════════════════════════════════════════════
 // COMPANIES — Delete from CSV
@@ -630,22 +551,6 @@ let companiesDeleteController = null;
 
 // Log appender for companies delete-by-CSV — no counts element in this panel.
 const appendCompaniesDeleteLogEntry = makeLogAppender('companies-delete-csv-live-log', 'companies-delete-csv-log-entries', null, 'company');
-
-const companiesDeleteDropzone  = $('companies-delete-dropzone');
-const companiesDeleteFileInput = $('companies-delete-file-input');
-
-companiesDeleteDropzone.addEventListener('click', () => companiesDeleteFileInput.click());
-companiesDeleteFileInput.addEventListener('change', (e) => {
-  if (e.target.files[0]) loadCompaniesDeleteCSV(e.target.files[0]);
-});
-companiesDeleteDropzone.addEventListener('dragover', (e) => { e.preventDefault(); companiesDeleteDropzone.classList.add('drag-over'); });
-companiesDeleteDropzone.addEventListener('dragleave', () => companiesDeleteDropzone.classList.remove('drag-over'));
-companiesDeleteDropzone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  companiesDeleteDropzone.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (file) loadCompaniesDeleteCSV(file);
-});
 
 function loadCompaniesDeleteCSV(file) {
   const reader = new FileReader();
@@ -671,7 +576,6 @@ function loadCompaniesDeleteCSV(file) {
   reader.readAsText(file);
 }
 
-$('companies-delete-uuid-column').addEventListener('change', updateCompaniesDeleteCSVPreview);
 
 function updateCompaniesDeleteCSVPreview() {
   const col = $('companies-delete-uuid-column').value;
@@ -699,18 +603,6 @@ function updateCompaniesDeleteCSVPreview() {
   }
 }
 
-$('btn-companies-delete-reupload').addEventListener('click', () => {
-  companiesDeleteParsedCSV = null;
-  companiesDeleteFileInput.value = '';
-  hide('companies-delete-csv-step-confirm');
-  hide('companies-delete-csv-step-run');
-});
-
-$('btn-companies-delete-csv-run').addEventListener('click', () => requireToken(() => {
-  const col = $('companies-delete-uuid-column').value;
-  if (!col || !companiesDeleteParsedCSV) return;
-  startCompaniesDeleteCSV(col);
-}));
 
 function startCompaniesDeleteCSV(uuidColumn) {
   hide('companies-delete-csv-step-confirm');
@@ -759,9 +651,6 @@ function startCompaniesDeleteCSV(uuidColumn) {
   );
 }
 
-$('btn-companies-delete-download-log').addEventListener('click', () => {
-  downloadLogCsv(appendCompaniesDeleteLogEntry, 'companies-delete');
-});
 
 function setCompaniesDeleteCSVProgress(msg, pct) {
   setText('companies-delete-csv-progress-msg', msg);
@@ -769,18 +658,6 @@ function setCompaniesDeleteCSVProgress(msg, pct) {
   $('companies-delete-csv-progress-bar').style.width = `${Math.min(100, pct)}%`;
 }
 
-$('btn-stop-companies-delete-csv').addEventListener('click', () => {
-  if (companiesDeleteController) { companiesDeleteController.abort(); companiesDeleteController = null; }
-  hide('btn-stop-companies-delete-csv');
-  show('btn-companies-delete-download-log');
-});
-
-$('btn-companies-delete-csv-again').addEventListener('click', () => {
-  companiesDeleteParsedCSV = null;
-  companiesDeleteFileInput.value = '';
-  hide('companies-delete-csv-step-confirm');
-  hide('companies-delete-csv-step-run');
-});
 
 // ══════════════════════════════════════════════════════════
 // COMPANIES — Delete All
@@ -788,14 +665,6 @@ $('btn-companies-delete-csv-again').addEventListener('click', () => {
 
 let companiesDeleteAllController = null;
 
-$('companies-delete-all-confirm-input').addEventListener('input', (e) => {
-  $('btn-companies-delete-all-run').disabled = e.target.value.trim() !== 'DELETE';
-});
-
-$('btn-companies-delete-all-run').addEventListener('click', () => requireToken(() => {
-  if ($('companies-delete-all-confirm-input').value.trim() !== 'DELETE') return;
-  startCompaniesDeleteAll();
-}));
 
 function startCompaniesDeleteAll() {
   hide('companies-delete-all-idle');
@@ -849,10 +718,146 @@ function setCompaniesDeleteAllProgress(msg, pct) {
   $('companies-delete-all-progress-bar').style.width = `${Math.min(100, pct)}%`;
 }
 
-$('btn-companies-delete-all-again').addEventListener('click', () => {
-  $('companies-delete-all-confirm-input').value = '';
-  $('btn-companies-delete-all-run').disabled = true;
-  hide('companies-delete-all-running');
-  hide('companies-delete-all-results');
-  show('companies-delete-all-idle');
-});
+// ══════════════════════════════════════════════════════════
+// MODULE INIT — called once by app.js after partial is loaded
+// ══════════════════════════════════════════════════════════
+let _companiesInitDone = false;
+function initCompaniesModule() {
+  if (_companiesInitDone) return;
+  _companiesInitDone = true;
+
+  // ── Export ──────────────────────────────────────────────
+  $('btn-export').addEventListener('click', () => requireToken(startExport));
+  $('btn-export-again').addEventListener('click', resetExport);
+  $('btn-export-stopped-again').addEventListener('click', resetExport);
+  $('btn-export-retry').addEventListener('click', resetExport);
+  $('btn-stop-export').addEventListener('click', () => {
+    if (companyExportCtrl) { companyExportCtrl.abort(); companyExportCtrl = null; }
+  });
+  $('btn-download-csv').addEventListener('click', () => {
+    if (lastExportCSV) triggerDownload(new Blob([lastExportCSV], { type: 'text/csv;charset=utf-8;' }), lastExportFilename);
+  });
+
+  // ── Import: file upload ──────────────────────────────────
+  const dropzone  = $('dropzone');
+  const fileInput = $('file-input');
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) loadCSVFile(file);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) loadCSVFile(fileInput.files[0]);
+  });
+  $('btn-reupload').addEventListener('click', () => {
+    parsedCSV = null;
+    fileInput.value = '';
+    hide('import-step-map');
+    hide('import-step-options');
+    hide('import-step-validate');
+    hide('import-step-run');
+    hide('import-summary-box');
+  });
+
+  // ── Import: map / validate / run ─────────────────────────
+  $('btn-validate').addEventListener('click', () => requireToken(runValidation));
+  $('btn-run-import').addEventListener('click', () => requireToken(runImport));
+  $('btn-back-to-map2').addEventListener('click', () => {
+    hide('import-step-validate');
+    hide('import-step-run');
+    show('import-step-map');
+    show('import-step-options');
+  });
+  $('btn-stop-import').addEventListener('click', () => {
+    if (window._importController) { window._importController.abort(); window._importController = null; }
+  });
+  $('btn-import-download-log').addEventListener('click', () => {
+    downloadLogCsv(appendLogEntry, 'companies-import');
+  });
+
+  // ── Source migration ──────────────────────────────────────
+  $('btn-csm-v1v2-run').addEventListener('click', () => requireToken(startCsmV1V2));
+  $('btn-csm-v1v2-stop').addEventListener('click', () => {
+    if (csmV1V2Ctrl) { csmV1V2Ctrl.abort(); csmV1V2Ctrl = null; }
+  });
+  $('btn-csm-v1v2-again').addEventListener('click', () => {
+    hide('csm-v1v2-running');
+    hide('csm-v1v2-results');
+    show('csm-v1v2-idle');
+  });
+  $('btn-csm-v2v1-run').addEventListener('click', () => requireToken(startCsmV2V1));
+  $('btn-csm-v2v1-stop').addEventListener('click', () => {
+    if (csmV2V1Ctrl) { csmV2V1Ctrl.abort(); csmV2V1Ctrl = null; }
+  });
+  $('btn-csm-v2v1-again').addEventListener('click', () => {
+    hide('csm-v2v1-running');
+    hide('csm-v2v1-results');
+    show('csm-v2v1-idle');
+  });
+
+  // ── Delete from CSV ───────────────────────────────────────
+  const companiesDeleteDropzone  = $('companies-delete-dropzone');
+  const companiesDeleteFileInput = $('companies-delete-file-input');
+  companiesDeleteDropzone.addEventListener('click', () => companiesDeleteFileInput.click());
+  companiesDeleteDropzone.addEventListener('dragover', (e) => { e.preventDefault(); companiesDeleteDropzone.classList.add('dragover'); });
+  companiesDeleteDropzone.addEventListener('dragleave', () => companiesDeleteDropzone.classList.remove('dragover'));
+  companiesDeleteDropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    companiesDeleteDropzone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) loadCompaniesDeleteCSV(file);
+  });
+  companiesDeleteFileInput.addEventListener('change', () => {
+    if (companiesDeleteFileInput.files[0]) loadCompaniesDeleteCSV(companiesDeleteFileInput.files[0]);
+  });
+  $('companies-delete-uuid-column').addEventListener('change', updateCompaniesDeleteCSVPreview);
+  $('btn-companies-delete-reupload').addEventListener('click', () => {
+    companiesDeleteParsedCSV = null;
+    companiesDeleteFileInput.value = '';
+    hide('companies-delete-csv-step-confirm');
+    hide('companies-delete-csv-step-run');
+  });
+  $('btn-companies-delete-csv-run').addEventListener('click', () => requireToken(() => {
+    const col = $('companies-delete-uuid-column').value;
+    if (!col || !companiesDeleteParsedCSV) return;
+    startCompaniesDeleteCSV(col);
+  }));
+  $('btn-companies-delete-download-log').addEventListener('click', () => {
+    downloadLogCsv(appendCompaniesDeleteLogEntry, 'companies-delete');
+  });
+  $('btn-stop-companies-delete-csv').addEventListener('click', () => {
+    if (companiesDeleteController) { companiesDeleteController.abort(); companiesDeleteController = null; }
+    hide('btn-stop-companies-delete-csv');
+    show('btn-companies-delete-download-log');
+  });
+  $('btn-companies-delete-csv-again').addEventListener('click', () => {
+    companiesDeleteParsedCSV = null;
+    companiesDeleteFileInput.value = '';
+    hide('companies-delete-csv-step-confirm');
+    hide('companies-delete-csv-step-run');
+  });
+
+  // ── Delete all ────────────────────────────────────────────
+  $('companies-delete-all-confirm-input').addEventListener('input', (e) => {
+    $('btn-companies-delete-all-run').disabled = e.target.value.trim() !== 'DELETE';
+  });
+  $('btn-companies-delete-all-run').addEventListener('click', () => requireToken(() => {
+    if ($('companies-delete-all-confirm-input').value.trim() !== 'DELETE') return;
+    startCompaniesDeleteAll();
+  }));
+  $('btn-companies-delete-all-again').addEventListener('click', () => {
+    $('companies-delete-all-confirm-input').value = '';
+    $('btn-companies-delete-all-run').disabled = true;
+    hide('companies-delete-all-running');
+    hide('companies-delete-all-results');
+    show('companies-delete-all-idle');
+  });
+
+  // ── Mapping persistence ──────────────────────────────────
+  // (mappingChangeListenerAdded guards added in loadAndBuildCustomFieldTable)
+}
+window.initCompaniesModule = initCompaniesModule;

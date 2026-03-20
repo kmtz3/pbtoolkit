@@ -1509,7 +1509,11 @@ function setupEntitiesNav() {
 
 // ── Event listeners ───────────────────────────────────────
 
-document.addEventListener('DOMContentLoaded', () => {
+let _entitiesInitDone = false;
+function initEntitiesModule() {
+  if (_entitiesInitDone) return;
+  _entitiesInitDone = true;
+
   initEntitiesTemplatesView();
   initEntitiesImportView();
   initEntitiesDeleteView();
@@ -1603,4 +1607,5 @@ document.addEventListener('DOMContentLoaded', () => {
     // Reset export panel
     resetEntExport();
   });
-});
+}
+window.initEntitiesModule = initEntitiesModule;

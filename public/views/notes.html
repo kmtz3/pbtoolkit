@@ -1,0 +1,438 @@
+        <!-- ════════════════════════════════════════
+             NOTES VIEWS
+        ════════════════════════════════════════ -->
+
+        <!-- ── NOTES EXPORT ── -->
+        <div id="view-notes-export" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Export notes</h2>
+              <div class="panel-subtitle">Download all Productboard notes as a CSV file.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div id="notes-export-idle">
+                <div class="alert alert-info mb-16">
+                  <span class="alert-icon">ℹ️</span>
+                  <span>Fetches notes via the v2 API (relationships included inline), then enriches any missing source origin/record ID from the v1 API. Large workspaces may take a few minutes.</span>
+                </div>
+                <p class="text-sm text-muted">
+                  <strong>Columns exported:</strong> PB Note ID, Type, Title, Content, Display URL, User Email, Company Domain, Owner Email, Creator Email, Tags, Source Origin, Source Record ID, Archived, Processed, Created At, Updated At, Linked Entities.
+                </p>
+
+                <div class="filter-block mt-16">
+                  <p class="filter-block-label">Date filter <span class="label-hint">(optional)</span></p>
+                  <div class="filter-radios">
+                    <label class="radio-label"><input type="radio" name="notes-date-filter" value="none" checked> No filter — export all notes</label>
+                    <label class="radio-label"><input type="radio" name="notes-date-filter" value="range"> Date range</label>
+                    <label class="radio-label"><input type="radio" name="notes-date-filter" value="dynamic"> Past N period</label>
+                  </div>
+
+                  <div id="notes-filter-range" class="filter-sub hidden mt-12">
+                    <div class="input-row">
+                      <div class="field mb-0">
+                        <label for="notes-filter-from" class="text-sm">From <span class="label-hint">(leave blank for open start)</span></label>
+                        <input type="date" id="notes-filter-from">
+                      </div>
+                      <div class="field mb-0">
+                        <label for="notes-filter-to" class="text-sm">To <span class="label-hint">(leave blank for open end)</span></label>
+                        <input type="date" id="notes-filter-to">
+                      </div>
+                    </div>
+                  </div>
+
+                  <div id="notes-filter-dynamic" class="filter-sub hidden mt-12">
+                    <label class="text-sm" for="notes-filter-n">Export notes created in the past</label>
+                    <div class="filter-dynamic-row mt-4">
+                      <input type="number" id="notes-filter-n" min="1" value="7" style="width:72px">
+                      <select id="notes-filter-period" aria-label="Period unit" style="width:auto">
+                        <option value="days">days</option>
+                        <option value="weeks">weeks</option>
+                        <option value="months">months</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <button class="btn btn-primary mt-16" id="btn-notes-export">Export notes</button>
+              </div>
+
+              <div id="notes-export-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="notes-export-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="notes-export-progress-msg">Starting…</span>
+                  <span id="notes-export-progress-pct">0%</span>
+                </div>
+                <button class="btn btn-ghost mt-8" id="btn-stop-notes-export">⏹ Stop</button>
+              </div>
+
+              <div id="notes-export-stopped" class="hidden">
+                <div class="alert alert-warn">
+                  <span class="alert-icon">⏹</span>
+                  <span>Export stopped by user.</span>
+                </div>
+                <button class="btn btn-secondary mt-16" id="btn-notes-export-stopped-again">Adjust criteria</button>
+              </div>
+
+              <div id="notes-export-done" class="hidden">
+                <div class="alert alert-ok">
+                  <span class="alert-icon">✅</span>
+                  <span id="notes-export-done-msg"></span>
+                </div>
+                <button class="btn btn-primary mt-16" id="btn-notes-download-csv">⬇ Download CSV</button>
+                <button class="btn btn-secondary mt-8" id="btn-notes-export-again">Adjust criteria</button>
+              </div>
+
+              <div id="notes-export-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="notes-export-error-msg"></span>
+                </div>
+                <button class="btn btn-secondary mt-12" id="btn-notes-export-retry">Try again</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-notes-export -->
+
+        <!-- ── NOTES IMPORT ── -->
+        <div id="view-notes-import" class="hidden">
+
+          <!-- Step 1: Upload -->
+          <div class="panel" id="notes-import-step-upload">
+            <div class="panel-header">
+              <h2 class="panel-title">Import notes</h2>
+              <div class="panel-subtitle">Upload a CSV, map columns to Productboard note fields, then run the import.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="alert alert-info mb-16">
+                <span class="alert-icon">ℹ️</span>
+                <span>Notes are created via the v1 API (which supports linking by user email or company domain). Status fields (archived/processed) and creator/owner are applied via a v2 backfill step after creation.</span>
+              </div>
+              <div class="dropzone" id="notes-dropzone">
+                <span class="dropzone-icon">📄</span>
+                <div class="dropzone-label">Drop a CSV file here</div>
+                <div class="dropzone-hint">or click to browse</div>
+              </div>
+              <input type="file" id="notes-file-input" accept=".csv,text/csv" class="hidden" />
+            </div>
+          </div>
+
+          <!-- Step 2: Map columns -->
+          <div class="panel mt-16 hidden" id="notes-import-step-map">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="panel-title">Map columns</h3>
+                  <div class="panel-subtitle" id="notes-map-subtitle"></div>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-notes-reupload">↩ Re-upload</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <table class="mapping-table">
+                <thead>
+                  <tr><th>PB Field</th><th>CSV Column</th></tr>
+                </thead>
+                <tbody id="notes-field-map-rows"></tbody>
+              </table>
+
+            </div>
+          </div>
+
+          <!-- Step 3: Options + actions -->
+          <div class="panel mt-16 hidden" id="notes-import-step-options">
+            <div class="panel-header">
+              <h3 class="panel-title">Options</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <!-- Migration mode -->
+              <label class="checkbox-row" id="notes-migration-mode-label">
+                <input type="checkbox" id="notes-migration-mode" />
+                Migration mode — remap linked entity UUIDs via a custom text field
+              </label>
+              <div class="text-sm text-muted mt-4" style="padding-left:24px">
+                Enable this when importing notes exported from a different workspace. The tool looks up entities in the <em>target</em> workspace using a custom text field that stores the original UUID, then links to those entities instead.
+              </div>
+              <div class="hidden mt-8" id="notes-migration-field-row" style="padding-left:24px">
+                <div class="flex gap-8 align-center flex-wrap">
+                  <label class="text-sm" for="notes-migration-field-name" style="white-space:nowrap">Custom field name:</label>
+                  <input type="text" id="notes-migration-field-name" value="original_uuid" style="width:200px" />
+                  <button class="btn btn-secondary btn-sm" id="btn-notes-detect-field">🔍 Detect</button>
+                  <span id="notes-migration-field-status" class="text-sm"></span>
+                </div>
+              </div>
+              <hr class="panel-divider mt-16" />
+              <div class="flex gap-8 mt-16 items-center flex-wrap">
+                <button class="btn btn-secondary" id="btn-notes-validate">✔ Validate</button>
+                <button class="btn btn-primary" id="btn-notes-run-import">📥 Import</button>
+                <button class="btn btn-ghost hidden" id="btn-stop-notes-import">⏹ Stop</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 4: Validation results -->
+          <div class="panel mt-16 hidden" id="notes-import-step-validate">
+            <div class="panel-header">
+              <h3 class="panel-title">Validation results</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div id="notes-validate-ok" class="hidden">
+                <div class="alert alert-ok">
+                  <span class="alert-icon">✅</span>
+                  <span id="notes-validate-ok-msg"></span>
+                </div>
+                <div id="notes-validate-warnings-section" class="hidden mt-12">
+                  <div class="alert alert-warn">
+                    <span class="alert-icon">⚠️</span>
+                    <span id="notes-validate-warnings-summary"></span>
+                  </div>
+                  <div class="result-scroll mt-8">
+                    <table class="results-table">
+                      <thead><tr><th>Row</th><th>Column</th><th>Warning</th></tr></thead>
+                      <tbody id="notes-validate-warning-rows"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+              <div id="notes-validate-errors" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="notes-validate-error-summary"></span>
+                </div>
+                <div class="result-scroll mt-12">
+                  <table class="results-table">
+                    <thead><tr><th>Row</th><th>Column</th><th>Error</th></tr></thead>
+                    <tbody id="notes-validate-error-rows"></tbody>
+                  </table>
+                </div>
+                <button class="btn btn-secondary mt-12" id="btn-notes-back-to-map2">← Fix &amp; re-map</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 6: Log — progress + summary + live log -->
+          <div class="panel mt-16 hidden" id="notes-import-step-run">
+            <div class="panel-header">
+              <h3 class="panel-title" id="notes-import-run-title">Importing notes…</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- Progress bar (always at top of log panel) -->
+              <div id="notes-import-progress-track" class="progress-wrap">
+                <div class="progress-bar" id="notes-import-progress-bar" style="width:0%"></div>
+              </div>
+              <div class="progress-label mt-4">
+                <span id="notes-import-progress-msg">Starting…</span>
+                <span id="notes-import-progress-pct">0%</span>
+              </div>
+
+              <!-- Summary alert (rendered by renderImportComplete on complete/stop/error) -->
+              <div id="notes-import-summary-box" class="hidden mt-16"></div>
+
+              <!-- Live log — never hidden after import finishes so user can review errors -->
+              <div id="notes-import-live-log" class="live-log hidden mt-16">
+                <div class="live-log-header">
+                  <span>Live log</span>
+                  <span id="notes-live-log-counts" class="live-log-counts"></span>
+                  <button id="btn-notes-download-log" class="btn btn-ghost btn-sm hidden" style="margin-left:auto">↓ Download log</button>
+                </div>
+                <div id="notes-live-log-entries" class="live-log-scroll"></div>
+              </div>
+
+            </div>
+          </div>
+
+        </div><!-- /view-notes-import -->
+
+        <!-- ── NOTES DELETE FROM CSV ── -->
+        <div id="view-notes-delete-csv" class="hidden">
+
+          <!-- Step 1: Upload -->
+          <div class="panel" id="notes-delete-csv-step-upload">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete notes from CSV</h2>
+              <div class="panel-subtitle">Upload a CSV containing PB Note IDs and permanently delete those notes.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="alert alert-warn mb-16">
+                <span class="alert-icon">⚠️</span>
+                <span>This action is <strong>irreversible</strong>. Deleted notes cannot be recovered. You can use the export CSV directly — just select the <em>PB Note ID</em> column.</span>
+              </div>
+              <div class="dropzone" id="notes-delete-dropzone">
+                <span class="dropzone-icon">📄</span>
+                <div class="dropzone-label">Drop a CSV file here</div>
+                <div class="dropzone-hint">or click to browse</div>
+              </div>
+              <input type="file" id="notes-delete-file-input" accept=".csv,text/csv" class="hidden" />
+            </div>
+          </div>
+
+          <!-- Step 2: Column picker + confirm -->
+          <div class="panel mt-16 hidden" id="notes-delete-csv-step-confirm">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="panel-title">Confirm deletion</h3>
+                  <div class="panel-subtitle" id="notes-delete-csv-subtitle"></div>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-notes-delete-reupload">↩ Re-upload</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="mb-16">
+                <label for="notes-delete-uuid-column">Which column contains the PB Note UUIDs?</label>
+                <select id="notes-delete-uuid-column" class="mt-8" style="width:100%;max-width:320px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:14px"></select>
+              </div>
+              <div id="notes-delete-csv-preview" class="mb-16 text-sm text-muted font-mono hidden"></div>
+              <button class="btn btn-danger" id="btn-notes-delete-csv-run">🗑 Delete notes</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Progress + log -->
+          <div class="panel mt-16 hidden" id="notes-delete-csv-step-run">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <h3 class="panel-title" id="notes-delete-csv-run-title">Deleting notes…</h3>
+                <button class="btn btn-danger btn-sm hidden" id="btn-stop-notes-delete-csv">⏹ Stop</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div id="notes-delete-csv-running">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="notes-delete-csv-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="notes-delete-csv-progress-msg">Starting…</span>
+                  <span id="notes-delete-csv-progress-pct">0%</span>
+                </div>
+                <div id="notes-delete-csv-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header"><span>Live log</span></div>
+                  <div id="notes-delete-csv-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+              <div id="notes-delete-csv-results" class="hidden">
+                <div id="notes-delete-csv-summary-alert"></div>
+                <button class="btn btn-secondary mt-16" id="btn-notes-delete-csv-again">← Delete more</button>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /view-notes-delete-csv -->
+
+        <!-- ── NOTES DELETE ALL ── -->
+        <div id="view-notes-delete-all" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete all notes</h2>
+              <div class="panel-subtitle">Permanently delete every note in your Productboard workspace.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div id="notes-delete-all-idle">
+                <div class="alert alert-danger mb-16">
+                  <span class="alert-icon">⛔</span>
+                  <span><strong>This will permanently delete every note in your workspace.</strong> This action cannot be undone and there is no way to recover deleted notes. Use with extreme caution — ideally export first.</span>
+                </div>
+                <label for="notes-delete-all-confirm-input" class="text-sm text-muted mb-16" style="display:block">Type <strong>DELETE</strong> in the box below to enable the button.</label>
+                <input type="text" id="notes-delete-all-confirm-input" placeholder="Type DELETE to confirm" autocomplete="off"
+                  style="display:block;width:100%;max-width:320px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-size:14px;margin-bottom:12px" />
+                <button class="btn btn-danger" id="btn-notes-delete-all-run" disabled>⛔ Delete all notes</button>
+              </div>
+
+              <div id="notes-delete-all-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="notes-delete-all-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="notes-delete-all-progress-msg">Starting…</span>
+                  <span id="notes-delete-all-progress-pct">0%</span>
+                </div>
+                <div id="notes-delete-all-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header"><span>Live log</span></div>
+                  <div id="notes-delete-all-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+
+              <div id="notes-delete-all-results" class="hidden">
+                <div id="notes-delete-all-summary-alert"></div>
+                <button class="btn btn-secondary mt-16" id="btn-notes-delete-all-again">← Start over</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-notes-delete-all -->
+
+        <!-- ── NOTES MIGRATION PREP ── -->
+        <div id="view-notes-migrate" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Migration prep</h2>
+              <div class="panel-subtitle">Transform an export CSV to make notes ready for import into a new workspace.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div class="alert alert-info mb-16">
+                <span class="alert-icon">ℹ️</span>
+                <span>
+                  <strong>Workflow:</strong>
+                  <ol style="margin:6px 0 0 16px;padding:0;line-height:1.7">
+                    <li>Export notes from your source workspace (Export notes tab).</li>
+                    <li>Upload that CSV here and enter the migration source name.</li>
+                    <li>Download the transformed CSV — each note's <em>pb_id</em> is moved to <em>source_record_id</em> (so it can be deduplicated on re-import), <em>source_origin</em> is set to your source name, and <em>pb_id</em> is cleared so Productboard creates a fresh note in the target workspace.</li>
+                    <li>Import the transformed CSV into the target workspace (Import notes tab). Enable <em>Migration mode</em> to also remap linked entity UUIDs.</li>
+                  </ol>
+                </span>
+              </div>
+
+              <div id="notes-migrate-idle">
+                <div class="dropzone" id="notes-migrate-dropzone">
+                  <span class="dropzone-icon">📄</span>
+                  <div class="dropzone-label">Drop your export CSV here</div>
+                  <div class="dropzone-hint">or click to browse</div>
+                </div>
+                <input type="file" id="notes-migrate-file-input" accept=".csv,text/csv" class="hidden" />
+
+                <div class="hidden mt-16" id="notes-migrate-form">
+                  <label for="notes-migrate-source-name">Migration source name <span class="label-hint">— used as source_origin value</span></label>
+                  <input type="text" id="notes-migrate-source-name" placeholder="e.g. workspace-v1"
+                    style="display:block;width:100%;max-width:320px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-size:14px;margin-top:6px" />
+                  <p class="text-sm text-muted mt-8">Example: if you enter <code>acme-source</code>, the original pb_id is written to source_record_id and source_origin is set to <code>acme-source</code>. Any pre-existing source_record_id on the note is replaced.</p>
+                  <button class="btn btn-primary mt-12" id="btn-notes-migrate-run">🔄 Prepare CSV</button>
+                </div>
+              </div>
+
+              <div id="notes-migrate-done" class="hidden">
+                <div class="alert alert-ok">
+                  <span class="alert-icon">✅</span>
+                  <span id="notes-migrate-done-msg"></span>
+                </div>
+                <button class="btn btn-primary mt-16" id="btn-notes-migrate-download">⬇️ Download prepared CSV</button>
+                <button class="btn btn-secondary mt-8" id="btn-notes-migrate-again">← Prepare another</button>
+              </div>
+
+              <div id="notes-migrate-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="notes-migrate-error-msg"></span>
+                </div>
+                <button class="btn btn-secondary mt-8" id="btn-notes-migrate-retry">Try again</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-notes-migrate -->

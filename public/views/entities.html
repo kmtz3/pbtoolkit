@@ -1,0 +1,380 @@
+        <!-- ════════════════════════════════════════
+             ENTITIES VIEWS
+        ════════════════════════════════════════ -->
+
+        <!-- ── ENTITIES TEMPLATES ── -->
+        <div id="view-entities-templates" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Entity templates</h2>
+              <div class="panel-subtitle">Download CSV templates pre-populated with your workspace's custom fields.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div class="alert alert-info mb-16">
+                <span class="alert-icon">ℹ️</span>
+                <span>Templates include all standard columns plus your workspace's custom fields. Custom field headers use <strong>Field Name [FieldType] [fieldUuid]</strong> format — the importer reads these automatically. Fill in rows and upload via the Import view.</span>
+              </div>
+
+              <div class="mb-8">
+                <div class="text-sm text-muted mb-16" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">Select entity types to download</div>
+                <div id="ent-templates-checkboxes" class="ent-export-check-grid"></div>
+                <div class="mt-8 flex gap-8">
+                  <button id="btn-ent-templates-select-all" class="btn btn-ghost btn-xs">Select all</button>
+                  <button id="btn-ent-templates-clear-all"  class="btn btn-ghost btn-xs">Deselect all</button>
+                </div>
+              </div>
+
+              <div class="mb-16 mt-20">
+                <button id="btn-ent-templates-download" class="btn btn-primary">Download selected</button>
+              </div>
+
+              <div id="entities-templates-error" class="alert alert-danger hidden mt-12">
+                <span class="alert-icon">⚠️</span>
+                <span id="entities-templates-error-msg"></span>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-entities-templates -->
+
+        <!-- ── ENTITIES EXPORT ── -->
+        <div id="view-entities-export" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Export entities</h2>
+              <div class="panel-subtitle">Download entities as CSV files — single type or full workspace export.</div>
+            </div>
+            <!-- Tab bar -->
+            <div class="ent-tab-bar" id="ent-export-tab-bar" style="padding:0 24px">
+              <button class="ent-tab-btn active" data-export-tab="export">Export</button>
+              <button class="ent-tab-btn" data-export-tab="normalize">Normalize ext_keys</button>
+            </div>
+
+            <div class="panel-body">
+
+              <!-- ── Tab: Export ── -->
+              <div id="ent-export-tab-export">
+
+                <!-- Idle / criteria state -->
+                <div id="ent-export-idle">
+
+                <!-- Migration mode toggle -->
+                <div class="mb-16">
+                  <label class="flex gap-8 items-center" style="cursor:pointer">
+                    <input type="checkbox" id="ent-export-migration-mode" />
+                    <span><strong>Migration mode</strong> — rewrites UUID ext_keys to <code>WSID-TYPE-NNN</code> and rewrites relationship columns to ext_keys</span>
+                  </label>
+                  <div id="ent-export-workspace-row" class="mt-8 hidden">
+                    <label for="ent-export-workspace-code" class="text-sm text-muted">Workspace code</label>
+                    <input id="ent-export-workspace-code" type="text" placeholder="e.g. ACME" maxlength="10"
+                      style="margin-left:8px;width:120px;padding:4px 8px;border:1px solid var(--c-border);border-radius:4px;font-size:13px" />
+                  </div>
+                </div>
+
+                <!-- Entity type checkboxes -->
+                <div class="mb-8">
+                  <div class="text-sm text-muted mb-16 flex items-center" style="font-weight:600">
+                    <span style="text-transform:uppercase;letter-spacing:.05em">Select entity types to export</span>
+                    <span class="info-icon" data-tip="In migration mode, relationships to unselected entity types will remain as UUIDs.">i</span>
+                  </div>
+                  <div id="ent-export-checkboxes" class="ent-export-check-grid"></div>
+                  <div class="mt-8 flex gap-8">
+                    <button id="btn-ent-export-select-all" class="btn btn-ghost btn-xs">Select all</button>
+                    <button id="btn-ent-export-clear-all"  class="btn btn-ghost btn-xs">Deselect all</button>
+                  </div>
+                </div>
+
+                <!-- Export selected -->
+                <div class="mb-16 mt-20">
+                  <button id="btn-ent-export-selected" class="btn btn-primary">Export selected</button>
+                </div>
+
+                </div><!-- /ent-export-idle -->
+
+                <!-- Progress / log -->
+                <div id="ent-export-progress-wrap" class="hidden mt-12">
+                  <div class="progress-wrap mb-16">
+                    <div id="ent-export-progress-bar" class="progress-bar" style="width:0%"></div>
+                  </div>
+                  <div id="ent-export-status" class="text-sm text-muted"></div>
+                  <button class="btn btn-ghost mt-8" id="btn-ent-export-stop">⏹ Stop</button>
+                  <div id="ent-export-log" class="live-log hidden mt-8"></div>
+                </div>
+
+                <!-- Stopped state -->
+                <div id="ent-export-stopped" class="hidden mt-12">
+                  <div class="alert alert-warn">
+                    <span class="alert-icon">⏹</span>
+                    <span>Export stopped by user.</span>
+                  </div>
+                  <button class="btn btn-secondary mt-16" id="btn-ent-export-stopped-again">Adjust criteria</button>
+                </div>
+
+                <!-- Done state -->
+                <div id="ent-export-done" class="hidden mt-12">
+                  <div class="alert alert-ok">
+                    <span class="alert-icon">✅</span>
+                    <span id="ent-export-done-msg"></span>
+                  </div>
+                  <button class="btn btn-primary mt-16" id="btn-ent-export-download-again">⬇ Download CSV</button>
+                  <button class="btn btn-secondary mt-8" id="btn-ent-export-again">Adjust criteria</button>
+                </div>
+
+                <div id="ent-export-error" class="hidden mt-12">
+                  <div class="alert alert-danger">
+                    <span class="alert-icon">⚠️</span>
+                    <span id="ent-export-error-msg"></span>
+                  </div>
+                  <button class="btn btn-secondary mt-8" id="btn-ent-export-retry">Adjust criteria</button>
+                </div>
+
+              </div><!-- /ent-export-tab-export -->
+
+              <!-- ── Tab: Normalize ext_keys ── -->
+              <div id="ent-export-tab-normalize" class="hidden">
+
+                <p class="text-sm text-muted mb-16">
+                  Rewrites UUID ext_keys to <code>WSID-TYPE-NNN</code> and updates relationship columns cross-entity.
+                  Upload CSVs exported from this tool (must include <code>pb_id</code> column for relationship rewriting). No API calls.
+                </p>
+                <div class="alert alert-warn mb-16">
+                  Relationship columns (connected links, dependencies) are only rewritten for entity types included in this upload.
+                  If you upload a single file, any cross-entity links pointing to a type you did not upload will remain as raw UUIDs.
+                  Upload all relevant entity types together for complete rewriting.
+                </div>
+                <div class="mb-16 flex gap-8 items-center">
+                  <label class="text-sm text-muted" for="ent-norm-multi-workspace">Workspace code</label>
+                  <input id="ent-norm-multi-workspace" type="text" placeholder="e.g. ACME" maxlength="10"
+                    style="width:120px;padding:4px 8px;border:1px solid var(--c-border);border-radius:4px;font-size:13px" />
+                </div>
+                <div id="ent-norm-multi-grid" class="ent-file-grid mb-16">
+                  <!-- tiles rendered by JS -->
+                </div>
+                <button id="btn-ent-norm-multi-run" class="btn btn-secondary" disabled>Normalize &amp; download ZIP</button>
+                <div id="ent-norm-multi-error" class="alert alert-danger hidden mt-8">
+                  <span id="ent-norm-multi-error-msg"></span>
+                </div>
+
+              </div><!-- /ent-export-tab-normalize -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-entities-export -->
+
+        <!-- ── ENTITIES IMPORT ── -->
+        <div id="view-entities-import" class="hidden">
+
+          <!-- Step 1: Upload files -->
+          <div class="panel" id="ent-import-step-upload">
+            <div class="panel-header">
+              <h2 class="panel-title">Import entities</h2>
+              <div class="panel-subtitle">Upload CSV files for the entity types you want to import. Process multiple types in one run — entities are created in dependency order.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div id="ent-import-file-grid" class="ent-file-grid">
+                <!-- Rendered by JS: 9 entity-type file tiles -->
+              </div>
+              <div id="ent-import-rowcount-warn" class="alert alert-warn hidden mt-16">
+                <span class="alert-icon">⚠️</span>
+                <span id="ent-import-rowcount-msg"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 2: Map columns (appears once ≥1 file uploaded) -->
+          <div class="panel mt-16 hidden" id="ent-import-step-map">
+            <div class="panel-header">
+              <h3 class="panel-title">Map columns</h3>
+              <div class="panel-subtitle">Verify that each CSV column is mapped to the correct Productboard field. Template-format headers are auto-mapped.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div id="ent-import-configs-loading" class="text-sm text-muted hidden">Loading field configurations…</div>
+              <!-- Tab bar (one tab per uploaded entity type) -->
+              <div id="ent-import-tab-bar" class="ent-tab-bar"></div>
+              <!-- Tab content area -->
+              <div id="ent-import-tab-content" class="mt-16"></div>
+              <!-- Parent entity missing warning -->
+              <div id="ent-import-parent-warn" class="alert alert-warn hidden mt-16">
+                <span class="alert-icon">⚠️</span>
+                <span id="ent-import-parent-warn-msg"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 3: Options + actions (appears with mapping panel) -->
+          <div class="panel mt-16 hidden" id="ent-import-step-options">
+            <div class="panel-header">
+              <h3 class="panel-title">Options</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="ent-options-grid">
+                <!-- Multi-select mode -->
+                <div>
+                  <label class="label-bold">Multi-select update mode</label>
+                  <div class="text-sm text-muted mb-8">Applies to tags, teams, and multi-select custom fields on PATCH rows only.</div>
+                  <div class="flex flex-col gap-4">
+                    <label class="radio-label"><input type="radio" name="ent-ms-mode" value="set" checked> Set — replace all items</label>
+                    <label class="radio-label"><input type="radio" name="ent-ms-mode" value="addItems"> Add items</label>
+                    <label class="radio-label"><input type="radio" name="ent-ms-mode" value="removeItems"> Remove items</label>
+                  </div>
+                </div>
+                <!-- Misc toggles -->
+                <div class="flex flex-col gap-12">
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="ent-bypass-empty" />
+                    Bypass empty cells <span class="info-icon" data-tip="Skip the field on update if the CSV cell is blank">i</span>
+                  </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="ent-bypass-html" />
+                    Bypass HTML formatter <span class="info-icon" data-tip="Send description HTML as-is, without sanitization">i</span>
+                  </label>
+                  <div>
+                    <label class="checkbox-row">
+                      <input type="checkbox" id="ent-autogen-extkeys" />
+                      Auto-generate ext_keys for new entities
+                    </label>
+                    <div id="ent-workspace-code-wrap" class="hidden mt-8">
+                      <label>Workspace code <span class="label-hint">(e.g. ACME)</span></label>
+                      <input type="text" id="ent-workspace-code" placeholder="ACME" maxlength="16" style="width:120px; margin-top:6px; text-transform:uppercase" />
+                    </div>
+                  <div>
+                    <label>Fiscal year start month <span class="info-icon" data-tip="1–12, default 1 = January">i</span></label>
+                    <input type="number" id="ent-fiscal-month" value="1" min="1" max="12" style="width:72px; margin-top:6px" />
+                  </div>
+                  </div>
+                </div>
+              </div>
+              <hr class="panel-divider mt-16" />
+              <!-- Action buttons — always in the Options panel, consistent with companies & notes -->
+              <div class="flex gap-8 mt-16 items-center flex-wrap">
+                <button class="btn btn-secondary" id="btn-ent-validate">✔ Validate</button>
+                <button class="btn btn-primary" id="btn-ent-run">📥 Import</button>
+                <button class="btn btn-ghost hidden" id="btn-ent-stop">⏹ Stop</button>
+                <span id="ent-validate-status" class="text-sm text-muted"></span>
+              </div>
+              <!-- Validation results (shown inline below action buttons) -->
+              <div id="ent-validate-results" class="hidden mt-16">
+                <div id="ent-validate-summary-alert"></div>
+                <div id="ent-validate-error-panels" class="mt-12"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 4: Log — progress + summary + live log (appears when import starts) -->
+          <div class="panel mt-16 hidden" id="ent-import-step-log">
+            <div class="panel-header">
+              <h3 class="panel-title" id="ent-import-run-title">Importing…</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- Progress bar (always at top of log panel) -->
+              <div id="ent-import-progress-track" class="progress-wrap">
+                <div id="ent-import-progress-bar" class="progress-bar" style="width:0%"></div>
+              </div>
+              <div id="ent-import-status" class="text-sm text-muted mt-4"></div>
+
+              <!-- Summary alert (rendered by renderImportComplete on complete/stop/error) -->
+              <div id="ent-import-summary-box" class="hidden mt-16"></div>
+
+              <!-- Fatal error alert (shown when SSE emits error event) -->
+              <div id="ent-import-error" class="alert alert-danger hidden mt-12">
+                <span id="ent-import-error-msg"></span>
+              </div>
+
+              <!-- Live log — never hidden after import finishes so user can review errors -->
+              <div id="ent-import-log" class="live-log hidden mt-16">
+                <div class="live-log-header">
+                  <span>Live log</span>
+                  <span id="ent-import-log-counts" class="live-log-counts"></span>
+                  <button id="btn-ent-import-download-log" class="btn btn-ghost btn-sm hidden" style="margin-left:auto">↓ Download log</button>
+                </div>
+                <div id="ent-import-log-entries" class="live-log-scroll"></div>
+              </div>
+
+              <!-- Fix relationships (shown after a completed run) -->
+              <button id="btn-ent-fix-rels" class="btn btn-ghost hidden mt-12">↺ Re-run relationships</button>
+
+            </div>
+          </div>
+
+        </div><!-- /view-entities-import -->
+
+        <!-- ── ENTITIES DELETE ── -->
+        <div id="view-entities-delete" class="hidden">
+
+          <!-- Step 1: Upload files -->
+          <div class="panel" id="ent-delete-step-upload">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete entities by CSV</h2>
+              <div class="panel-subtitle">Upload exported CSV files for each entity type you want to delete. Use the column picker on each tile to select the ID column. Entities are deleted in child-first order.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div id="ent-delete-file-grid" class="ent-file-grid">
+                <!-- Rendered by JS: 9 entity-type file tiles with inline column pickers -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 2: Preview + options (appears once ≥1 file uploaded) -->
+          <div class="panel mt-16 hidden" id="ent-delete-step-preview">
+            <div class="panel-header">
+              <h3 class="panel-title">Review &amp; run</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <table class="mapping-table">
+                <thead><tr><th>Entity type</th><th>Records to delete</th><th>UUID column</th></tr></thead>
+                <tbody id="ent-delete-preview-tbody"></tbody>
+              </table>
+              <div class="mt-16">
+                <label class="checkbox-row">
+                  <input type="checkbox" id="ent-delete-safe-mode" checked />
+                  Safe mode — skip entities that still have children in Productboard not included in these files
+                  <span class="info-icon" data-tip="When checked, any entity that has children outside your uploaded CSVs will be skipped rather than cascade-deleted">i</span>
+                </label>
+              </div>
+              <div class="mt-16">
+                <button class="btn btn-danger" id="btn-ent-delete-run">🗑 Run deletion</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 3: Run (SSE progress + log + results) -->
+          <div class="panel mt-16 hidden" id="ent-delete-step-run">
+            <div class="panel-header">
+              <h3 class="panel-title" id="ent-delete-run-title">Deleting…</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="progress-wrap">
+                <div id="ent-delete-progress-bar" class="progress-bar" style="width:0%"></div>
+              </div>
+              <div id="ent-delete-status" class="text-sm text-muted mt-4"></div>
+
+              <!-- Results summary (shown on complete) -->
+              <div id="ent-delete-results" class="hidden mt-16"></div>
+
+              <!-- Live log -->
+              <div id="ent-delete-log" class="live-log hidden mt-16">
+                <div class="live-log-header">
+                  <span>Live log</span>
+                  <span id="ent-delete-log-counts" class="live-log-counts"></span>
+                  <button id="btn-ent-delete-download-log" class="btn btn-ghost btn-sm hidden" style="margin-left:auto">↓ Download log</button>
+                </div>
+                <div id="ent-delete-log-entries" class="live-log-scroll"></div>
+              </div>
+
+              <div class="flex gap-8 mt-16">
+                <button class="btn btn-ghost hidden" id="btn-ent-delete-stop">⏹ Stop</button>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /view-entities-delete -->

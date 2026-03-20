@@ -184,9 +184,9 @@ Add inside `.sidebar-nav`:
 </button>
 ```
 
-### 5. View panels in `public/index.html`
+### 5. View panels in `public/views/{module}.html`
 
-Add inside `#view-area`:
+Create a new file `public/views/{module}.html` containing all view panels for the module. `loadPartial()` in `app.js` will inject this file into `#view-area` on first navigation — it is **not** added to `index.html`. Example:
 
 ```html
 <div id="view-notes-export" class="hidden">
@@ -196,37 +196,45 @@ Add inside `#view-area`:
 </div>
 ```
 
-### 6. Frontend JS in `public/app.js`
+### 6. Frontend JS
 
-**Extend `showView()`** — add new view names to the array:
+#### `public/{module}-app.js`
+
+Write all module logic here. Wrap everything in an `initXxxModule()` function and expose it on `window`:
 
 ```js
-function showView(view) {
-  ['export', 'import', 'notes-export', 'notes-delete'].forEach((v) => {
-    const el = $(`view-${v}`);
-    if (el) el.classList.toggle('hidden', v !== view);
-  });
+function initNotesModule() {
+  // wire up DOM event listeners, reset state, etc.
+  // called once after the partial is first loaded
 }
+window.initNotesModule = initNotesModule;
 ```
 
-**Extend `loadTool()`** — add the tool name and default view:
+#### `public/app.js` — extend `loadTool()`
+
+Add the tool name to the `names` map and a block that calls `loadPartial()`, sets the active nav item, shows the default view, and calls the module init:
 
 ```js
-function loadTool(toolName) {
+async function loadTool(toolName) {
   const names = { companies: 'Companies', notes: 'Notes' };
   setText('topbar-tool-name', names[toolName] || toolName);
   showScreen('tool');
+  // ... sidebar show/hide ...
+  document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
 
-  if (toolName === 'companies') { ... }
+  await loadPartial(toolName);   // injects public/views/{toolName}.html into #view-area
+
   if (toolName === 'notes') {
-    document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
     $('nav-notes-export').classList.add('active');
     showView('notes-export');
+    window.initNotesModule?.();
   }
 }
 ```
 
-**Add event listeners** for buttons in the new views, following the same patterns as the companies module.
+`loadPartial()` is idempotent — subsequent navigations skip the fetch.
+
+**Add event listeners** for buttons in the new views inside `initNotesModule()`, not at the top level, so they are registered after the HTML is in the DOM.
 
 ---
 

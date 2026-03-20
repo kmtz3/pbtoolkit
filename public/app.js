@@ -105,6 +105,18 @@ function switchDatacenter(newEu) {
   }
 }
 
+// ── Partial loader ──────────────────────────────────────────
+const _loadedPartials = new Set();
+
+async function loadPartial(toolName) {
+  if (_loadedPartials.has(toolName)) return;
+  const res = await fetch(`/views/${toolName}.html`);
+  if (!res.ok) throw new Error(`Failed to load view: ${toolName} (${res.status})`);
+  const html = await res.text();
+  $('view-area').insertAdjacentHTML('beforeend', html);
+  _loadedPartials.add(toolName);
+}
+
 // ── Tool cards ─────────────────────────────────────────────
 document.querySelectorAll('.tool-card:not(.tool-card-soon)').forEach((card) => {
   card.addEventListener('click', () => {
@@ -113,7 +125,7 @@ document.querySelectorAll('.tool-card:not(.tool-card-soon)').forEach((card) => {
   });
 });
 
-function loadTool(toolName) {
+async function loadTool(toolName) {
   const names = { companies: 'Companies', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', 'team-membership': 'Team Membership' };
   setText('topbar-tool-name', names[toolName] || toolName);
   showScreen('tool');
@@ -127,19 +139,29 @@ function loadTool(toolName) {
 
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
 
+  try {
+    await loadPartial(toolName);
+  } catch (e) {
+    console.error('Failed to load view partial:', e);
+    return;
+  }
+
   if (toolName === 'companies') {
     $('nav-export').classList.add('active');
     showView('export');
+    window.initCompaniesModule?.();
   }
 
   if (toolName === 'notes') {
     $('nav-notes-export').classList.add('active');
     showView('notes-export');
+    window.initNotesModule?.();
   }
 
   if (toolName === 'entities') {
     $('nav-entities-templates').classList.add('active');
     showView('entities-templates');
+    window.initEntitiesModule?.();
   }
 
   if (toolName === 'member-activity') {
@@ -224,7 +246,7 @@ $('auth-submit').addEventListener('click', async () => {
     // If the team membership module loaded before a token was set, reload now
     if (typeof window.tmReloadIfNeeded === 'function') window.tmReloadIfNeeded();
     // If the companies mapper is open and custom fields failed to load (no token), reload them now
-    if (parsedCSV && !$('import-step-map').classList.contains('hidden')) {
+    if (typeof parsedCSV !== 'undefined' && parsedCSV && $('import-step-map') && !$('import-step-map').classList.contains('hidden')) {
       loadAndBuildCustomFieldTable();
     }
   } catch (e) {

@@ -1,0 +1,155 @@
+        <!-- ── MEMBER ACTIVITY EXPORT ── -->
+        <div id="view-member-activity-export" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Export member activity</div>
+              <div class="panel-subtitle">Export activity data enriched with member profiles and team assignments. Use for license auditing and enablement planning.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ── IDLE STATE ── -->
+              <div id="ma-idle">
+
+                <!-- Obfuscated PII warning -->
+                <div id="ma-obfuscated-warn" class="alert alert-warn hidden" style="margin-bottom:16px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span>Member names and emails are obfuscated. Your token may lack PII access.</span>
+                </div>
+
+                <!-- Date range -->
+                <div class="form-row" style="margin-bottom:16px;">
+                  <label class="form-label">Date range</label>
+                  <select id="ma-date-preset" class="form-select">
+                    <option value="last30">Last 30 days</option>
+                    <option value="last7">Last 7 days</option>
+                    <option value="last90">Last 90 days</option>
+                    <option value="thisMonth">This month</option>
+                    <option value="lastMonth">Last month</option>
+                    <option value="custom">Custom…</option>
+                  </select>
+                  <div id="ma-custom-dates" class="hidden" style="display:flex;gap:8px;margin-top:8px;">
+                    <input type="date" id="ma-date-from" class="form-input" placeholder="From" />
+                    <input type="date" id="ma-date-to"   class="form-input" placeholder="To" />
+                  </div>
+                </div>
+
+                <!-- Role filter -->
+                <div class="form-row" style="margin-bottom:16px;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                    <label class="form-label" style="margin:0;">Roles</label>
+                    <button id="btn-ma-roles-select-all"   class="btn btn-xs btn-ghost" type="button">Select all</button>
+                    <button id="btn-ma-roles-deselect-all" class="btn btn-xs btn-ghost" type="button">Deselect all</button>
+                  </div>
+                  <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:4px;">
+                    <label class="checkbox-label"><input type="checkbox" id="ma-role-admin"       checked> Admin</label>
+                    <label class="checkbox-label"><input type="checkbox" id="ma-role-maker"       checked> Maker</label>
+                    <label class="checkbox-label"><input type="checkbox" id="ma-role-contributor" checked> Contributor</label>
+                    <label class="checkbox-label"><input type="checkbox" id="ma-role-viewer"      checked> Viewer</label>
+                  </div>
+                </div>
+
+                <!-- Team filter -->
+                <div class="form-row" style="margin-bottom:16px;">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <label class="form-label" style="margin:0;">Teams</label>
+                    <span class="info-icon" data-tip="Team assignments reflect current state in Productboard, not the member's team at the time of the activity.">i</span>
+                    <button id="btn-ma-teams-select-all"   class="btn btn-xs btn-ghost" type="button">Select all</button>
+                    <button id="btn-ma-teams-deselect-all" class="btn btn-xs btn-ghost" type="button">Deselect all</button>
+                    <button id="btn-ma-refresh" class="btn btn-xs btn-ghost" style="margin-left:auto;" type="button">↺ Refresh data</button>
+                  </div>
+                  <input type="text" id="ma-team-search" class="form-input" placeholder="Search teams…" style="margin-bottom:6px;" />
+                  <div id="ma-team-list" class="checkbox-scroll-list">
+                    <span class="text-muted" style="padding:8px 12px;display:block;font-size:12px;">Loading teams…</span>
+                  </div>
+                  <div id="ma-team-error" class="hidden" style="margin-top:6px;">
+                    <span class="text-danger" id="ma-team-error-msg"></span>
+                  </div>
+                  <div id="ma-member-count" class="text-muted" style="font-size:12px;margin-top:4px;"></div>
+                </div>
+
+                <!-- Include zero-activity -->
+                <div class="form-row" style="margin-bottom:12px;">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="ma-include-zero" checked>
+                    Include members with no records
+                    <span class="info-icon" data-tip="The analytics API only returns data for members who had at least one tracked event in the selected period. Checking this adds a zero-row for every other workspace member so the export reflects your full member list. Use this when you want a complete roster — for example, to identify who has never used Productboard in the given period. Uncheck it to export only members the API returned data for.">i</span>
+                  </label>
+                </div>
+
+                <!-- Active / Inactive filter -->
+                <div class="form-row" style="margin-bottom:12px;">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:0;">
+                    <label class="form-label" style="margin:0;">Activity filter</label>
+                    <span class="info-icon" data-tip="Filters by whether Productboard counted a member as active on a given day. Active only: had at least 1 active day in the period. Inactive only: had records but 0 active days (logged some events but not enough for Productboard to flag as active). Note: members with no records at all are only included if 'Include members with no records' is checked — inactive only will include them too.">i</span>
+                  </div>
+                  <div style="display:flex;gap:16px;margin-top:4px;">
+                    <label class="checkbox-label"><input type="radio" name="ma-active-filter" value="all"      checked> All members</label>
+                    <label class="checkbox-label"><input type="radio" name="ma-active-filter" value="active">         Active only</label>
+                    <label class="checkbox-label"><input type="radio" name="ma-active-filter" value="inactive">       Inactive only</label>
+                  </div>
+                </div>
+
+                <!-- Raw mode -->
+                <div class="form-row" style="margin-bottom:20px;">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="ma-raw-mode">
+                    Export raw daily data
+                    <span class="info-icon" data-tip="By default, each member appears once with their activity totalled across the selected date range. Checking this box exports one row per member per day instead, preserving the daily breakdown. This will produce a much larger file for long date ranges.">i</span>
+                  </label>
+                </div>
+
+                <button class="btn btn-primary" id="btn-ma-export" disabled>Export activity</button>
+              </div><!-- /ma-idle -->
+
+              <!-- ── RUNNING STATE ── -->
+              <div id="ma-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="ma-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="ma-progress-msg">Starting…</span>
+                  <span id="ma-progress-pct">0%</span>
+                </div>
+                <button class="btn btn-ghost mt-8" id="btn-ma-stop-export">⏹ Stop</button>
+              </div><!-- /ma-running -->
+
+              <!-- ── STOPPED STATE ── -->
+              <div id="ma-stopped" class="hidden">
+                <div class="alert alert-warn">
+                  <span class="alert-icon">⏹</span>
+                  <span>Export stopped by user.</span>
+                </div>
+                <button class="btn btn-secondary mt-16" id="btn-ma-export-stopped-again">Adjust criteria</button>
+              </div><!-- /ma-stopped -->
+
+              <!-- ── DONE STATE ── -->
+              <div id="ma-done" class="hidden">
+                <div class="alert alert-ok">
+                  <span class="alert-icon">✅</span>
+                  <span id="ma-done-msg"></span>
+                </div>
+                <div id="ma-zero-activity-alert" class="alert alert-warn hidden" style="margin-top:12px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="ma-zero-activity-msg"></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:16px;">
+                  <button class="btn btn-primary" id="btn-ma-download">⬇ Download CSV</button>
+                  <button class="btn btn-secondary" id="btn-ma-export-again">Adjust criteria</button>
+                </div>
+              </div><!-- /ma-done -->
+
+              <!-- ── ERROR STATE ── -->
+              <div id="ma-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="ma-error-msg"></span>
+                </div>
+                <button class="btn btn-secondary mt-12" id="btn-ma-export-retry">Adjust criteria</button>
+              </div><!-- /ma-error -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-member-activity-export -->
+
+        <!-- ── ENTITIES RELATIONSHIPS (Phase 3) ── -->

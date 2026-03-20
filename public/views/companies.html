@@ -1,0 +1,432 @@
+        <!-- ── EXPORT VIEW ── -->
+        <div id="view-export">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Export companies</h2>
+              <div class="panel-subtitle">Download all Productboard companies as a CSV file, including custom fields.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div id="export-idle">
+                <p class="text-sm text-muted">
+                  This will fetch all companies from your Productboard workspace and generate a CSV you can download and edit.
+                </p>
+                <button class="btn btn-primary mt-16" id="btn-export">Export companies</button>
+              </div>
+
+              <div id="export-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="export-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="export-progress-msg">Starting…</span>
+                  <span id="export-progress-pct">0%</span>
+                </div>
+                <button class="btn btn-ghost mt-8" id="btn-stop-export">⏹ Stop</button>
+              </div>
+
+              <div id="export-stopped" class="hidden">
+                <div class="alert alert-warn">
+                  <span class="alert-icon">⏹</span>
+                  <span>Export stopped by user.</span>
+                </div>
+                <button class="btn btn-secondary mt-16" id="btn-export-stopped-again">Export again</button>
+              </div>
+
+              <div id="export-done" class="hidden">
+                <div class="alert alert-ok">
+                  <span class="alert-icon">✅</span>
+                  <span id="export-done-msg"></span>
+                </div>
+                <button class="btn btn-primary mt-16" id="btn-download-csv">⬇ Download CSV</button>
+                <button class="btn btn-secondary mt-8" id="btn-export-again">Export again</button>
+              </div>
+
+              <div id="export-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="export-error-msg"></span>
+                </div>
+                <button class="btn btn-secondary mt-12" id="btn-export-retry">Try again</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-export -->
+
+        <!-- ── IMPORT VIEW ── -->
+        <div id="view-import" class="hidden">
+
+          <!-- Step 1: Upload CSV -->
+          <div class="panel" id="import-step-upload">
+            <div class="panel-header">
+              <h2 class="panel-title">Import companies</h2>
+              <div class="panel-subtitle">Upload a CSV, map columns to Productboard fields, then run the import.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="dropzone" id="dropzone">
+                <span class="dropzone-icon">📄</span>
+                <div class="dropzone-label">Drop a CSV file here</div>
+                <div class="dropzone-hint">or click to browse</div>
+              </div>
+              <input type="file" id="file-input" accept=".csv,text/csv" class="hidden" />
+            </div>
+          </div>
+
+          <!-- Step 2: Map fields -->
+          <div class="panel mt-16 hidden" id="import-step-map">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="panel-title">Map columns</h3>
+                  <div class="panel-subtitle" id="map-subtitle"></div>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-reupload">↩ Re-upload</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- Field mapping -->
+              <div class="text-sm text-muted mb-16">Map your CSV columns to Productboard company fields.</div>
+              <div id="custom-fields-loading" class="text-sm text-muted mb-8 hidden">Loading custom fields…</div>
+              <table class="mapping-table" id="co-mapping-table">
+                <thead>
+                  <tr>
+                    <th>PB Field</th>
+                    <th>Type</th>
+                    <th>CSV Column</th>
+                  </tr>
+                </thead>
+                <tbody id="co-mapping-rows"></tbody>
+              </table>
+
+<div id="unmapped-warning" class="alert alert-warn hidden mt-12">
+                <span class="alert-icon">⚠️</span>
+                <span id="unmapped-warning-msg"></span>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Step 3: Options + actions -->
+          <div class="panel mt-16 hidden" id="import-step-options">
+            <div class="panel-header">
+              <h3 class="panel-title">Options</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="ent-options-grid">
+                <!-- Multi-select update mode -->
+                <div>
+                  <label class="label-bold">Multi-select update mode</label>
+                  <div class="text-sm text-muted mb-8">Applies to tags, teams, and multi-select custom fields on PATCH rows only.</div>
+                  <div class="flex flex-col gap-4">
+                    <label class="radio-label"><input type="radio" name="imp-ms-mode" value="set" checked> Set — replace all items</label>
+                    <label class="radio-label"><input type="radio" name="imp-ms-mode" value="addItems"> Add items</label>
+                    <label class="radio-label"><input type="radio" name="imp-ms-mode" value="removeItems"> Remove items</label>
+                  </div>
+                </div>
+                <!-- Misc toggles -->
+                <div class="flex flex-col gap-12">
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="imp-bypass-empty" />
+                    Bypass empty cells <span class="info-icon" data-tip="Skip the field on update if the CSV cell is blank">i</span>
+                  </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="imp-bypass-html" />
+                    Bypass HTML formatter <span class="info-icon" data-tip="Send description HTML as-is, without sanitization">i</span>
+                  </label>
+                </div>
+              </div>
+              <hr class="panel-divider mt-16" />
+              <div class="flex gap-8 mt-16 items-center flex-wrap">
+                <button class="btn btn-secondary" id="btn-validate">✔ Validate</button>
+                <button class="btn btn-primary" id="btn-run-import">📥 Import</button>
+                <button class="btn btn-ghost hidden" id="btn-stop-import">⏹ Stop</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 4: Validation results -->
+          <div class="panel mt-16 hidden" id="import-step-validate">
+            <div class="panel-header">
+              <h3 class="panel-title">Validation results</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div id="validate-ok" class="hidden">
+                <div class="alert alert-ok">
+                  <span class="alert-icon">✅</span>
+                  <span id="validate-ok-msg"></span>
+                </div>
+              </div>
+              <div id="validate-errors" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="validate-error-summary"></span>
+                </div>
+                <div class="result-scroll mt-12">
+                  <table class="results-table">
+                    <thead><tr><th>Row</th><th>Column</th><th>Error</th></tr></thead>
+                    <tbody id="validate-error-rows"></tbody>
+                  </table>
+                </div>
+                <button class="btn btn-secondary mt-12" id="btn-back-to-map2">← Fix &amp; re-map</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 6: Log — progress + summary + live log -->
+          <div class="panel mt-16 hidden" id="import-step-run">
+            <div class="panel-header">
+              <h3 class="panel-title" id="import-run-title">Importing…</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- Progress bar (always at top of log panel) -->
+              <div id="import-progress-track" class="progress-wrap">
+                <div class="progress-bar" id="import-progress-bar" style="width:0%"></div>
+              </div>
+              <div class="progress-label mt-4">
+                <span id="import-progress-msg">Starting…</span>
+                <span id="import-progress-pct">0%</span>
+              </div>
+
+              <!-- Summary alert (rendered by renderImportComplete on complete/stop/error) -->
+              <div id="import-summary-box" class="hidden mt-16"></div>
+
+              <!-- Live log — never hidden after import finishes so user can review errors -->
+              <div id="import-live-log" class="live-log hidden mt-16">
+                <div class="live-log-header">
+                  <span>Live log</span>
+                  <span id="live-log-counts" class="live-log-counts"></span>
+                  <button id="btn-import-download-log" class="btn btn-ghost btn-sm hidden" style="margin-left:auto">↓ Download log</button>
+                </div>
+                <div id="live-log-entries" class="live-log-scroll"></div>
+              </div>
+
+            </div>
+          </div>
+
+        </div><!-- /view-import -->
+
+        <!-- ════════════════════════════════════════
+             COMPANIES DELETE VIEWS
+        ════════════════════════════════════════ -->
+
+        <!-- ── COMPANIES DELETE FROM CSV ── -->
+        <div id="view-companies-delete-csv" class="hidden">
+
+          <!-- Step 1: Upload -->
+          <div class="panel" id="companies-delete-csv-step-upload">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete companies from CSV</h2>
+              <div class="panel-subtitle">Upload a CSV containing company UUIDs and permanently delete those companies.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="alert alert-warn mb-16">
+                <span class="alert-icon">⚠️</span>
+                <span>This action is <strong>irreversible</strong>. Deleted companies cannot be recovered. You can use the export CSV directly — just select the <em>id</em> column.</span>
+              </div>
+              <div class="dropzone" id="companies-delete-dropzone">
+                <span class="dropzone-icon">📄</span>
+                <div class="dropzone-label">Drop a CSV file here</div>
+                <div class="dropzone-hint">or click to browse</div>
+              </div>
+              <input type="file" id="companies-delete-file-input" accept=".csv,text/csv" class="hidden" />
+            </div>
+          </div>
+
+          <!-- Step 2: Column picker + confirm -->
+          <div class="panel mt-16 hidden" id="companies-delete-csv-step-confirm">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="panel-title">Confirm deletion</h3>
+                  <div class="panel-subtitle" id="companies-delete-csv-subtitle"></div>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-companies-delete-reupload">↩ Re-upload</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="mb-16">
+                <label for="companies-delete-uuid-column">Which column contains the company UUIDs?</label>
+                <select id="companies-delete-uuid-column" class="mt-8" style="width:100%;max-width:320px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:14px"></select>
+              </div>
+              <div id="companies-delete-csv-preview" class="mb-16 text-sm text-muted font-mono hidden"></div>
+              <button class="btn btn-danger" id="btn-companies-delete-csv-run">🗑 Delete companies</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Progress + log -->
+          <div class="panel mt-16 hidden" id="companies-delete-csv-step-run">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <h3 class="panel-title" id="companies-delete-csv-run-title">Deleting companies…</h3>
+                <button class="btn btn-danger btn-sm hidden" id="btn-stop-companies-delete-csv">⏹ Stop</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div id="companies-delete-csv-running">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="companies-delete-csv-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="companies-delete-csv-progress-msg">Starting…</span>
+                  <span id="companies-delete-csv-progress-pct">0%</span>
+                </div>
+                <div id="companies-delete-csv-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Live log</span>
+                    <button id="btn-companies-delete-download-log" class="btn btn-ghost btn-sm hidden" style="margin-left:auto">↓ Download log</button>
+                  </div>
+                  <div id="companies-delete-csv-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+              <div id="companies-delete-csv-results" class="hidden">
+                <div id="companies-delete-csv-summary-alert"></div>
+                <button class="btn btn-secondary mt-16" id="btn-companies-delete-csv-again">← Delete more</button>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /view-companies-delete-csv -->
+
+        <!-- ── COMPANIES DELETE ALL ── -->
+        <div id="view-companies-delete-all" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete all companies</h2>
+              <div class="panel-subtitle">Permanently delete every company in your Productboard workspace.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div id="companies-delete-all-idle">
+                <div class="alert alert-danger mb-16">
+                  <span class="alert-icon">⛔</span>
+                  <span><strong>This will permanently delete every company in your workspace.</strong> This action cannot be undone and there is no way to recover deleted companies. Use with extreme caution — ideally export first.</span>
+                </div>
+                <label for="companies-delete-all-confirm-input" class="text-sm text-muted mb-16" style="display:block">Type <strong>DELETE</strong> in the box below to enable the button.</label>
+                <input type="text" id="companies-delete-all-confirm-input" placeholder="Type DELETE to confirm" autocomplete="off"
+                  style="display:block;width:100%;max-width:320px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-size:14px;margin-bottom:12px" />
+                <button class="btn btn-danger" id="btn-companies-delete-all-run" disabled>⛔ Delete all companies</button>
+              </div>
+
+              <div id="companies-delete-all-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="companies-delete-all-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="companies-delete-all-progress-msg">Starting…</span>
+                  <span id="companies-delete-all-progress-pct">0%</span>
+                </div>
+                <div id="companies-delete-all-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header"><span>Live log</span></div>
+                  <div id="companies-delete-all-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+
+              <div id="companies-delete-all-results" class="hidden">
+                <div id="companies-delete-all-summary-alert"></div>
+                <button class="btn btn-secondary mt-16" id="btn-companies-delete-all-again">← Start over</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-companies-delete-all -->
+
+        <!-- ── COMPANIES SOURCE MIGRATION ── -->
+        <div id="view-companies-source-migration" class="hidden">
+
+          <!-- ── V1 → V2 panel ── -->
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Source migration</h2>
+              <div class="panel-subtitle">Sync source identity fields between the legacy v1 API and v2 metadata.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <h3 class="text-sm font-semibold mb-8" style="margin-top:0">V1 → V2 upcopy</h3>
+              <p class="text-sm text-muted mb-16">Copies <code>sourceOrigin</code> and <code>sourceRecordId</code> from the legacy v1 API into v2 metadata (<code>externalSystemName</code> / <code>externalRecordId</code>) for every company that has v1 source data. Overwrites any existing v2 source metadata.</p>
+
+              <!-- idle -->
+              <div id="csm-v1v2-idle">
+                <button class="btn btn-primary" id="btn-csm-v1v2-run">🔄 Run V1 → V2 migration</button>
+              </div>
+
+              <!-- running -->
+              <div id="csm-v1v2-running" class="hidden">
+                <div class="flex items-center justify-between mb-8">
+                  <span class="text-sm text-muted" id="csm-v1v2-progress-msg">Starting…</span>
+                  <div class="flex items-center gap-8">
+                    <span class="text-sm text-muted" id="csm-v1v2-progress-pct">0%</span>
+                    <button class="btn btn-ghost btn-sm" id="btn-stop-csm-v1v2">⏹ Stop</button>
+                  </div>
+                </div>
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="csm-v1v2-progress-bar" style="width:0%"></div>
+                </div>
+                <div id="csm-v1v2-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header"><span>Live log</span></div>
+                  <div id="csm-v1v2-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+
+              <!-- results -->
+              <div id="csm-v1v2-results" class="hidden">
+                <div id="csm-v1v2-summary"></div>
+                <button class="btn btn-ghost btn-sm mt-16" id="btn-csm-v1v2-again">← Run again</button>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- ── V2 → V1 panel ── -->
+          <div class="panel mt-16">
+            <div class="panel-body">
+
+              <h3 class="text-sm font-semibold mb-8" style="margin-top:0">V2 → V1 downcopy</h3>
+              <p class="text-sm text-muted mb-16">Copies v2 <code>metadata.source</code> fields back into the legacy v1 <code>sourceOrigin</code> / <code>sourceRecordId</code> fields for every company that has v2 source data. Note: the v1 API may not support updating these fields for all companies — errors will be logged per company.</p>
+
+              <!-- idle -->
+              <div id="csm-v2v1-idle">
+                <button class="btn btn-secondary" id="btn-csm-v2v1-run">🔄 Run V2 → V1 downcopy</button>
+              </div>
+
+              <!-- running -->
+              <div id="csm-v2v1-running" class="hidden">
+                <div class="flex items-center justify-between mb-8">
+                  <span class="text-sm text-muted" id="csm-v2v1-progress-msg">Starting…</span>
+                  <div class="flex items-center gap-8">
+                    <span class="text-sm text-muted" id="csm-v2v1-progress-pct">0%</span>
+                    <button class="btn btn-ghost btn-sm" id="btn-stop-csm-v2v1">⏹ Stop</button>
+                  </div>
+                </div>
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="csm-v2v1-progress-bar" style="width:0%"></div>
+                </div>
+                <div id="csm-v2v1-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header"><span>Live log</span></div>
+                  <div id="csm-v2v1-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+
+              <!-- results -->
+              <div id="csm-v2v1-results" class="hidden">
+                <div id="csm-v2v1-summary"></div>
+                <button class="btn btn-ghost btn-sm mt-16" id="btn-csm-v2v1-again">← Run again</button>
+              </div>
+
+            </div>
+          </div>
+
+        </div><!-- /view-companies-source-migration -->
