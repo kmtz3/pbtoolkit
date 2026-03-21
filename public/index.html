@@ -162,11 +162,11 @@
           <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
         </div>
 
-        <div class="tool-card tool-card-soon">
+        <div class="tool-card" data-tool="teams-crud">
           <span class="tool-card-icon">🏷️</span>
-          <div class="tool-card-name">Teams</div>
+          <div class="tool-card-name">Teams Management</div>
           <div class="tool-card-desc">Create, update, and delete teams in bulk via CSV — manage names, handles, and descriptions.</div>
-          <div class="tool-card-footer"><span class="badge badge-muted">Soon</span></div>
+          <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
         </div>
 
       </div>
@@ -257,6 +257,14 @@
           </button>
         </div>
 
+        <!-- Teams CRUD nav items -->
+        <div id="sidebar-teams-crud" class="hidden">
+          <button class="nav-item active" data-view="teams-crud-export"     id="nav-teams-crud-export">Export</button>
+          <button class="nav-item"        data-view="teams-crud-import"     id="nav-teams-crud-import">Import</button>
+          <button class="nav-item"        data-view="teams-crud-delete-csv" id="nav-teams-crud-delete-csv">Delete by CSV</button>
+          <button class="nav-item"        data-view="teams-crud-delete-all" id="nav-teams-crud-delete-all">Delete all</button>
+        </div>
+
       </nav>
 
       <!-- Right panel area -->
@@ -275,6 +283,7 @@
 <script src="entities-app.js"></script>
 <script src="member-activity-app.js"></script>
 <script src="team-membership-app.js"></script>
+<script src="teams-crud-app.js"></script>
 
 <!-- ── BOTTOM-LEFT CLUSTER ── -->
 <div class="bottom-left">

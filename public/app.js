@@ -126,7 +126,7 @@ document.querySelectorAll('.tool-card:not(.tool-card-soon)').forEach((card) => {
 });
 
 async function loadTool(toolName) {
-  const names = { companies: 'Companies', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', 'team-membership': 'Team Membership' };
+  const names = { companies: 'Companies', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', 'team-membership': 'Team Membership', 'teams-crud': 'Teams Management' };
   setText('topbar-tool-name', names[toolName] || toolName);
   showScreen('tool');
 
@@ -136,6 +136,7 @@ async function loadTool(toolName) {
   $('sidebar-entities').classList.toggle('hidden', toolName !== 'entities');
   $('sidebar-member-activity').classList.toggle('hidden', toolName !== 'member-activity');
   $('sidebar-team-membership').classList.toggle('hidden', toolName !== 'team-membership');
+  $('sidebar-teams-crud').classList.toggle('hidden', toolName !== 'teams-crud');
 
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
 
@@ -174,6 +175,12 @@ async function loadTool(toolName) {
     $('nav-team-membership-export').classList.add('active');
     showView('team-membership-export');
     if (typeof window.initTeamMembershipModule === 'function') window.initTeamMembershipModule();
+  }
+
+  if (toolName === 'teams-crud') {
+    $('nav-teams-crud-export').classList.add('active');
+    showView('teams-crud-export');
+    if (typeof window.initTeamsCrudModule === 'function') window.initTeamsCrudModule();
   }
 
   updateConnectionStatus();
@@ -294,6 +301,7 @@ function showView(view) {
     'entities-templates', 'entities-export', 'entities-import', 'entities-delete',
     'member-activity-export',
     'team-membership-export', 'team-membership-import',
+    'teams-crud-export', 'teams-crud-import', 'teams-crud-delete-csv', 'teams-crud-delete-all',
   ].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', v !== view);

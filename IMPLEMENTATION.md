@@ -21,6 +21,8 @@ pbtoolkit/
 │   ├── entities.validator.test.js
 │   ├── memberActivity.metadata.test.js
 │   ├── notes-import.test.js
+│   ├── team-membership.export.bench.js
+│   ├── teamsCrud.test.js
 │   └── utils.test.js
 ├── src/
 │   ├── server.js              # Express entry point — mounts all routers
@@ -37,7 +39,8 @@ pbtoolkit/
 │       ├── notes.js           # POST /api/notes/* (export, import, delete, migrate)
 │       ├── entities.js        # GET/POST /api/entities/* (templates, configs, preview, normalize-keys)
 │       ├── memberActivity.js  # GET /api/member-activity/metadata + POST /api/member-activity/export (SSE)
-│       └── teamMembership.js  # GET /api/team-membership/metadata + GET /api/team-membership/export + POST /api/team-membership/preview + POST /api/team-membership/import (SSE)
+│       ├── teamMembership.js  # GET /api/team-membership/metadata + GET /api/team-membership/export + POST /api/team-membership/preview + POST /api/team-membership/import (SSE)
+│       └── teamsCrud.js       # GET /api/teams-crud/export + POST /api/teams-crud/preview + POST /api/teams-crud/import (SSE) + POST /api/teams-crud/delete/preview + POST /api/teams-crud/delete/by-csv (SSE) + POST /api/teams-crud/delete/all (SSE)
 ├── src/services/
 │   └── entities/
 │       ├── meta.js            # ENTITY_ORDER, TYPE_CODE, labels, syntheticColumns(), relationshipColumns()
@@ -51,13 +54,21 @@ pbtoolkit/
 │       ├── relationWriter.js  # writeRelations() — parent PUT + connected POST, 409 swallow — Phase 4
 │       └── importCoordinator.js # runImport() — orchestrates parse→seed→upsert→relations — Phase 4
 ├── public/
-│   ├── index.html             # All HTML views, inline
-│   ├── app.js                 # Shared utilities: auth, DOM helpers, SSE, makeLogAppender
+│   ├── index.html             # Shell only — module views loaded as partials
+│   ├── app.js                 # Shared utilities: auth, DOM helpers, SSE, makeLogAppender, loadPartial()
 │   ├── companies-app.js       # Companies module frontend JS
 │   ├── notes-app.js           # Notes module frontend JS
 │   ├── entities-app.js        # Entities module frontend JS (separate script tag)
 │   ├── member-activity-app.js # Member Activity module frontend JS (separate script tag)
 │   ├── team-membership-app.js # Team Membership module frontend JS (separate script tag)
+│   ├── teams-crud-app.js      # Teams CRUD module frontend JS (separate script tag)
+│   ├── views/                 # HTML partials, one per module (lazy-loaded into #view-area)
+│   │   ├── companies.html
+│   │   ├── notes.html
+│   │   ├── entities.html
+│   │   ├── member-activity.html
+│   │   ├── team-membership.html
+│   │   └── teams-crud.html
 │   ├── csv-utils.js           # Frontend CSV utilities (papaparse wrappers for browser)
 │   └── style.css              # CSS custom properties design system
 ├── Dockerfile
@@ -947,3 +958,67 @@ The frontend renders `member.email` (not UUID) in the per-team collapsible block
 Team Membership does **not** use the four-panel upload/map/options/log layout. It uses a simpler state machine: `idle → uploading → diff preview → running → (results | stopped | error)`. The live log panel is inside `#tm-import-running` (hidden when running ends), so the log is copied to `#tm-results-log` in the results panel via `moveLogToResults()`. The download button appears in:
 - `#tm-results-log` header — after complete/abort
 - `#tm-import-error` panel — after error (if log has entries)
+
+---
+
+## Teams CRUD module — API reference
+
+Routes in `src/routes/teamsCrud.js`. Frontend JS in `public/teams-crud-app.js`. UI has three tabs: **Export**, **Import**, and **Delete**.
+
+### Endpoints
+
+| Method | Path | Type | Description |
+|---|---|---|---|
+| `GET` | `/api/teams-crud/export` | CSV download | Direct `text/csv` response. Exports all teams sorted by name. Columns: `id, name, handle, description, createdAt, avatarUrl`. |
+| `POST` | `/api/teams-crud/preview` | JSON | Body: `{ csvText, mapping }`. Returns `{ hardErrors, warnings, diff: { toCreate, toUpdate, unchanged } }`. Compares CSV against live teams — no writes. |
+| `POST` | `/api/teams-crud/import` | SSE | Body: `{ csvText, mapping }`. Upserts teams (create + patch). Events: `progress`, `log`, `complete`, `error`, `done`. |
+| `POST` | `/api/teams-crud/delete/preview` | JSON | Body: `{ csvText, idCol, handleCol, fallbackToHandle }`. Returns `{ toDelete, notFound }` — resolves UUIDs/handles against live teams, deduplicates. No writes. |
+| `POST` | `/api/teams-crud/delete/by-csv` | SSE | Body: `{ csvText, idCol, handleCol, fallbackToHandle }`. Deletes teams identified by UUID and/or handle. 404 = skipped. |
+| `POST` | `/api/teams-crud/delete/all` | SSE | No body. Deletes every team in the workspace. |
+
+### Import mapping shape
+
+```js
+{
+  idCol:     string | null,   // CSV column header for PB team UUID
+  nameCol:   string | null,   // CSV column header for team name
+  handleCol: string | null,   // CSV column header for team handle
+  descCol:   string | null,   // CSV column header for description
+}
+```
+
+At least one of `idCol`, `nameCol`, or `handleCol` must be mapped. `idCol` is required for PATCH-by-UUID; `handleCol` is required for PATCH-by-handle or CREATE (new teams need a handle + name).
+
+### Upsert logic (import)
+
+- Row has valid UUID (`idCol` resolves to a UUID found in workspace) → **PATCH** that team.
+- Row has handle (no valid UUID, or UUID not in workspace) → match by handle → **PATCH** if found, else **CREATE** (requires `name`).
+- Row has neither → hard error.
+
+### Handle sanitization
+
+Handles are lowercase alphanumeric only (`[a-z0-9]+`). Non-conforming characters are stripped automatically; a warning is emitted per sanitized row. If sanitization produces an empty string, it is a hard error.
+
+### Delete-by-CSV logic
+
+Resolution order per row:
+1. `idCol` present and valid UUID → resolve by UUID; if not found and `fallbackToHandle=true`, retry by handle.
+2. `idCol` absent or not a valid UUID, `handleCol` present → resolve by handle.
+3. Neither → `notFound` (preview) or skip with warning (SSE run).
+
+Rows that resolve to the same team ID are deduplicated in the preview.
+
+### PB API calls
+
+| Operation | Endpoint |
+|---|---|
+| List teams | `GET /v2/teams` (via `listTeams` helper in `pbClient.js`) |
+| Create team | `POST /v2/teams` — body: `{ data: { type: 'team', fields: { name, handle, description } } }` |
+| Update team | `PATCH /v2/teams/{id}` — body: `{ data: { fields: { ...changes } } }` |
+| Delete team | `DELETE /v2/teams/{id}` |
+
+409 on create = handle already exists (skip with warning, not an error). 404 on delete = team not found (skip, counted as `skipped`).
+
+### SSE log detail shape
+
+Import and delete SSE endpoints pass `{ uuid, row }` in the `sse.log` detail for the downloaded CSV log — the log CSV includes `uuid` and `row_num` columns for traceability.

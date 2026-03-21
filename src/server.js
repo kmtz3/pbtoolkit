@@ -12,6 +12,7 @@ const notesRouter = require('./routes/notes');
 const entitiesRouter = require('./routes/entities');
 const memberActivityRouter = require('./routes/memberActivity');
 const teamMembershipRouter = require('./routes/teamMembership');
+const teamsCrudRouter      = require('./routes/teamsCrud');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -63,9 +64,11 @@ const speedLimiter = slowDown({
   delayMs: (hits) => hits * 200,
 });
 
-app.use(burstLimiter);
-app.use(sustainedLimiter);
-app.use(speedLimiter);
+if (process.env.NODE_ENV !== 'test') {
+  app.use(burstLimiter);
+  app.use(sustainedLimiter);
+  app.use(speedLimiter);
+}
 
 app.use('/api/validate', validateRouter);
 app.use('/api', companiesRouter);
@@ -73,6 +76,7 @@ app.use('/api/notes', notesRouter);
 app.use('/api/entities', entitiesRouter);
 app.use('/api/member-activity', memberActivityRouter);
 app.use('/api/team-membership', teamMembershipRouter);
+app.use('/api/teams-crud', teamsCrudRouter);
 
 // Fallback to index.html for client-side routing
 app.get('*', (_req, res) => {

@@ -1,0 +1,427 @@
+        <!-- ══════════════════════════════════════════
+             TEAMS CRUD — EXPORT VIEW
+        ═══════════════════════════════════════════ -->
+        <div id="view-teams-crud-export" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Export teams</h2>
+              <div class="panel-subtitle">Download all Productboard teams as a CSV file.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ── IDLE STATE ── -->
+              <div id="tc-export-idle">
+                <p class="text-sm text-muted">
+                  Exports all teams in your workspace — id, name, handle, description, createdAt, and avatarUrl.
+                </p>
+                <button class="btn btn-primary mt-16" id="btn-tc-export">Export teams</button>
+              </div>
+
+              <!-- ── LOADING STATE ── -->
+              <div id="tc-export-loading" class="hidden">
+                <p class="text-sm text-muted">Exporting teams…</p>
+              </div>
+
+              <!-- ── DONE STATE ── -->
+              <div id="tc-export-done" class="hidden">
+                <div class="alert alert-ok">
+                  <span class="alert-icon">✅</span>
+                  <span>Exported <strong><span id="tc-export-count"></span> teams</strong> — <span id="tc-export-filename"></span></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:16px;">
+                  <button class="btn btn-primary" id="btn-tc-export-download">⬇ Download again</button>
+                  <button class="btn btn-secondary" id="btn-tc-export-again">New export</button>
+                </div>
+              </div>
+
+              <!-- ── ERROR STATE ── -->
+              <div id="tc-export-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="tc-export-error-msg"></span>
+                </div>
+                <button class="btn btn-secondary mt-12" id="btn-tc-export-retry">Retry</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-teams-crud-export -->
+
+        <!-- ══════════════════════════════════════════
+             TEAMS CRUD — IMPORT VIEW
+        ═══════════════════════════════════════════ -->
+        <div id="view-teams-crud-import" class="hidden">
+
+          <!-- Step 1: Upload CSV -->
+          <div class="panel" id="tc-import-step-upload">
+            <div class="panel-header">
+              <h2 class="panel-title">Import teams</h2>
+              <div class="panel-subtitle">Upload a CSV to create new teams and update existing ones. A diff preview is shown before any changes are applied.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="dropzone" id="tc-import-dropzone">
+                <span class="dropzone-icon">📄</span>
+                <div class="dropzone-label">Drop a CSV file here</div>
+                <div class="dropzone-hint">or click to browse</div>
+              </div>
+              <input type="file" id="tc-import-file-input" accept=".csv,text/csv" class="hidden" />
+            </div>
+          </div>
+
+          <!-- Step 2: Map columns -->
+          <div class="panel mt-16 hidden" id="tc-import-step-map">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="panel-title">Map columns</h3>
+                  <div class="panel-subtitle" id="tc-map-subtitle"></div>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-tc-import-reupload">↩ Re-upload</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="text-sm text-muted mb-16">Map your CSV columns to Productboard team fields.</div>
+              <table class="mapping-table" id="tc-mapping-table">
+                <thead>
+                  <tr>
+                    <th>PB Field</th>
+                    <th>Type</th>
+                    <th>CSV Column</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>id (pb_id)</strong></td>
+                    <td><span class="badge badge-muted">uuid</span></td>
+                    <td><select id="tc-map-id" class="map-select"></select></td>
+                    <td class="text-sm text-muted">Present + found → update · blank → try handle → update or create</td>
+                  </tr>
+                  <tr>
+                    <td><strong>name</strong></td>
+                    <td><span class="badge badge-muted">text</span></td>
+                    <td><select id="tc-map-name" class="map-select"></select></td>
+                    <td class="text-sm text-muted">Required for new teams</td>
+                  </tr>
+                  <tr>
+                    <td><strong>handle</strong></td>
+                    <td><span class="badge badge-muted">text</span></td>
+                    <td><select id="tc-map-handle" class="map-select"></select></td>
+                    <td class="text-sm text-muted">Lowercase a–z 0–9 only — auto-sanitized if needed</td>
+                  </tr>
+                  <tr>
+                    <td><strong>description</strong></td>
+                    <td><span class="badge badge-muted">text</span></td>
+                    <td><select id="tc-map-desc" class="map-select"></select></td>
+                    <td class="text-sm text-muted">Optional</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div id="tc-map-warning" class="alert alert-warn hidden mt-12">
+                <span class="alert-icon">⚠️</span>
+                <span id="tc-map-warning-msg"></span>
+              </div>
+
+              <button class="btn btn-primary mt-16" id="btn-tc-import-preview">Preview changes</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Diff preview -->
+          <div class="panel mt-16 hidden" id="tc-import-step-preview">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <h3 class="panel-title">Preview changes</h3>
+                <button class="btn btn-ghost btn-sm" id="btn-tc-preview-back">← Back</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- Warnings (handle sanitizations etc.) -->
+              <div id="tc-preview-warnings" class="hidden" style="margin-bottom:12px;"></div>
+
+              <!-- Hard errors -->
+              <div id="tc-preview-errors" class="alert alert-danger hidden" style="margin-bottom:12px;">
+                <span class="alert-icon">⚠️</span>
+                <div id="tc-preview-error-list"></div>
+              </div>
+
+              <!-- Diff sections -->
+              <div id="tc-preview-diff" class="hidden">
+
+                <details open style="margin-bottom:12px;">
+                  <summary style="cursor:pointer;font-weight:600;padding:8px 0;">
+                    Create (<span id="tc-preview-create-count">0</span> new teams)
+                  </summary>
+                  <div id="tc-preview-create-body" style="margin-top:8px;overflow-x:auto;">
+                    <table class="results-table">
+                      <thead><tr><th>Name</th><th>Handle</th><th>Description</th></tr></thead>
+                      <tbody id="tc-preview-create-rows"></tbody>
+                    </table>
+                  </div>
+                </details>
+
+                <details open style="margin-bottom:12px;">
+                  <summary style="cursor:pointer;font-weight:600;padding:8px 0;">
+                    Update (<span id="tc-preview-update-count">0</span> existing teams)
+                  </summary>
+                  <div id="tc-preview-update-body" style="margin-top:8px;overflow-x:auto;">
+                    <table class="results-table">
+                      <thead><tr><th>Current name</th><th>Matched by</th><th>Changes</th></tr></thead>
+                      <tbody id="tc-preview-update-rows"></tbody>
+                    </table>
+                  </div>
+                </details>
+
+                <details style="margin-bottom:12px;">
+                  <summary style="cursor:pointer;font-weight:600;padding:8px 0;">
+                    Unchanged (<span id="tc-preview-unchanged-count">0</span> teams)
+                  </summary>
+                  <div style="margin-top:8px;overflow-x:auto;">
+                    <table class="results-table">
+                      <thead><tr><th>Name</th><th>Handle</th></tr></thead>
+                      <tbody id="tc-preview-unchanged-rows"></tbody>
+                    </table>
+                  </div>
+                </details>
+
+                <button class="btn btn-primary mt-8" id="btn-tc-import-execute"></button>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Step 4: SSE run -->
+          <div class="panel mt-16 hidden" id="tc-import-step-run">
+            <div class="panel-header">
+              <h3 class="panel-title" id="tc-import-run-title">Importing…</h3>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div class="progress-wrap">
+                <div class="progress-bar" id="tc-import-progress-bar" style="width:0%"></div>
+              </div>
+              <div class="progress-label mt-4">
+                <span id="tc-import-progress-msg">Starting…</span>
+              </div>
+
+              <div id="tc-import-live-log" class="live-log hidden mt-16">
+                <div class="live-log-header">
+                  <span>Live log</span>
+                  <span id="tc-import-log-counts" class="live-log-counts"></span>
+                  <button id="btn-tc-import-download-log" class="btn btn-ghost btn-sm hidden" style="margin-left:auto">↓ Download log</button>
+                </div>
+                <div id="tc-import-log-entries" class="live-log-scroll"></div>
+              </div>
+
+              <div id="tc-import-summary" class="hidden mt-16"></div>
+
+              <div style="margin-top:12px;display:flex;gap:8px;">
+                <button class="btn btn-ghost hidden" id="btn-tc-import-stop">⏹ Stop</button>
+                <button class="btn btn-secondary hidden" id="btn-tc-import-again">← New import</button>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Error state -->
+          <div class="panel mt-16 hidden" id="tc-import-error">
+            <div class="panel-body">
+              <div class="alert alert-danger">
+                <span class="alert-icon">⚠️</span>
+                <span id="tc-import-error-msg"></span>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:12px;">
+                <button class="btn btn-secondary" id="btn-tc-import-error-retry">Start over</button>
+                <button class="btn btn-ghost btn-sm hidden" id="btn-tc-import-error-download-log">↓ Download log</button>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /view-teams-crud-import -->
+
+        <!-- ══════════════════════════════════════════
+             TEAMS CRUD — DELETE BY CSV VIEW
+        ═══════════════════════════════════════════ -->
+        <div id="view-teams-crud-delete-csv" class="hidden">
+
+          <!-- Step 1: Upload -->
+          <div class="panel" id="tc-delete-csv-step-upload">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete teams from CSV</h2>
+              <div class="panel-subtitle">Upload a CSV containing team UUIDs or handles and permanently delete those teams.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="alert alert-warn mb-16">
+                <span class="alert-icon">⚠️</span>
+                <span>This action is <strong>irreversible</strong>. Deleted teams cannot be recovered. You can use the export CSV directly — just select the <em>id</em> column.</span>
+              </div>
+              <div class="dropzone" id="tc-delete-csv-dropzone">
+                <span class="dropzone-icon">📄</span>
+                <div class="dropzone-label">Drop a CSV file here</div>
+                <div class="dropzone-hint">or click to browse</div>
+              </div>
+              <input type="file" id="tc-delete-csv-file-input" accept=".csv,text/csv" class="hidden" />
+            </div>
+          </div>
+
+          <!-- Step 2: Column mapping + options -->
+          <div class="panel mt-16 hidden" id="tc-delete-csv-step-confirm">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="panel-title">Confirm deletion</h3>
+                  <div class="panel-subtitle" id="tc-delete-csv-subtitle"></div>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-tc-delete-csv-reupload">↩ Re-upload</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div class="mb-16">
+                <label for="tc-delete-csv-id-col">Which column contains team UUIDs?</label>
+                <select id="tc-delete-csv-id-col" class="mt-8" style="width:100%;max-width:320px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:14px"></select>
+              </div>
+
+              <div class="mb-16">
+                <label for="tc-delete-csv-handle-col">Which column contains team handles?</label>
+                <select id="tc-delete-csv-handle-col" class="mt-8" style="width:100%;max-width:320px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:14px"></select>
+              </div>
+
+              <label class="checkbox-label mb-16" style="display:inline-flex;align-items:center;gap:6px;">
+                <input type="checkbox" id="tc-delete-csv-fallback">
+                Try handle if UUID not found (404)
+                <span class="info-icon" data-tip="If a team UUID returns 404, attempt deletion by handle as a fallback.">i</span>
+              </label>
+
+              <div class="mt-16">
+                <button class="btn btn-danger" id="btn-tc-delete-csv-run">Preview deletions →</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 3: Delete preview -->
+          <div class="panel mt-16 hidden" id="tc-delete-csv-step-preview">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <h3 class="panel-title">Preview deletion</h3>
+                <button class="btn btn-ghost btn-sm" id="btn-tc-delete-csv-preview-back">← Back</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <details open style="margin-bottom:12px;">
+                <summary style="cursor:pointer;font-weight:600;padding:8px 0;">
+                  Will be deleted (<span id="tc-delete-csv-preview-count">0</span> teams)
+                </summary>
+                <div style="margin-top:8px;overflow-x:auto;">
+                  <table class="results-table">
+                    <thead><tr><th>Name</th><th>Handle</th><th>UUID</th><th>Matched by</th></tr></thead>
+                    <tbody id="tc-delete-csv-preview-rows"></tbody>
+                  </table>
+                </div>
+              </details>
+
+              <details style="margin-bottom:12px;">
+                <summary style="cursor:pointer;font-weight:600;padding:8px 0;">
+                  Not found / skipped (<span id="tc-delete-csv-preview-notfound-count">0</span> rows)
+                </summary>
+                <div id="tc-delete-csv-preview-notfound-body" style="margin-top:8px;" class="text-sm text-muted"></div>
+              </details>
+
+              <button class="btn btn-danger mt-8" id="btn-tc-delete-csv-preview-run"></button>
+
+            </div>
+          </div>
+
+          <!-- Step 4: Progress + log -->
+          <div class="panel mt-16 hidden" id="tc-delete-csv-step-run">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <h3 class="panel-title" id="tc-delete-csv-run-title">Deleting teams…</h3>
+                <button class="btn btn-danger btn-sm hidden" id="btn-tc-delete-csv-stop">⏹ Stop</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div id="tc-delete-csv-running">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="tc-delete-csv-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="tc-delete-csv-progress-msg">Starting…</span>
+                  <span id="tc-delete-csv-progress-pct">0%</span>
+                </div>
+                <div id="tc-delete-csv-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Live log</span>
+                    <button id="btn-tc-delete-csv-download-log" class="btn btn-ghost btn-sm hidden" style="margin-left:auto">↓ Download log</button>
+                  </div>
+                  <div id="tc-delete-csv-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+              <div id="tc-delete-csv-results" class="hidden">
+                <div id="tc-delete-csv-summary-alert"></div>
+                <button class="btn btn-secondary mt-16" id="btn-tc-delete-csv-again">← Delete more</button>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /view-teams-crud-delete-csv -->
+
+        <!-- ══════════════════════════════════════════
+             TEAMS CRUD — DELETE ALL VIEW
+        ═══════════════════════════════════════════ -->
+        <div id="view-teams-crud-delete-all" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete all teams</h2>
+              <div class="panel-subtitle">Permanently delete every team in your Productboard workspace.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div id="tc-delete-all-idle">
+                <div class="alert alert-danger mb-16">
+                  <span class="alert-icon">⛔</span>
+                  <span><strong>This will permanently delete every team in your workspace.</strong>
+                  This action cannot be undone. Use with extreme caution — export first.</span>
+                </div>
+                <label for="tc-delete-all-confirm-input" class="text-sm text-muted mb-16" style="display:block">
+                  Type <strong>DELETE</strong> in the box below to enable the button.
+                </label>
+                <input type="text" id="tc-delete-all-confirm-input" placeholder="Type DELETE to confirm" autocomplete="off"
+                  style="display:block;width:100%;max-width:320px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-size:14px;margin-bottom:12px" />
+                <button class="btn btn-danger" id="btn-tc-delete-all-run" disabled>⛔ Delete all teams</button>
+              </div>
+
+              <div id="tc-delete-all-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="tc-delete-all-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="tc-delete-all-progress-msg">Starting…</span>
+                  <span id="tc-delete-all-progress-pct">0%</span>
+                </div>
+                <div id="tc-delete-all-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header"><span>Live log</span></div>
+                  <div id="tc-delete-all-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+
+              <div id="tc-delete-all-results" class="hidden">
+                <div id="tc-delete-all-summary-alert"></div>
+                <button class="btn btn-secondary mt-16" id="btn-tc-delete-all-again">← Start over</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-teams-crud-delete-all -->

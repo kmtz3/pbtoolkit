@@ -69,6 +69,7 @@ To disconnect, click **Disconnect** in the top-right corner. This clears the ses
 | Entities | 🔄 Polish | Templates, export, and import for all entity types (QA in progress) |
 | Member Activity | ✅ Live | Export member activity and license utilization data |
 | Team Membership | ✅ Live | Export and bulk-import team assignments via CSV diff preview |
+| Teams Management | ✅ Live | Export, create/update, and delete teams via CSV |
 
 ---
 
@@ -252,6 +253,43 @@ A **Stop** button is available during import. The results panel shows assignment
 ### Known limitations
 
 Every add/remove is a separate API call (no bulk endpoint). Large imports should be planned against the workspace rate limit (1,000 requests/hour) — the diff preview shows an estimate.
+
+---
+
+## Teams Management
+
+Bulk-manages teams themselves (not their membership) via three tabs: **Export** (download all teams as CSV), **Import** (create and update teams via CSV with a diff preview), and **Delete** (remove teams by CSV or delete all).
+
+### Export
+
+Downloads all teams as a CSV sorted by name. Columns: `id, name, handle, description, createdAt, avatarUrl`. Output filename: `pb-teams_YYYY-MM-DD.csv`. An export loading indicator prevents a blank flash while the API call completes.
+
+### Import
+
+A three-step flow: **Upload → Map columns → Preview diff → Run**.
+
+**Column mapping**: map CSV columns to `id` (PB UUID), `name`, `handle`, and `description`. At least one of `id`, `name`, or `handle` must be mapped.
+
+**Diff preview** shows a breakdown of teams to create (green), teams to update with field changes (blue), and unchanged teams (grey) before any writes.
+
+**Upsert logic per row:**
+- Has a valid PB UUID → PATCH that team
+- Has a handle that matches an existing team → PATCH by handle
+- Has a handle with no match + has a name → CREATE (new team)
+
+Handles are auto-sanitized to lowercase alphanumeric (`[a-z0-9]+`). Warnings are shown for sanitized handles.
+
+A **Stop** button is available during import. The summary shows teams created, updated, unchanged, and error count.
+
+### Delete by CSV
+
+Upload a CSV with `id` and/or `handle` columns. A preview step resolves each row to a live team (with deduplication) and shows what will be deleted before any writes. Then confirm to run the SSE delete job.
+
+**Fallback to handle**: if a UUID is not found in the workspace, the delete can optionally fall back to matching by handle — useful when teams were re-created and IDs changed.
+
+### Delete all
+
+Deletes **every** team in the workspace. Requires confirmation. Irreversible.
 
 ---
 
