@@ -180,8 +180,8 @@ function buildFieldsObject(normalizedRow, entityType, config, options, op) {
 
   // --- timeframe ---
   if (HAS_TIMEFRAME.has(entityType)) {
-    const startVal = normalizedRow['timeframe_start (YYYY-MM-DD)'] || '';
-    const endVal   = normalizedRow['timeframe_end (YYYY-MM-DD)']   || '';
+    const startVal = normalizedRow['timeframe_start'] || normalizedRow['timeframe_start (YYYY-MM-DD)'] || '';
+    const endVal   = normalizedRow['timeframe_end']   || normalizedRow['timeframe_end (YYYY-MM-DD)']   || '';
     if (startVal || endVal) {
       const tf = buildTimeframeFromDates(startVal || null, endVal || null, fiscal_year_start_month);
       if (tf) F.timeframe = tf;
@@ -416,11 +416,16 @@ function sanitizeDescription(html) {
   if (!html) return null;
   const s = String(html).trim();
   if (!s) return null;
-  // If no HTML tags, wrap plain text in a paragraph
+  // If no HTML tags, wrap plain text in a paragraph.
+  // Escape HTML special chars first so e.g. "Foo & Bar" becomes valid XML.
   if (!/<\/?[a-z][\s\S]*>/i.test(s)) {
-    return `<p>${s.replace(/\n/g, '<br/>')}</p>`;
+    const escaped = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<p>${escaped.replace(/\n/g, '<br/>')}</p>`;
   }
-  return sanitizeHtml(s, SANITIZE_OPTS) || null;
+  // Escape bare & that aren't already part of an HTML entity reference,
+  // so sanitize-html doesn't pass invalid XML to the PB API.
+  const preEscaped = s.replace(/&(?![a-zA-Z#][a-zA-Z0-9]*;)/g, '&amp;');
+  return sanitizeHtml(preEscaped, SANITIZE_OPTS) || null;
 }
 
 // ---------------------------------------------------------------------------

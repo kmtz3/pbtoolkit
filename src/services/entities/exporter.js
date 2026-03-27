@@ -72,7 +72,7 @@ function formatFieldValue(val, schema) {
  * export output can be re-imported without remapping.
  */
 function buildExportHeaders(entityType, entityConfig) {
-  const prefixCols = ['pb_id', 'ext_key'];
+  const prefixCols = ['pb_id', 'ext_key', 'created_at', 'updated_at'];
 
   const systemHeaders = [...entityConfig.systemFields]
     .sort((a, b) => {
@@ -104,6 +104,8 @@ function entityToRow(entity, entityType, entityConfig) {
   // 1. Tracking columns
   row['pb_id'] = entity.id || '';
   row['ext_key'] = fields.externalKey || '';
+  row['created_at'] = entity.createdAt || '';
+  row['updated_at'] = entity.updatedAt || '';
 
   // 2. System fields (identified by f.id; use f.name as column header)
   for (const f of entityConfig.systemFields) {
