@@ -86,9 +86,13 @@ async function runImport(files, mappings, configs, options, pbFetch, withRetry, 
   const normalizedByType = {};
   for (const type of ENTITY_ORDER) {
     if (!files[type]) continue;
-    const { rows, errors } = parseEntityCsv(files[type].csvText);
+    const { rows, errors, tooManyFieldsRows } = parseEntityCsv(files[type].csvText);
     if (errors.length) {
       onLog('warn', `CSV parse warnings for ${ENTITY_LABELS[type]}: ${errors.join('; ')}`);
+    }
+    if (tooManyFieldsRows.length) {
+      onLog('error', `${ENTITY_LABELS[type]}: ${tooManyFieldsRows.length} row(s) have too many columns — row(s) ${tooManyFieldsRows.join(', ')}. Multi-value relationship cells (e.g. blocked_by_ext_key, connected_objs_ext_key) must be wrapped in double quotes when they contain commas. Example: "OBJ-1,OBJ-2". Fix these rows and re-upload.`, { entityType: type });
+      continue;
     }
     const mapping = mappings[type] || { columns: {} };
     normalizedByType[type] = applyMapping(rows, type, mapping);

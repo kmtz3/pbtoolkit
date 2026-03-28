@@ -142,6 +142,10 @@ async function writeRelations(allRows, idCache, pbFetch, withRetry, onLog) {
   }
 
   // ── 7. Feature / Subfeature / Initiative isBlocking ───────────────────────
+  // Post as isBlockedBy from the target's side rather than isBlocking from self.
+  // PB auto-creates the inverse isBlocking when isBlockedBy is posted, and returns
+  // 500 (instead of 409) when isBlocking is posted explicitly for an already-existing
+  // pair. Posting isBlockedBy means duplicates become idempotent 409s, not 500s.
   for (const entityType of ['feature', 'subfeature', 'initiative']) {
     for (const row of allRows.filter((r) => r._type === entityType && r['blocking_ext_key'])) {
       const selfId = _selfId(row, idCache);
@@ -153,7 +157,8 @@ async function writeRelations(allRows, idCache, pbFetch, withRetry, onLog) {
         if (!targetId) { skippedLinks++; onLog('warn', `Skipped isBlocking — target not resolved: ${tok}`, { entityType: row._type, extKey: row._extKey }); continue; }
         if (targetId === selfId || linked.has(targetId)) continue;
         linked.add(targetId);
-        const r = await _postDepLink(selfId, targetId, 'isBlocking', `${entityType}-blocking`, row, pbFetch, withRetry, onLog);
+        // POST isBlockedBy on targetId (the entity being blocked), with selfId as the blocker.
+        const r = await _postDepLink(targetId, selfId, 'isBlockedBy', `${entityType}-blocking`, row, pbFetch, withRetry, onLog);
         if (r.ok) relationshipLinks++; else errors++;
       }
     }

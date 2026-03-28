@@ -35,6 +35,7 @@ pbtoolkit/
 │   ├── middleware/
 │   │   └── pbAuth.js          # token validation + pbClient injection
 │   └── routes/
+│       ├── auth.js            # GET /auth/pb + GET /auth/pb/callback + POST /auth/pb/disconnect (OAuth 2.0 PKCE)
 │       ├── companies.js       # GET /api/fields + POST /api/export + POST /api/import/* + POST /api/companies/* (unified)
 │       ├── notes.js           # POST /api/notes/* (export, import, delete, migrate)
 │       ├── entities.js        # GET/POST /api/entities/* (templates, configs, preview, normalize-keys)
@@ -118,6 +119,30 @@ Supported variables (documented in `.env.example`):
 | `PORT` | Server listen port (default `8080`) |
 | `FEEDBACK_URL` | "Share feedback" button URL |
 | `ISSUE_URL` | "Report issue" button URL |
+| `SESSION_SECRET` | Signs the session cookie — **required in production** (defaults to `dev-secret-change-in-production`) |
+| `PB_OAUTH_CLIENT_ID` | Productboard OAuth app client ID — required for OAuth login |
+| `PB_OAUTH_CLIENT_SECRET` | Productboard OAuth app client secret — required for OAuth login |
+| `PB_OAUTH_REDIRECT_URI` | OAuth callback URL registered with Productboard — required for OAuth login |
+
+---
+
+## OAuth authentication (`src/routes/auth.js`)
+
+OAuth 2.0 Authorization Code flow with PKCE and CSRF state protection. Mounted at `/auth` in `server.js`.
+
+| Route | Description |
+|---|---|
+| `GET /auth/pb?eu=true\|false` | Initiates OAuth — generates CSRF state + PKCE verifier, stores both in session, redirects to Productboard |
+| `GET /auth/pb/callback` | Receives authorization code, validates state, exchanges code for access token via `POST /oauth2/token`, stores token in `req.session.pbToken` |
+| `POST /auth/pb/disconnect` | Destroys the server-side session |
+| `GET /api/auth/status` | Public endpoint — returns `{ connected, method, useEu }` based on session state; used by the frontend on page load to restore OAuth state |
+
+Token flow after successful OAuth:
+- `req.session.pbToken` holds the access token server-side; the browser never sees it
+- Frontend sets `authMethod = 'oauth'` and `token = '__oauth__'` (a truthy sentinel) based on the `/api/auth/status` response
+- `pbAuth` middleware uses `req.session.pbToken` directly — no `x-pb-token` header is needed or sent
+
+Required env vars: `PB_OAUTH_CLIENT_ID`, `PB_OAUTH_CLIENT_SECRET`, `PB_OAUTH_REDIRECT_URI`. If any are missing, `GET /auth/pb` returns 503. The OAuth button in the UI is only shown when these are configured.
 
 ---
 
@@ -253,14 +278,16 @@ async function loadTool(toolName) {
 
 ### Headers (backend)
 
-Every route reads these from the request:
+All routes use the `pbAuth` middleware, which resolves the token and EU flag in priority order:
 
 ```js
-const token = req.headers['x-pb-token'];   // required
-const useEu  = req.headers['x-pb-eu'] === 'true'; // optional
+// Token: session (OAuth) takes priority; header token is the manual fallback
+const token = req.session?.pbToken || req.headers['x-pb-token'];
+// EU flag: same priority
+const useEu = req.session?.useEu ?? (req.headers['x-pb-eu'] === 'true');
 ```
 
-The frontend sends them via `buildHeaders()` in `app.js`.
+The frontend omits the `x-pb-token` header when `authMethod === 'oauth'` (token lives server-side in the session). See `buildHeaders()` in `public/app.js`.
 
 ### Request body wrapping
 

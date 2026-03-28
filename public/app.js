@@ -28,8 +28,9 @@ loadAppConfig();
 const SESSION_KEY = 'pb_token';
 const EU_KEY      = 'pb_eu';
 
-let token  = sessionStorage.getItem(SESSION_KEY) || '';
-let useEu  = sessionStorage.getItem(EU_KEY) === 'true';
+let token      = sessionStorage.getItem(SESSION_KEY) || '';
+let useEu      = sessionStorage.getItem(EU_KEY) === 'true';
+let authMethod = null; // 'oauth' | 'manual' | null
 
 // ── DOM helpers ────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -211,6 +212,10 @@ function requireToken(callback) {
 $('btn-connect').addEventListener('click', () => openConnectModal());
 $('btn-close-connect-modal').addEventListener('click', closeConnectModal);
 $('btn-connect-from-tool').addEventListener('click', () => openConnectModal());
+$('btn-connect-oauth').addEventListener('click', () => {
+  // Redirect to the server-side OAuth initiation route; include the current DC preference.
+  location.href = `/auth/pb?eu=${useEu}`;
+});
 $('auth-screen').addEventListener('click', (e) => { if (e.target === $('auth-screen')) closeConnectModal(); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('auth-screen').classList.contains('hidden')) closeConnectModal();
@@ -273,7 +278,12 @@ function showAuthError(msg) {
 }
 
 // ── Disconnect ─────────────────────────────────────────────
-$('btn-disconnect').addEventListener('click', () => {
+$('btn-disconnect').addEventListener('click', async () => {
+  if (authMethod === 'oauth') {
+    // Destroy the server-side session that holds the OAuth token.
+    await fetch('/auth/pb/disconnect', { method: 'POST' }).catch(() => {});
+    authMethod = null;
+  }
   sessionStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem(EU_KEY);
   token = '';
@@ -311,7 +321,10 @@ function showView(view) {
 
 // ── Helpers ─────────────────────────────────────────────────
 function buildHeaders(t = token, eu = useEu) {
-  const h = { 'Content-Type': 'application/json', 'x-pb-token': t };
+  const h = { 'Content-Type': 'application/json' };
+  // OAuth path: token lives in the session cookie — don't send it as a header.
+  // Manual path: pass the token the user provided.
+  if (authMethod !== 'oauth') h['x-pb-token'] = t;
   if (eu) h['x-pb-eu'] = 'true';
   return h;
 }
@@ -623,4 +636,20 @@ function wireDropzone(dropzoneEl, fileInputEl, onFile, onClear) {
 }
 
 // ── Run ─────────────────────────────────────────────────────
-boot();
+// Check for an existing OAuth session before booting the UI.
+// If the server session holds a token, set authMethod and token sentinel
+// so the app shows "Connected" without exposing the token to the browser.
+async function initAuth() {
+  try {
+    const status = await fetch('/api/auth/status').then(r => r.json());
+    if (status.connected && status.method === 'oauth') {
+      authMethod = 'oauth';
+      token  = '__oauth__'; // truthy sentinel — actual token lives server-side
+      useEu  = status.useEu;
+    }
+  } catch (_) {
+    // Network error on status check — fall through to manual token path
+  }
+  boot();
+}
+initAuth();

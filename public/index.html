@@ -69,7 +69,13 @@
   <div class="auth-card">
     <button class="auth-close" id="btn-close-connect-modal">&#x2715;</button>
     <div class="auth-logo">Connect to Productboard</div>
-    <div class="auth-tagline">Enter your API token to run jobs.</div>
+    <div class="auth-tagline">Sign in with OAuth or enter your API token.</div>
+
+    <button class="btn btn-primary btn-full" id="btn-connect-oauth">
+      Sign in with Productboard
+    </button>
+
+    <div class="auth-divider"><span>or enter your API token</span></div>
 
     <div class="field">
       <label for="auth-token">Productboard API token</label>
@@ -93,7 +99,7 @@
     </div>
 
     <p class="text-sm text-muted mt-16">
-      Your token is never stored on our servers — it lives only in this browser session and is passed directly to Productboard on each request.
+      Your credentials are never permanently stored. OAuth tokens live only in your browser session. Manual API tokens are passed directly to Productboard on each request.
     </p>
   </div>
 </div>

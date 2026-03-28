@@ -707,6 +707,22 @@ input:focus, select:focus, textarea:focus {
 }
 .auth-close:hover { background: var(--c-border); color: var(--c-text); }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+  color: var(--c-muted);
+  font-size: var(--fs-sm);
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--c-border);
+}
+
 /* ── Connection status (topbar) ── */
 .conn-status {
   display: flex;

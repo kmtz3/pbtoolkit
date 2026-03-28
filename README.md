@@ -25,6 +25,10 @@ Copy `.env.example` to `.env` and fill in values as needed:
 | `PORT` | `8080` | Port the server listens on |
 | `FEEDBACK_URL` | — | URL opened by the "Share feedback" button (hidden if unset) |
 | `ISSUE_URL` | — | URL opened by the "Report issue" button (hidden if unset) |
+| `SESSION_SECRET` | `dev-secret-change-in-production` | Secret used to sign the session cookie. **Must be set in production.** |
+| `PB_OAUTH_CLIENT_ID` | — | Productboard OAuth application client ID (required for OAuth) |
+| `PB_OAUTH_CLIENT_SECRET` | — | Productboard OAuth application client secret (required for OAuth) |
+| `PB_OAUTH_REDIRECT_URI` | — | OAuth callback URL — must match your app registration, e.g. `https://yourapp.com/auth/pb/callback` |
 
 ```bash
 cp .env.example .env
@@ -50,13 +54,18 @@ The Dockerfile targets Cloud Run (`ENV PORT=8080`).
 
 ## Authentication
 
-Open the app in a browser. You can browse the tool list without a token, but a **Productboard API token** is required before running any operation.
+Open the app in a browser. You can browse the tool list without a token, but authentication is required before running any operation.
 
-- The token lives only in `sessionStorage` — it is never persisted to disk or sent anywhere except directly to the Productboard API.
+Two authentication methods are supported:
+
+**OAuth (recommended)** — click **Sign in with Productboard** in the connect modal. This uses the standard OAuth 2.0 Authorization Code flow with PKCE. The access token is stored server-side in an encrypted session cookie; it is never exposed to the browser. Requires `PB_OAUTH_CLIENT_ID`, `PB_OAUTH_CLIENT_SECRET`, and `PB_OAUTH_REDIRECT_URI` to be configured on the server. If these are not set, the OAuth button is disabled.
+
+**API token (manual)** — paste your Productboard API token in the connect modal. The token lives only in `sessionStorage` — it is never persisted to disk or sent anywhere except directly to the Productboard API.
+
 - Select **EU datacenter** if your Productboard workspace is hosted on `api.eu.productboard.com`. Tokens are region-bound; switching datacenter requires re-authentication.
-- The token is validated on connect by making a test API call. An incorrect token shows an error before you can proceed.
+- The token (both paths) is validated on connect by making a test API call. An incorrect token shows an error before you can proceed.
 
-To disconnect, click **Disconnect** in the top-right corner. This clears the session and resets all module pages — file uploads, export results, and any in-progress state are cleared.
+To disconnect, click **Disconnect** in the top-right corner. This clears the session (and destroys the server-side OAuth session if applicable) and resets all module pages — file uploads, export results, and any in-progress state are cleared.
 
 ---
 
@@ -155,7 +164,7 @@ A pure client-side CSV transform — no API calls. Converts an exported notes CS
 
 ---
 
-## Entities *(in progress)*
+## Entities
 
 Covers all Productboard entity types: objectives, key results, initiatives, products, components, features, subfeatures, release groups, and releases.
 
@@ -182,7 +191,7 @@ Covers all Productboard entity types: objectives, key results, initiatives, prod
 
 ---
 
-## Member Activity *(WIP)*
+## Member Activity
 
 Exports member activity data from the Productboard Analytics API enriched with current member profiles and team assignments.
 

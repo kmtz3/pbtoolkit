@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const helmet = require('helmet');
+const session = require('express-session');
 const rateLimit = require('express-rate-limit');
 const slowDown = require('express-slow-down');
 
@@ -13,6 +14,7 @@ const entitiesRouter = require('./routes/entities');
 const memberActivityRouter = require('./routes/memberActivity');
 const teamMembershipRouter = require('./routes/teamMembership');
 const teamsCrudRouter      = require('./routes/teamsCrud');
+const authRouter           = require('./routes/auth');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -30,8 +32,28 @@ app.use(helmet({
 app.use(express.json({ limit: '25mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// Health and config are exempt from rate limiting
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000, // 24 h — matches PB OAuth access token lifetime
+  },
+}));
+
+// Health, config, and auth status are exempt from rate limiting
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/auth/status', (req, res) => {
+  if (req.session?.pbToken) {
+    res.json({ connected: true, method: 'oauth', useEu: req.session.useEu ?? false });
+  } else {
+    res.json({ connected: false });
+  }
+});
+app.use('/auth', authRouter);
 app.get('/api/config', (_req, res) => {
   res.json({
     feedbackUrl: process.env.FEEDBACK_URL || null,

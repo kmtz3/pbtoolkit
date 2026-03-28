@@ -14,10 +14,18 @@ Tick each box as you verify it. Re-run after any significant change.
 
 ## 1. Auth & Token Validation
 
-- [ ] Load the app with no token set → token connect form is shown
+**Manual token path:**
+- [ ] Load the app with no token set → connect modal shown with both OAuth button and manual token field
 - [ ] Enter an invalid token and click Connect → clear error message shown, no tools unlock
-- [ ] Enter a valid token → success banner, tools become accessible
+- [ ] Enter a valid token → modal closes, connection status shows "Connected", tools become accessible
 - [ ] Click Disconnect → token cleared, all module state resets, connect form shown again
+
+**OAuth path (requires `PB_OAUTH_CLIENT_ID` / `PB_OAUTH_CLIENT_SECRET` / `PB_OAUTH_REDIRECT_URI` configured):**
+- [ ] Click "Sign in with Productboard" → redirected to Productboard OAuth consent screen
+- [ ] Approve consent → redirected back to app, connection status shows "Connected"
+- [ ] Reload page → app restores "Connected" state via `/api/auth/status` without re-auth
+- [ ] Click Disconnect → `POST /auth/pb/disconnect` called, session destroyed, state resets
+- [ ] After OAuth disconnect, reload page → app shows "Not connected"
 
 ---
 

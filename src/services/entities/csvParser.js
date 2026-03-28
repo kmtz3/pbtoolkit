@@ -13,7 +13,12 @@ const { UUID_RE } = require('../../lib/constants');
 /**
  * Parse an entity CSV string.
  * @param {string} csvText
- * @returns {{ headers: string[], rows: object[], errors: string[] }}
+ * @returns {{
+ *   headers: string[],
+ *   rows: object[],
+ *   errors: string[],
+ *   tooManyFieldsRows: number[],  // 1-indexed row numbers with TooManyFields errors
+ * }}
  */
 function parseEntityCsv(csvText) {
   const text = String(csvText || '').replace(/^\uFEFF/, '').trim();
@@ -22,10 +27,22 @@ function parseEntityCsv(csvText) {
     skipEmptyLines: true,
     transformHeader: (h) => h.trim(),
   });
+
+  const tooManyFieldsRows = [];
+  const otherErrors = [];
+  for (const e of (result.errors || [])) {
+    if (e.code === 'TooManyFields' && e.row != null) {
+      tooManyFieldsRows.push(e.row + 1); // convert to 1-indexed
+    } else {
+      otherErrors.push(e.message);
+    }
+  }
+
   return {
-    headers: result.meta.fields || [],
-    rows:    result.data || [],
-    errors:  (result.errors || []).map((e) => e.message),
+    headers:           result.meta.fields || [],
+    rows:              result.data || [],
+    errors:            otherErrors,
+    tooManyFieldsRows,
   };
 }
 
