@@ -106,11 +106,10 @@ async function buildCache(token, pbClient, onProgress = () => {}) {
     const batch = teamIds.slice(i, i + BATCH);
     await Promise.all(
       batch.map(async (teamId) => {
-        const rels = await listTeamMembers(pbClient, teamId);
+        const members = await listTeamMembers(pbClient, teamId);
         reqCount++;
-        for (const rel of rels) {
-          const memberId = rel.target?.id;
-          if (memberId) memberIdsByTeamId.get(teamId)?.add(memberId);
+        for (const m of members) {
+          if (m.id) memberIdsByTeamId.get(teamId)?.add(m.id);
         }
       })
     );
@@ -120,7 +119,7 @@ async function buildCache(token, pbClient, onProgress = () => {}) {
     if (i + BATCH < teamIds.length) await sleep(BATCH_DELAY_MS);
   }
 
-  console.log(`[team-membership] cache built: ${membersById.size} members, ${teamsById.size} teams, ${reqCount} relationship requests`);
+  console.log(`[team-membership] cache built: ${membersById.size} members, ${teamsById.size} teams, ${reqCount} member-list requests`);
 
   const entry = { membersById, membersByEmail, teamsById, memberIdsByTeamId, fetchedAt: Date.now() };
   pruneCache();
@@ -411,67 +410,63 @@ async function executeImport(diffs, cache, pbClient, sse) {
     errors:              [],
   };
 
-  const totalOps = diffs.reduce((n, d) => n + d.toAdd.length + d.toRemove.length, 0);
-  let doneOps = 0;
+  const totalTeams = diffs.filter((d) => d.toAdd.length + d.toRemove.length > 0).length;
+  let doneTeams = 0;
 
   for (const diff of diffs) {
     if (sse.isAborted()) break;
+    const hasAdds    = diff.toAdd.length > 0;
+    const hasRemoves = diff.toRemove.length > 0;
+    if (!hasAdds && !hasRemoves) continue;
 
-    // Add operations
-    for (const memberId of diff.toAdd) {
-      if (sse.isAborted()) break;
-      const email = memberEmail(memberId, cache);
-      try {
-        await pbClient.withRetry(
-          () => pbClient.pbFetch('post', `/v2/teams/${diff.teamId}/relationships`, {
-            data: { type: 'team_membership', target: { id: memberId, type: 'member' } },
-          }),
-          `add ${memberId} to ${diff.teamId}`
-        );
+    // Build a single PATCH with addItems and/or removeItems operations
+    const patchOps = [];
+    if (hasAdds) {
+      patchOps.push({
+        op: 'addItems',
+        path: 'members',
+        value: diff.toAdd.map((id) => ({ id })),
+      });
+    }
+    if (hasRemoves) {
+      patchOps.push({
+        op: 'removeItems',
+        path: 'members',
+        value: diff.toRemove.map((id) => ({ id })),
+      });
+    }
+
+    try {
+      await pbClient.withRetry(
+        () => pbClient.pbFetch('patch', `/v2/teams/${diff.teamId}`, {
+          data: { patch: patchOps },
+        }),
+        `update members of ${diff.teamId}`
+      );
+
+      // Log individual successes
+      for (const memberId of diff.toAdd) {
         result.added++;
-        sse.log('success', `Added ${email} → ${diff.teamName}`, { uuid: memberId });
-      } catch (err) {
-        if (err.status === 409) {
-          result.skippedAlreadyMember++;
-          sse.log('info', `Skipped ${email} → ${diff.teamName} (already a member)`);
-        } else {
-          const detail = parseApiError(err);
-          let correlationId = null;
-          try { correlationId = JSON.parse(err.message.split(' → ')[1]?.split(': ').slice(1).join(': '))?.id ?? null; } catch (_) {}
-          result.errors.push({ teamId: diff.teamId, memberId, detail, correlationId });
-          sse.log('error', `Failed: ${email} → ${diff.teamName} — ${detail}`, { uuid: correlationId ?? memberId });
-        }
+        sse.log('success', `Added ${memberEmail(memberId, cache)} → ${diff.teamName}`, { uuid: memberId });
       }
-      doneOps++;
-      sse.progress(`Processing… (${doneOps}/${totalOps})`, Math.round((doneOps / totalOps) * 90));
+      for (const memberId of diff.toRemove) {
+        result.removed++;
+        sse.log('success', `Removed ${memberEmail(memberId, cache)} ← ${diff.teamName}`, { uuid: memberId });
+      }
+    } catch (err) {
+      const detail = parseApiError(err);
+      let correlationId = null;
+      try { correlationId = JSON.parse(err.message.split(' → ')[1]?.split(': ').slice(1).join(': '))?.id ?? null; } catch (_) {}
+
+      // Count all members in this team as errors
+      for (const memberId of [...diff.toAdd, ...diff.toRemove]) {
+        result.errors.push({ teamId: diff.teamId, memberId, detail, correlationId });
+      }
+      sse.log('error', `Failed to update ${diff.teamName} — ${detail}`, { uuid: correlationId ?? diff.teamId });
     }
 
-    // Remove operations
-    for (const memberId of diff.toRemove) {
-      if (sse.isAborted()) break;
-      const email = memberEmail(memberId, cache);
-      try {
-        await pbClient.withRetry(
-          () => pbClient.pbFetch('delete', `/v2/teams/${diff.teamId}/relationships/member/${memberId}`),
-          `remove ${memberId} from ${diff.teamId}`
-        );
-        result.removed++;
-        sse.log('success', `Removed ${email} ← ${diff.teamName}`, { uuid: memberId });
-      } catch (err) {
-        if (err.status === 404) {
-          result.skippedNotMember++;
-          sse.log('info', `Skipped ${email} ← ${diff.teamName} (not a member)`);
-        } else {
-          const detail = parseApiError(err);
-          let correlationId = null;
-          try { correlationId = JSON.parse(err.message.split(' → ')[1]?.split(': ').slice(1).join(': '))?.id ?? null; } catch (_) {}
-          result.errors.push({ teamId: diff.teamId, memberId, detail, correlationId });
-          sse.log('error', `Failed: ${email} ← ${diff.teamName} — ${detail}`, { uuid: correlationId ?? memberId });
-        }
-      }
-      doneOps++;
-      sse.progress(`Processing… (${doneOps}/${totalOps})`, Math.round((doneOps / totalOps) * 90));
-    }
+    doneTeams++;
+    sse.progress(`Processing… (${doneTeams}/${totalTeams} teams)`, Math.round((doneTeams / totalTeams) * 90));
   }
 
   return result;

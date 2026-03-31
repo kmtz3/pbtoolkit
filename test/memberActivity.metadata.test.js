@@ -280,12 +280,12 @@ describe('buildCache — member and team population', () => {
    * Build mock fetchAllPages that returns different data based on path prefix.
    * - /v2/members → array of member objects
    * - /v2/teams and no subpath → array of team objects
-   * - /v2/teams/{id}/relationships → array of relationship objects
+   * - /v2/teams/{id}/members → array of team member objects ({ id, fields })
    */
-  function makeMockFetchAllPages({ members, teams, relationships }) {
+  function makeMockFetchAllPages({ members, teams, teamMembers }) {
     return async function fetchAllPages(path) {
       if (path.startsWith('/v2/members')) return members;
-      if (/\/v2\/teams\/[^/]+\/relationships/.test(path)) return relationships;
+      if (/\/v2\/teams\/[^/]+\/members/.test(path)) return teamMembers;
       if (path.startsWith('/v2/teams')) return teams;
       return [];
     };
@@ -297,7 +297,7 @@ describe('buildCache — member and team population', () => {
     const fetchAllPages = makeMockFetchAllPages({
       members: [{ id: 'm1', fields: { name: 'Alice', email: 'alice@x.com', role: 'maker' } }],
       teams: [],
-      relationships: [],
+      teamMembers: [],
     });
 
     const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
@@ -312,7 +312,7 @@ describe('buildCache — member and team population', () => {
     const fetchAllPages = makeMockFetchAllPages({
       members: [],
       teams: [{ id: 't1', fields: { name: 'Eng', handle: 'eng' } }],
-      relationships: [],
+      teamMembers: [],
     });
 
     const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
@@ -322,11 +322,11 @@ describe('buildCache — member and team population', () => {
     assert.equal(t.handle, 'eng');
   });
 
-  test('memberTeams built from team relationships', async () => {
+  test('memberTeams built from team members list', async () => {
     const fetchAllPages = makeMockFetchAllPages({
       members: [{ id: 'm1', fields: { name: 'Alice', email: 'a@x.com', role: 'maker' } }],
       teams: [{ id: 't1', fields: { name: 'Engineering', handle: 'eng' } }],
-      relationships: [{ target: { id: 'm1' } }],
+      teamMembers: [{ id: 'm1', fields: { name: 'Alice', email: 'a@x.com' } }],
     });
 
     const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
@@ -339,7 +339,7 @@ describe('buildCache — member and team population', () => {
     const fetchAllPages = makeMockFetchAllPages({
       members: [{ id: 'm2', fields: { name: 'Bob', email: 'b@x.com', role: 'viewer' } }],
       teams: [{ id: 't1', fields: { name: 'Eng', handle: 'eng' } }],
-      relationships: [], // t1 has no members
+      teamMembers: [], // t1 has no members
     });
 
     const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
@@ -348,7 +348,7 @@ describe('buildCache — member and team population', () => {
 
   test('fetchedAt is set to a recent timestamp', async () => {
     const before = Date.now();
-    const fetchAllPages = makeMockFetchAllPages({ members: [], teams: [], relationships: [] });
+    const fetchAllPages = makeMockFetchAllPages({ members: [], teams: [], teamMembers: [] });
     const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
     const after = Date.now();
     assert.ok(entry.fetchedAt >= before && entry.fetchedAt <= after);
@@ -358,7 +358,7 @@ describe('buildCache — member and team population', () => {
     const fetchAllPages = makeMockFetchAllPages({
       members: [{ id: 'm1', fields: { name: 'Alice', email: 'a@x.com', role: 'maker' } }],
       teams: [],
-      relationships: [],
+      teamMembers: [],
     });
     const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
     assert.equal(entry.obfuscated, false);
@@ -368,7 +368,7 @@ describe('buildCache — member and team population', () => {
     const fetchAllPages = makeMockFetchAllPages({
       members: [{ id: 'm1', fields: { name: '[obfuscated]', email: '[obfuscated]', role: 'viewer' } }],
       teams: [],
-      relationships: [],
+      teamMembers: [],
     });
     const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
     assert.equal(entry.obfuscated, true);
@@ -378,7 +378,7 @@ describe('buildCache — member and team population', () => {
     const fetchAllPages = makeMockFetchAllPages({
       members: [{ id: 'm1', fields: {} }], // all fields missing
       teams: [],
-      relationships: [],
+      teamMembers: [],
     });
     const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
     const m = entry.members.get('m1');

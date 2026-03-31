@@ -9,9 +9,9 @@
  *                                          teamIds filter; empty workspace
  *  - POST /api/team-membership/preview   — format A diff; format B diff; mode variations;
  *                                          unresolvable emails; name resolution; hard errors
- *  - POST /api/team-membership/import    — add → POST /v2/teams/:id/relationships;
- *                                          remove → DELETE .../relationships/member/:id;
- *                                          409 = skippedAlreadyMember; 404 = skippedNotMember;
+ *  - POST /api/team-membership/import    — add → PATCH /v2/teams/:id with addItems op;
+ *                                          remove → PATCH /v2/teams/:id with removeItems op;
+ *                                          addItems/removeItems are idempotent;
  *                                          no changes → complete with zeroes
  */
 
@@ -63,7 +63,7 @@ const responseOverrides = new Map();
 // Default mock data — mutated per test
 let mockTeams   = [];
 let mockMembers = [];
-// teamId → [{ target: { id: memberId } }]
+// teamId → [memberId, ...]
 let mockMemberships = {};
 
 function setOverride(method, path, status, body) {
@@ -108,36 +108,31 @@ before(async () => {
         return;
       }
 
-      // GET /v2/teams — returns mockTeams
-      if (req.method === 'GET' && req.url.startsWith('/v2/teams') && !req.url.includes('/relationships')) {
+      // GET /v2/teams/:id/members — returns mock team members
+      const membersGetMatch = req.url.match(/^\/v2\/teams\/([^/]+)\/members/);
+      if (req.method === 'GET' && membersGetMatch) {
+        const teamId = membersGetMatch[1];
+        const members = (mockMemberships[teamId] || []).map((memberId) => {
+          const m = mockMembers.find((mm) => mm.id === memberId);
+          return { id: memberId, fields: { name: m?.fields?.name ?? '', email: m?.fields?.email ?? '' } };
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: members, links: { next: null } }));
+        return;
+      }
+
+      // GET /v2/teams — returns mockTeams (must come after /members match)
+      if (req.method === 'GET' && req.url.startsWith('/v2/teams')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ data: mockTeams, links: { next: null } }));
         return;
       }
 
-      // GET /v2/teams/:id/relationships — returns mock memberships
-      const relGetMatch = req.url.match(/^\/v2\/teams\/([^/]+)\/relationships/);
-      if (req.method === 'GET' && relGetMatch) {
-        const teamId = relGetMatch[1];
-        const rels = (mockMemberships[teamId] || []).map((memberId) => ({
-          target: { id: memberId, type: 'member' },
-        }));
+      // PATCH /v2/teams/:id — team update (member patch operations)
+      const teamPatchMatch = req.url.match(/^\/v2\/teams\/([^/]+)$/);
+      if (req.method === 'PATCH' && teamPatchMatch) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ data: rels, links: { next: null } }));
-        return;
-      }
-
-      // POST /v2/teams/:id/relationships — add member
-      const relPostMatch = req.url.match(/^\/v2\/teams\/([^/]+)\/relationships$/);
-      if (req.method === 'POST' && relPostMatch) {
-        res.writeHead(201, { 'Content-Type': 'application/json' });
-        res.end('{}');
-        return;
-      }
-
-      // DELETE /v2/teams/:id/relationships/member/:memberId — remove member
-      if (req.method === 'DELETE' && req.url.includes('/relationships/member/')) {
-        res.writeHead(204); res.end();
+        res.end(JSON.stringify({ data: { id: teamPatchMatch[1] } }));
         return;
       }
 
@@ -235,7 +230,7 @@ test('metadata: refresh=true forces a new API fetch (not stale cache)', async ()
     .set('x-pb-token', token);
 
   assert.equal(res2.status, 200);
-  // GET /v2/members + GET /v2/teams + 2× GET /v2/teams/:id/relationships
+  // GET /v2/members + GET /v2/teams + 2× GET /v2/teams/:id/members
   const fetchCalls = calls.get.filter((u) => u.startsWith('/v2/'));
   assert.ok(fetchCalls.length >= 2, 'should re-fetch after refresh=true');
 });
@@ -534,11 +529,11 @@ test('import: missing csvText → 400', async () => {
   assert.equal(res.status, 400);
 });
 
-test('import: add mode — POST /v2/teams/:id/relationships called for new assignment', async () => {
+test('import: add mode — PATCH /v2/teams/:id with addItems called for new assignment', async () => {
   setupWorkspace();
   clearCalls();
 
-  // Bob is NOT in Team Alpha — add mode should call POST to add him
+  // Bob is NOT in Team Alpha — add mode should PATCH to add him
   const csv = formatACsv([
     { email: 'bob@example.com', name: 'Bob', role: 'viewer', alpha: '✓', beta: '' },
   ]);
@@ -558,16 +553,16 @@ test('import: add mode — POST /v2/teams/:id/relationships called for new assig
   assert.equal(complete.added, 1);
   assert.equal(complete.errors.length, 0);
 
-  // Verify the relationship POST was made
-  const relPost = calls.post.find((u) => u.includes(`${TEAM_A_ID}/relationships`));
-  assert.ok(relPost, 'should call POST /v2/teams/:id/relationships');
+  // Verify the PATCH was made to the team endpoint
+  const teamPatch = calls.patch.find((u) => u.includes(`/v2/teams/${TEAM_A_ID}`));
+  assert.ok(teamPatch, 'should call PATCH /v2/teams/:id with addItems');
 });
 
-test('import: remove mode — DELETE .../relationships/member/:id called', async () => {
+test('import: remove mode — PATCH /v2/teams/:id with removeItems called', async () => {
   setupWorkspace();
   clearCalls();
 
-  // Alice is in Team Alpha — remove mode should DELETE the relationship
+  // Alice is in Team Alpha — remove mode should PATCH to remove her
   const csv = formatACsv([
     { email: 'alice@example.com', name: 'Alice', role: 'maker', alpha: '✓', beta: '' },
   ]);
@@ -587,8 +582,8 @@ test('import: remove mode — DELETE .../relationships/member/:id called', async
   assert.equal(complete.removed, 1);
   assert.equal(complete.errors.length, 0);
 
-  const relDelete = calls.delete.find((u) => u.includes('/relationships/member/'));
-  assert.ok(relDelete, 'should call DELETE .../relationships/member/:id');
+  const teamPatch = calls.patch.find((u) => u.includes(`/v2/teams/${TEAM_A_ID}`));
+  assert.ok(teamPatch, 'should call PATCH /v2/teams/:id with removeItems');
 });
 
 test('import: no changes to apply → complete with zeroes, no API relationship calls', async () => {
@@ -616,17 +611,17 @@ test('import: no changes to apply → complete with zeroes, no API relationship 
   assert.equal(complete.removed, 0);
   assert.equal(complete.errors.length, 0);
 
-  // No relationship write calls
-  const relWrites = calls.post.filter((u) => u.includes('/relationships'));
-  assert.equal(relWrites.length, 0, 'no relationship calls for no-op import');
+  // No PATCH calls for member changes
+  const teamPatches = calls.patch.filter((u) => u.startsWith('/v2/teams/'));
+  assert.equal(teamPatches.length, 0, 'no PATCH calls for no-op import');
 });
 
-test('import: 409 on add → skippedAlreadyMember++, not counted as error', async () => {
+test('import: PATCH error on team → all members counted as errors', async () => {
   setupWorkspace();
   clearCalls();
 
-  // Force POST /v2/teams/:id/relationships to return 409
-  setOverride('POST', `/v2/teams/${TEAM_A_ID}/relationships`, 409, { errors: [{ detail: 'Already a member' }] });
+  // Force PATCH /v2/teams/:id to return 500
+  setOverride('PATCH', `/v2/teams/${TEAM_A_ID}`, 500, { errors: [{ detail: 'Internal error' }] });
 
   const csv = formatACsv([
     { email: 'bob@example.com', name: 'Bob', role: 'viewer', alpha: '✓', beta: '' },
@@ -634,7 +629,7 @@ test('import: 409 on add → skippedAlreadyMember++, not counted as error', asyn
 
   const res = await request(app)
     .post('/api/team-membership/import')
-    .set('x-pb-token', 'import-409')
+    .set('x-pb-token', 'import-err')
     .buffer(true).parse((res, cb) => {
       let data = '';
       res.on('data', (c) => { data += c; });
@@ -646,37 +641,6 @@ test('import: 409 on add → skippedAlreadyMember++, not counted as error', asyn
 
   const complete = parseCompleteEvent(res.body);
   assert.ok(complete, 'should receive complete');
-  assert.equal(complete.added,                0);
-  assert.equal(complete.skippedAlreadyMember, 1);
-  assert.equal(complete.errors.length,        0, '409 must not be counted as an error');
-});
-
-test('import: 404 on remove → skippedNotMember++, not counted as error', async () => {
-  setupWorkspace();
-  clearCalls();
-
-  // Force DELETE to return 404
-  setOverride('DELETE', `/v2/teams/${TEAM_A_ID}/relationships/member/${MEMBER_1_ID}`, 404, {});
-
-  const csv = formatACsv([
-    { email: 'alice@example.com', name: 'Alice', role: 'maker', alpha: '✓', beta: '' },
-  ]);
-
-  const res = await request(app)
-    .post('/api/team-membership/import')
-    .set('x-pb-token', 'import-404')
-    .buffer(true).parse((res, cb) => {
-      let data = '';
-      res.on('data', (c) => { data += c; });
-      res.on('end', () => cb(null, data));
-    })
-    .send({ csvText: csv, mode: 'remove' });
-
-  clearOverrides();
-
-  const complete = parseCompleteEvent(res.body);
-  assert.ok(complete, 'should receive complete');
-  assert.equal(complete.removed,          0);
-  assert.equal(complete.skippedNotMember, 1);
-  assert.equal(complete.errors.length,    0, '404 on remove must not be counted as an error');
+  assert.equal(complete.added, 0);
+  assert.equal(complete.errors.length, 1, 'PATCH failure should count as error');
 });

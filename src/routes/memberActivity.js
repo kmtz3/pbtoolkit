@@ -54,8 +54,8 @@ async function sleep(ms) {
 
 /**
  * Build and store the session cache for a given token.
- * Fetches members and teams concurrently, then fans out team relationships
- * in batches of 5 to stay within rate limits.
+ * Fetches members and teams concurrently, then fans out team member list
+ * calls in batches of 5 to stay within rate limits.
  *
  * @param {string} token
  * @param {Function} fetchAllPages - from createClient()
@@ -96,7 +96,7 @@ async function buildCache(token, fetchAllPages, pbFetch, onProgress = () => {}) 
     teams.set(t.id, { name: t.fields?.name ?? t.id, handle: t.fields?.handle ?? '' });
   }
 
-  // Fan out team relationship calls in batches of 5
+  // Fan out team member list calls in batches of 5
   onProgress(`Fetching team memberships (${teamRecords.length} teams)…`);
   const memberTeams = new Map(); // memberId → [teamName, ...]
   const teamIds = teamRecords.map((t) => t.id);
@@ -105,16 +105,15 @@ async function buildCache(token, fetchAllPages, pbFetch, onProgress = () => {}) 
     const batch = teamIds.slice(i, i + BATCH);
     await Promise.all(
       batch.map(async (teamId) => {
-        const relationships = await fetchAllPages(
-          `/v2/teams/${teamId}/relationships`,
+        const teamMembers = await fetchAllPages(
+          `/v2/teams/${teamId}/members`,
           `fetch team members ${teamId}`
         );
         const teamName = teams.get(teamId)?.name ?? teamId;
-        for (const rel of relationships) {
-          const memberId = rel.target?.id;
-          if (!memberId) continue;
-          if (!memberTeams.has(memberId)) memberTeams.set(memberId, []);
-          memberTeams.get(memberId).push(teamName);
+        for (const m of teamMembers) {
+          if (!m.id) continue;
+          if (!memberTeams.has(m.id)) memberTeams.set(m.id, []);
+          memberTeams.get(m.id).push(teamName);
         }
       })
     );

@@ -244,13 +244,14 @@ function listMembers(client, { includeDisabled = false, includeInvited = false }
 }
 
 /**
- * Fetch all member relationships for a team.
+ * Fetch all members of a team.
+ * Returns TeamMemberResource objects with { id, fields: { name, email } }.
  * @param {{ fetchAllPages: Function }} client - from createClient()
  * @param {string} teamId
  */
 function listTeamMembers(client, teamId) {
   return client.fetchAllPages(
-    `/v2/teams/${teamId}/relationships`,
+    `/v2/teams/${teamId}/members`,
     `list team members ${teamId}`
   );
 }
