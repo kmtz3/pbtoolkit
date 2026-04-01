@@ -128,12 +128,9 @@ function entityToRow(entity, entityType, entityConfig) {
         row[col] = fields.phase?.name || '';
         break;
       case 'teams': {
-        // Objectives return this field as `team` (singular); all other types use `teams` (plural)
-        const teamData = fields.teams ?? fields.team;
+        const teamData = fields.teams;
         if (Array.isArray(teamData)) {
           row[col] = teamData.map((t) => t.name).filter(Boolean).join(', ');
-        } else if (teamData && typeof teamData === 'object') {
-          row[col] = teamData.name || '';
         } else {
           row[col] = '';
         }

@@ -8,7 +8,7 @@
 
 const sanitizeHtml = require('sanitize-html');
 const { cell } = require('./csvParser');
-const { SINGULAR_TEAM_TYPES, HAS_TIMEFRAME, HEALTH_TYPES } = require('./meta');
+const { HAS_TIMEFRAME, HEALTH_TYPES } = require('./meta');
 const { normalizeSchema } = require('./configCache');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -195,15 +195,15 @@ function buildFieldsObject(normalizedRow, entityType, config, options, op) {
   }
 
   // --- teams ---
-  // Objectives use field key 'team' (singular) in both GET responses and write payloads;
-  // all other entity types use 'teams' (plural). Objectives also only accept one team.
+  // All entity types (including objectives) now use 'teams' (plural) and accept multiple values.
+  // Note: before 2026-04, objectives used 'team' (singular) and only accepted one value.
+  // The PB UI may still limit objectives to 1 team even though the API accepts multiple.
   {
     const teamsVal = normalizedRow['teams'] || normalizedRow['team'] || '';
     if (!skip(teamsVal) && teamsVal) {
       const items = teamsVal.split(',').map((s) => ({ name: _sanitizeTeamName(s) })).filter((t) => t.name);
       if (items.length) {
-        const isObjective = SINGULAR_TEAM_TYPES.has(entityType);
-        F[isObjective ? 'team' : 'teams'] = isObjective ? items.slice(0, 1) : items;
+        F.teams = items;
       }
     }
   }

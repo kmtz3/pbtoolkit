@@ -63,10 +63,6 @@ const HEALTH_TYPES = new Set([
   'objective', 'keyResult', 'initiative', 'feature', 'subfeature',
 ]);
 
-// All entity types use field ID 'teams' (TeamFieldValue).
-// Objectives accept only one team (import slices to 1 item; display name in configs is "Team").
-const SINGULAR_TEAM_TYPES = new Set(['objective']);
-
 // ---------------------------------------------------------------------------
 // Preferred ordering for system fields sourced from configurations.
 // buildTemplateCsv sorts systemFields[] by this order before writing headers.
@@ -128,7 +124,6 @@ module.exports = {
   SKIP_STATUS_VALIDATION,
   HAS_TIMEFRAME,
   HEALTH_TYPES,
-  SINGULAR_TEAM_TYPES,
   SYSTEM_FIELD_ORDER,
   syntheticColumns,
   relationshipColumns,
