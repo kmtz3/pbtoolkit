@@ -96,8 +96,8 @@ const BASE_FIELDS = [
   { key: 'description',    label: 'Description' },
   { key: 'sourceOrigin',       label: 'Source Origin (v1 – will be removed once engineers consolidate source fields)' },
   { key: 'sourceRecordId',     label: 'Source Record ID (v1 – will be removed once engineers consolidate source fields)' },
-  { key: 'externalSystemName', label: 'External System Name (v2)' },
-  { key: 'externalRecordId',   label: 'External Record ID (v2)' },
+  { key: 'sourceSystem',   label: 'Source System (v2)' },
+  { key: 'sourceRecordV2', label: 'Source Record ID (v2)' },
 ];
 
 /**
@@ -194,10 +194,10 @@ function buildExportCSV(companies, v1Map, customFields, domainFieldId) {
         row[col.key] = v1.sourceOrigin ?? '';
       } else if (col.key === 'sourceRecordId') {
         row[col.key] = v1.sourceRecordId ?? '';
-      } else if (col.key === 'externalSystemName') {
-        row[col.key] = entity.metadata?.source?.externalSystemName ?? '';
-      } else if (col.key === 'externalRecordId') {
-        row[col.key] = entity.metadata?.source?.externalRecordId ?? '';
+      } else if (col.key === 'sourceSystem') {
+        row[col.key] = entity.metadata?.source?.system ?? '';
+      } else if (col.key === 'sourceRecordV2') {
+        row[col.key] = entity.metadata?.source?.recordId ?? '';
       } else if (col.key.startsWith('custom__')) {
         row[col.key] = formatFieldValue(fields[col.id], col.schema);
       } else {
@@ -497,7 +497,7 @@ async function createCompanyV2(pbFetch, row, mapping, domainFieldId, bypassHtmlF
   const sourceOrigin   = cell(row, mapping.sourceOriginCol);
   const sourceRecordId = cell(row, mapping.sourceRecordCol);
   const metadata = (sourceOrigin || sourceRecordId)
-    ? { source: { externalSystemName: sourceOrigin || null, externalRecordId: sourceRecordId || null } }
+    ? { source: { system: sourceOrigin || null, recordId: sourceRecordId || null } }
     : undefined;
 
   const response = await pbFetch('post', '/v2/entities', {
@@ -551,7 +551,7 @@ async function patchCompanyV2(pbFetch, companyId, row, mapping, options, domainF
   const sourceOrigin   = cell(row, mapping.sourceOriginCol);
   const sourceRecordId = cell(row, mapping.sourceRecordCol);
   const metadata = (sourceOrigin || sourceRecordId)
-    ? { source: { externalSystemName: sourceOrigin || null, externalRecordId: sourceRecordId || null } }
+    ? { source: { system: sourceOrigin || null, recordId: sourceRecordId || null } }
     : undefined;
 
   if (ops.length || metadata) {
@@ -739,8 +739,8 @@ router.post('/companies/source-migration/v1-to-v2', pbAuth, async (_req, res) =>
             data: {
               metadata: {
                 source: {
-                  externalSystemName: sourceOrigin   || null,
-                  externalRecordId:   sourceRecordId || null,
+                  system:   sourceOrigin   || null,
+                  recordId: sourceRecordId || null,
                 },
               },
             },
@@ -772,7 +772,7 @@ router.post('/companies/source-migration/v1-to-v2', pbAuth, async (_req, res) =>
 
 /**
  * POST /api/companies/source-migration/v2-to-v1
- * Copies v2 metadata.source.externalSystemName + externalRecordId back into
+ * Copies v2 metadata.source.system + recordId back into
  * v1 sourceOrigin + sourceRecordId for every company that has v2 source data.
  * Note: the v1 API may treat these fields as read-only for some companies;
  * any error is logged per-company rather than failing the whole run.
@@ -803,10 +803,10 @@ router.post('/companies/source-migration/v2-to-v1', pbAuth, async (_req, res) =>
       const entity = v2Companies[i];
       const pct = 20 + Math.round(((i + 1) / total) * 78);
 
-      const externalSystemName = entity.metadata?.source?.externalSystemName || '';
-      const externalRecordId   = entity.metadata?.source?.externalRecordId   || '';
+      const sourceSystem   = entity.metadata?.source?.system   || '';
+      const sourceRecordId = entity.metadata?.source?.recordId || '';
 
-      if (!externalSystemName && !externalRecordId) {
+      if (!sourceSystem && !sourceRecordId) {
         skippedEmpty++;
         sse.progress(`Processing ${i + 1} of ${total}…`, pct);
         continue;
@@ -816,14 +816,14 @@ router.post('/companies/source-migration/v2-to-v1', pbAuth, async (_req, res) =>
         await withRetry(
           () => pbFetch('patch', `/companies/${entity.id}`, {
             data: {
-              sourceOrigin:   externalSystemName || null,
-              sourceRecordId: externalRecordId   || null,
+              sourceOrigin:   sourceSystem   || null,
+              sourceRecordId: sourceRecordId || null,
             },
           }),
           `patch company ${entity.id} v1 source`
         );
         migrated++;
-        sse.log('success', `Migrated ${entity.id}`, `${externalSystemName} / ${externalRecordId}`);
+        sse.log('success', `Migrated ${entity.id}`, `${sourceSystem} / ${sourceRecordId}`);
       } catch (err) {
         if (err.status === 404) {
           skippedNotFound++;
