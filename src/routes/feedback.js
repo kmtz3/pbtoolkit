@@ -62,7 +62,7 @@ router.post('/', async (req, res) => {
         // but v1 accepts { email } and auto-matches to existing users/companies.
         if (safeEmail) {
           try {
-            await pbFetch('patch', `/notes/${noteId}`, { data: { user: { email: safeEmail } } });
+            await pbFetch('patch', `/notes/${noteId}`, { data: { user: { email: safeEmail, name: safeEmail } } });
           } catch (userErr) {
             console.warn(`Failed to link user "${safeEmail}" to note ${noteId}:`, userErr.message);
           }
@@ -136,43 +136,51 @@ function nl2br(str) {
  * Clean, readable format that works well in PB's note viewer.
  */
 function buildNoteHtml({ module, description, expectedBehavior, stepsToReproduce, email }) {
-  let html = '';
+  const parts = [];
   if (email) {
-    html += `<p><strong>From:</strong> ${esc(email)}</p>`;
+    parts.push(`<p><b>From:</b> ${esc(email)}</p>`);
   }
-  html += `<p><strong>Module:</strong> ${esc(module)}</p>`;
-  html += `<h3>Description</h3><p>${nl2br(description)}</p>`;
-  html += `<h3>Expected Behavior</h3><p>${nl2br(expectedBehavior)}</p>`;
+  parts.push(`<p><b>Module:</b> ${esc(module)}</p>`);
+  parts.push(`<hr>`);
+  parts.push(`<h2><b>Description</b></h2>`);
+  parts.push(`<p>${nl2br(description)}</p>`);
+  parts.push(`<h2><b>Expected Behavior</b></h2>`);
+  parts.push(`<p>${nl2br(expectedBehavior)}</p>`);
   if (stepsToReproduce?.trim()) {
-    html += `<h3>Steps to Reproduce</h3><p>${nl2br(stepsToReproduce)}</p>`;
+    parts.push(`<h2><b>Steps to Reproduce</b></h2>`);
+    parts.push(`<p>${nl2br(stepsToReproduce)}</p>`);
   }
-  return html;
+  return parts.join('\n');
 }
 
 /**
  * HTML email body for Brevo fallback.
  */
 function buildEmailHtml({ module, description, expectedBehavior, stepsToReproduce, email }) {
-  const section = (label, content) => `
-    <div style="margin-bottom:20px;">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;margin-bottom:4px;">${label}</div>
-      <div style="font-size:14px;line-height:1.6;color:#111827;">${content}</div>
-    </div>`;
+  // Uses semantic HTML (h3, strong, p, hr) so it renders well in both
+  // email clients and PB's note viewer (which strips inline styles).
+  const parts = [];
+  if (email) {
+    parts.push(`<p><b>From:</b> <a href="mailto:${esc(email)}">${esc(email)}</a></p>`);
+  }
+  parts.push(`<p><b>Module:</b> ${esc(module)}</p>`);
+  parts.push(`<hr>`);
+  parts.push(`<h2><b>Description</b></h2>`);
+  parts.push(`<p>${nl2br(description)}</p>`);
+  parts.push(`<h2><b>Expected Behavior</b></h2>`);
+  parts.push(`<p>${nl2br(expectedBehavior)}</p>`);
+  if (stepsToReproduce?.trim()) {
+    parts.push(`<h2><b>Steps to Reproduce</b></h2>`);
+    parts.push(`<p>${nl2br(stepsToReproduce)}</p>`);
+  }
+  const body = parts.join('\n');
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;font-family:system-ui,sans-serif;color:#111827;background:#f9fafb;">
   <div style="max-width:600px;margin:24px auto;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-    <div style="background:#355E3B;padding:16px 24px;">
-      <h1 style="margin:0;font-size:18px;font-weight:700;color:#fff;">PBToolkit — Bug Report</h1>
-    </div>
     <div style="padding:24px;">
-      ${email ? `<p style="margin:0 0 20px;font-size:14px;"><strong>From:</strong> <a href="mailto:${esc(email)}" style="color:#355E3B;">${esc(email)}</a></p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:0 0 20px;">` : ''}
-      ${section('Module', esc(module))}
-      ${section('Description', nl2br(description))}
-      ${section('Expected Behavior', nl2br(expectedBehavior))}
-      ${stepsToReproduce?.trim() ? section('Steps to Reproduce', nl2br(stepsToReproduce)) : ''}
+      ${body}
     </div>
     <div style="padding:12px 24px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;">
       Sent from PBToolkit Report Issue form
