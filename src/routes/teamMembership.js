@@ -12,129 +12,13 @@
 'use strict';
 
 const express = require('express');
-const { listTeams, listMembers, listTeamMembers } = require('../lib/pbClient');
 const { parseCSV } = require('../lib/csvUtils');
 const { startSSE } = require('../lib/sse');
 const { pbAuth } = require('../middleware/pbAuth');
 const { parseApiError } = require('../lib/errorUtils');
+const { ensureCache, invalidateCache, refreshCache, isCacheStale, buildCache, CACHE_TTL_MS } = require('../services/teamCache');
 
 const router = express.Router();
-
-// ---------------------------------------------------------------------------
-// Session cache
-// ---------------------------------------------------------------------------
-
-/** @type {Map<string, CacheEntry>} token → CacheEntry */
-const sessionCache = new Map();
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
-const CACHE_MAX_ENTRIES = 200;
-
-const BATCH = 5;
-const BATCH_DELAY_MS = 100;
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-function isCacheStale(entry) {
-  return !entry || Date.now() - entry.fetchedAt > CACHE_TTL_MS;
-}
-
-function pruneCache() {
-  if (sessionCache.size < CACHE_MAX_ENTRIES) return;
-  for (const [key, entry] of sessionCache) {
-    if (isCacheStale(entry)) sessionCache.delete(key);
-  }
-  if (sessionCache.size >= CACHE_MAX_ENTRIES) {
-    const oldest = [...sessionCache.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
-    sessionCache.delete(oldest[0][0]);
-  }
-}
-
-/**
- * Build and store the session cache for a given token.
- * Fetches members (includeDisabled:false, includeInvited:false) and teams concurrently,
- * then fans out team relationship calls in batches of 5.
- *
- * @param {string} token
- * @param {object} pbClient - from createClient()
- * @param {Function} [onProgress]
- * @returns {CacheEntry}
- */
-async function buildCache(token, pbClient, onProgress = () => {}) {
-  onProgress('Fetching members and teams…');
-
-  const [memberRecords, teamRecords] = await Promise.all([
-    listMembers(pbClient, { includeDisabled: false, includeInvited: false }),
-    listTeams(pbClient),
-  ]);
-
-  // membersById: id → MemberProfile
-  const membersById = new Map();
-  // membersByEmail: email.toLowerCase() → MemberProfile
-  const membersByEmail = new Map();
-  for (const m of memberRecords) {
-    const profile = {
-      id:    m.id,
-      name:  m.fields?.name     ?? '[unknown]',
-      email: m.fields?.email    ?? '',
-      role:  m.fields?.role     ?? 'viewer',
-    };
-    membersById.set(m.id, profile);
-    if (profile.email) membersByEmail.set(profile.email.toLowerCase().trim(), profile);
-  }
-
-  // teamsById: id → TeamMeta
-  const teamsById = new Map();
-  for (const t of teamRecords) {
-    teamsById.set(t.id, {
-      id:     t.id,
-      name:   t.fields?.name   ?? t.id,
-      handle: t.fields?.handle ?? '',
-    });
-  }
-
-  // memberIdsByTeamId: teamId → Set<memberId>
-  const memberIdsByTeamId = new Map();
-  const teamIds = teamRecords.map((t) => t.id);
-  for (const id of teamIds) memberIdsByTeamId.set(id, new Set());
-
-  onProgress(`Fetching team memberships (${teamRecords.length} teams)…`);
-
-  let reqCount = 0;
-  for (let i = 0; i < teamIds.length; i += BATCH) {
-    const batch = teamIds.slice(i, i + BATCH);
-    await Promise.all(
-      batch.map(async (teamId) => {
-        const members = await listTeamMembers(pbClient, teamId);
-        reqCount++;
-        for (const m of members) {
-          if (m.id) memberIdsByTeamId.get(teamId)?.add(m.id);
-        }
-      })
-    );
-    // Inter-batch sleep: all 5 calls in a batch fire concurrently via Promise.all,
-    // so rate-limit headers from one batch aren't visible to the next batch's requests
-    // until after they've already started. This delay is the safety margin.
-    if (i + BATCH < teamIds.length) await sleep(BATCH_DELAY_MS);
-  }
-
-  console.log(`[team-membership] cache built: ${membersById.size} members, ${teamsById.size} teams, ${reqCount} member-list requests`);
-
-  const entry = { membersById, membersByEmail, teamsById, memberIdsByTeamId, fetchedAt: Date.now() };
-  pruneCache();
-  sessionCache.set(token, entry);
-  return entry;
-}
-
-function invalidateCache(token) {
-  sessionCache.delete(token);
-}
-
-async function refreshAfterImport(token, pbClient) {
-  invalidateCache(token);
-  return buildCache(token, pbClient);
-}
 
 /**
  * Return a display name for a team, appending handle when another team shares the same name.
@@ -156,10 +40,7 @@ router.get('/metadata', pbAuth, async (req, res) => {
   if (refresh) invalidateCache(token);
 
   try {
-    let entry = sessionCache.get(token);
-    if (isCacheStale(entry)) {
-      entry = await buildCache(token, pbClient);
-    }
+    const entry = await ensureCache(token, pbClient);
 
     const allTeams = [...entry.teamsById.values()].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -568,11 +449,8 @@ router.get('/export', pbAuth, async (req, res) => {
     : null;
 
   try {
-    let entry = sessionCache.get(token);
-    if (isCacheStale(entry)) {
-      const { pbClient } = res.locals;
-      entry = await buildCache(token, pbClient);
-    }
+    const { pbClient } = res.locals;
+    const entry = await ensureCache(token, pbClient);
 
     const csv = format === 'B'
       ? exportFormatB(entry, teamIds)
@@ -691,11 +569,8 @@ router.post('/preview', pbAuth, async (req, res) => {
   }
 
   try {
-    let entry = sessionCache.get(token);
     const { pbClient } = res.locals;
-    if (isCacheStale(entry)) {
-      entry = await buildCache(token, pbClient);
-    }
+    const entry = await ensureCache(token, pbClient);
 
     const { hardErrors, warnings, assignments } = parseAndValidate(csvText, entry);
 
@@ -764,15 +639,10 @@ router.post('/import', pbAuth, async (req, res) => {
 
   try {
     // Step 1 — Ensure cache is warm
-    let entry = sessionCache.get(token);
     const { pbClient } = res.locals;
-    if (isCacheStale(entry)) {
-      sse.progress('Loading workspace data…', 2);
-      entry = await buildCache(token, pbClient, (msg) => sse.progress(msg, 5));
-      sse.progress('Workspace data loaded.', 8);
-    } else {
-      sse.progress('Using cached workspace data.', 8);
-    }
+    sse.progress('Loading workspace data…', 2);
+    const entry = await ensureCache(token, pbClient, (msg) => sse.progress(msg, 5));
+    sse.progress('Workspace data loaded.', 8);
 
     if (sse.isAborted()) return;
 
@@ -813,7 +683,7 @@ router.post('/import', pbAuth, async (req, res) => {
     if (sse.isAborted()) return;
 
     // Step 5 — Invalidate cache so next export/preview sees updated state
-    await refreshAfterImport(token, pbClient);
+    await refreshCache(token, pbClient);
 
     sse.progress('Done!', 100);
     sse.complete(result);
