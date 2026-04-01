@@ -142,10 +142,11 @@ async function writeRelations(allRows, idCache, pbFetch, withRetry, onLog) {
   }
 
   // ── 7. Feature / Subfeature / Initiative isBlocking ───────────────────────
-  // Post as isBlockedBy from the target's side rather than isBlocking from self.
-  // PB auto-creates the inverse isBlocking when isBlockedBy is posted, and returns
-  // 500 (instead of 409) when isBlocking is posted explicitly for an already-existing
-  // pair. Posting isBlockedBy means duplicates become idempotent 409s, not 500s.
+  // Temporary API hotfix: post isBlockedBy from the target's side rather than
+  // isBlocking from self. The current API route can return 500 (instead of 409)
+  // when isBlocking is posted explicitly for an already-existing pair. Posting
+  // isBlockedBy lets PB create the inverse isBlocking and keeps duplicates
+  // idempotent until the API route is fixed.
   for (const entityType of ['feature', 'subfeature', 'initiative']) {
     for (const row of allRows.filter((r) => r._type === entityType && r['blocking_ext_key'])) {
       const selfId = _selfId(row, idCache);

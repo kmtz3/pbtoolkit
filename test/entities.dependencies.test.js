@@ -418,7 +418,10 @@ describe('writeRelations — isBlockedBy pass (pass 6)', () => {
 });
 
 describe('writeRelations — isBlocking pass (pass 7)', () => {
-  test('posts isBlocking relationship with correct payload type', async () => {
+  // Temporary API hotfix: blocking_ext_key is currently written by posting
+  // isBlockedBy from the target side because the direct isBlocking route can
+  // return 500 for already-existing pairs.
+  test('posts reverse isBlockedBy relationship for the temporary API hotfix', async () => {
     const calls = [];
     const cache = makeIdCache();
     const rows = [{
@@ -428,12 +431,12 @@ describe('writeRelations — isBlocking pass (pass 7)', () => {
 
     await writeRelations(rows, cache, makePbFetch(calls), withRetry, noLog);
 
-    const depCall = calls.find((c) => c.body?.data?.type === 'isBlocking');
-    assert.ok(depCall, 'expected isBlocking POST call');
-    assert.equal(depCall.body.data.target.id, UUID_A);
+    const depCall = calls.find((c) => c.path.includes(UUID_A) && c.body?.data?.type === 'isBlockedBy');
+    assert.ok(depCall, 'expected reversed isBlockedBy POST call');
+    assert.equal(depCall.body.data.target.id, UUID_SELF);
   });
 
-  test('subfeature rows are processed for isBlocking', async () => {
+  test('subfeature rows are processed for the temporary hotfix path', async () => {
     const calls = [];
     const cache = makeIdCache();
     const rows = [{
@@ -443,12 +446,12 @@ describe('writeRelations — isBlocking pass (pass 7)', () => {
 
     await writeRelations(rows, cache, makePbFetch(calls), withRetry, noLog);
 
-    const depCall = calls.find((c) => c.body?.data?.type === 'isBlocking');
+    const depCall = calls.find((c) => c.path.includes(UUID_B) && c.body?.data?.type === 'isBlockedBy');
     assert.ok(depCall);
-    assert.equal(depCall.body.data.target.id, UUID_B);
+    assert.equal(depCall.body.data.target.id, UUID_SELF);
   });
 
-  test('initiative rows are processed for isBlocking', async () => {
+  test('initiative rows are processed for the temporary hotfix path', async () => {
     const calls = [];
     const cache = makeIdCache();
     const rows = [{
@@ -458,12 +461,12 @@ describe('writeRelations — isBlocking pass (pass 7)', () => {
 
     await writeRelations(rows, cache, makePbFetch(calls), withRetry, noLog);
 
-    const depCall = calls.find((c) => c.body?.data?.type === 'isBlocking');
+    const depCall = calls.find((c) => c.path.includes(UUID_C) && c.body?.data?.type === 'isBlockedBy');
     assert.ok(depCall);
-    assert.equal(depCall.body.data.target.id, UUID_C);
+    assert.equal(depCall.body.data.target.id, UUID_SELF);
   });
 
-  test('both isBlockedBy and isBlocking written in same run', async () => {
+  test('both dependency directions are written in the same run under the hotfix', async () => {
     const calls = [];
     const cache = makeIdCache();
     const rows = [{
@@ -474,14 +477,14 @@ describe('writeRelations — isBlocking pass (pass 7)', () => {
 
     const result = await writeRelations(rows, cache, makePbFetch(calls), withRetry, noLog);
 
-    const bby = calls.find((c) => c.body?.data?.type === 'isBlockedBy');
-    const blk = calls.find((c) => c.body?.data?.type === 'isBlocking');
+    const bby = calls.find((c) => c.path.includes(UUID_SELF) && c.body?.data?.type === 'isBlockedBy' && c.body.data.target.id === UUID_A);
+    const blk = calls.find((c) => c.path.includes(UUID_B) && c.body?.data?.type === 'isBlockedBy' && c.body.data.target.id === UUID_SELF);
     assert.ok(bby, 'isBlockedBy call missing');
-    assert.ok(blk, 'isBlocking call missing');
+    assert.ok(blk, 'reversed isBlockedBy hotfix call missing');
     assert.equal(result.relationshipLinks, 2);
   });
 
-  test('treats 409 as idempotent success for isBlocking', async () => {
+  test('treats 409 as idempotent success for the temporary hotfix path', async () => {
     const cache = makeIdCache();
     const rows = [{
       _type: 'feature', _pbId: UUID_SELF, _extKey: 'FEAT-1',
