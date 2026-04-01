@@ -1,0 +1,132 @@
+<!-- ── Members & Teams Management ── -->
+<div id="view-members-teams-mgmt-manage" class="view-panel">
+  <div class="panel">
+    <div class="panel-header">
+      <h2 class="panel-title">Members &amp; Teams</h2>
+      <div class="panel-subtitle">View and manage team membership in real time.</div>
+      <details class="mtm-howto">
+        <summary>How to use</summary>
+        <ul>
+          <li><strong>Edit team details</strong> — click a team name, handle, or description to edit inline. Press Enter to save, Escape to cancel.</li>
+          <li><strong>Move a member</strong> — drag a member row and drop it onto another team card.</li>
+          <li><strong>Copy a member</strong> — hold <kbd>Shift</kbd> while dragging to add them to the target team without removing from the original.</li>
+          <li><strong>Remove a member</strong> — click the &times; button on a member row.</li>
+          <li><strong>Add a member</strong> — click "+ Add member" on a team card and search by name or email.</li>
+          <li><strong>Create / delete teams</strong> — use the "+ New team" button or the "Delete team" link on each card.</li>
+          <li><strong>Filter</strong> — type in the search bar to filter teams and members by name, handle, or email.</li>
+        </ul>
+      </details>
+    </div>
+    <hr class="panel-divider mt-12" />
+    <div class="panel-body">
+
+      <!-- Loading state -->
+      <div id="mtm-loading" class="hidden">
+        <div class="progress-wrap mt-16">
+          <div class="progress-bar" id="mtm-progress-bar" style="width:0%"></div>
+        </div>
+        <p class="text-sm text-muted mt-8" id="mtm-loading-msg">Loading teams and members...</p>
+      </div>
+
+      <!-- Error state -->
+      <div id="mtm-error" class="hidden">
+        <div class="alert alert-danger">
+          <span class="alert-icon">&#9888;</span>
+          <span id="mtm-error-msg"></span>
+        </div>
+        <button class="btn btn-primary mt-12" id="btn-mtm-retry">Retry</button>
+      </div>
+
+      <!-- Idle / loaded state -->
+      <div id="mtm-idle">
+        <div class="mtm-toolbar">
+          <div class="mtm-search-wrap">
+            <input type="text" id="mtm-search" class="input input-sm" placeholder="Filter teams or members..." />
+          </div>
+          <button class="btn btn-primary btn-sm" id="btn-mtm-create">+ New team</button>
+          <button class="btn btn-ghost btn-sm" id="btn-mtm-refresh" title="Reload teams">Refresh</button>
+        </div>
+        <div id="mtm-team-count" class="text-sm text-muted" style="margin-bottom:8px"></div>
+
+        <div id="mtm-team-list" class="mtm-team-list">
+          <!-- Team cards injected here by JS -->
+        </div>
+
+        <div id="mtm-empty" class="hidden">
+          <p class="text-sm text-muted mt-16">No teams found in this workspace.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Create Team Modal ── -->
+<div id="mtm-create-modal" class="mtm-modal-overlay hidden">
+  <div class="mtm-modal">
+    <div class="mtm-modal-header">
+      <h3 class="mtm-modal-title">Create new team</h3>
+      <button class="mtm-modal-close" id="btn-mtm-create-modal-close">&times;</button>
+    </div>
+    <div class="mtm-modal-body">
+      <div class="field">
+        <label for="mtm-create-name">Team name <span class="text-danger">*</span></label>
+        <input type="text" id="mtm-create-name" class="input" placeholder="e.g. Platform Team" />
+      </div>
+      <div class="field mt-8">
+        <label for="mtm-create-handle">Handle</label>
+        <input type="text" id="mtm-create-handle" class="input" placeholder="e.g. platformteam (lowercase, no spaces)" />
+      </div>
+      <div class="field mt-8">
+        <label for="mtm-create-desc">Description</label>
+        <input type="text" id="mtm-create-desc" class="input" placeholder="Optional description" />
+      </div>
+      <div id="mtm-create-error" class="alert alert-danger hidden mt-12">
+        <span class="alert-icon">&#9888;</span>
+        <span id="mtm-create-error-msg"></span>
+      </div>
+      <button class="btn btn-primary btn-full mt-16" id="btn-mtm-create-submit">Create team</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Delete Team Confirmation Modal ── -->
+<div id="mtm-delete-modal" class="mtm-modal-overlay hidden">
+  <div class="mtm-modal">
+    <div class="mtm-modal-header">
+      <h3 class="mtm-modal-title">Delete team</h3>
+      <button class="mtm-modal-close" id="btn-mtm-delete-modal-close">&times;</button>
+    </div>
+    <div class="mtm-modal-body">
+      <div class="alert alert-danger">
+        <span class="alert-icon">&#9888;</span>
+        <span>This will permanently delete <strong id="mtm-delete-team-name"></strong>. This action cannot be undone.</span>
+      </div>
+      <label for="mtm-delete-confirm-input" class="text-sm text-muted" style="display:block;margin-top:16px">
+        Type <strong>DELETE</strong> to confirm.
+      </label>
+      <input type="text" id="mtm-delete-confirm-input" placeholder="Type DELETE to confirm" autocomplete="off"
+        style="display:block;width:100%;max-width:320px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-size:14px;margin:8px 0 12px" />
+      <button class="btn btn-danger" id="btn-mtm-delete-confirm" disabled>Delete team</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add Member Modal ── -->
+<div id="mtm-add-modal" class="mtm-modal-overlay hidden">
+  <div class="mtm-modal">
+    <div class="mtm-modal-header">
+      <h3 class="mtm-modal-title">Add member to <span id="mtm-add-modal-team-name"></span></h3>
+      <button class="mtm-modal-close" id="btn-mtm-add-modal-close">&times;</button>
+    </div>
+    <div class="mtm-modal-body">
+      <input type="text" id="mtm-add-search" class="input" placeholder="Filter by name or email..." autocomplete="off" />
+      <label class="checkbox-row text-sm" style="margin-bottom:10px">
+        <input type="checkbox" id="mtm-add-unassigned-only" /><span>Only show members without a team</span>
+      </label>
+      <div id="mtm-add-results" class="mtm-add-results">
+        <!-- Search results injected here -->
+      </div>
+    </div>
+  </div>
+</div>
