@@ -179,8 +179,8 @@
           </div>
           <div class="tool-card" data-tool="companies">
             <span class="tool-card-icon">🏢</span>
-            <h3 class="tool-card-name">Companies</h3>
-            <div class="tool-card-desc">Export and import companies, including custom fields and UUID-based patching.</div>
+            <h3 class="tool-card-name">Companies &amp; Users</h3>
+            <div class="tool-card-desc">Export and import companies and users, including custom fields, relationships, and UUID-based patching.</div>
           </div>
         </div>
       </section>
@@ -251,22 +251,37 @@
         <button class="btn-back-home" id="btn-back-home">← All tools</button>
         <span class="nav-section-label">Tools</span>
 
-        <!-- Companies nav items -->
+        <!-- Companies & Users nav items -->
         <div id="sidebar-companies">
+          <span class="nav-group-label">Companies</span>
           <button class="nav-item active" data-view="export" id="nav-export">
-            <span class="icon">📤</span> Export companies
+            <span class="icon">📤</span> Export
           </button>
           <button class="nav-item" data-view="import" id="nav-import">
-            <span class="icon">📥</span> Import companies
+            <span class="icon">📥</span> Import
           </button>
           <button class="nav-item" data-view="companies-delete-csv" id="nav-companies-delete-csv">
             <span class="icon">🗑</span> Delete from CSV
           </button>
           <button class="nav-item" data-view="companies-delete-all" id="nav-companies-delete-all">
-            <span class="icon">⚠️</span> Delete all companies
+            <span class="icon">⚠️</span> Delete all
           </button>
           <button class="nav-item" data-view="companies-source-migration" id="nav-companies-source-migration">
             <span class="icon">🔄</span> Source migration
+          </button>
+
+          <span class="nav-group-label">Users</span>
+          <button class="nav-item" data-view="users-export" id="nav-users-export">
+            <span class="icon">📤</span> Export
+          </button>
+          <button class="nav-item" data-view="users-import" id="nav-users-import">
+            <span class="icon">📥</span> Import
+          </button>
+          <button class="nav-item" data-view="users-delete-csv" id="nav-users-delete-csv">
+            <span class="icon">🗑</span> Delete from CSV
+          </button>
+          <button class="nav-item" data-view="users-delete-all" id="nav-users-delete-all">
+            <span class="icon">⚠️</span> Delete all
           </button>
         </div>
 
@@ -358,6 +373,7 @@
 <script src="csv-utils.js"></script>
 <script src="app.js"></script>
 <script src="companies-app.js"></script>
+<script src="users-app.js"></script>
 <script src="notes-app.js"></script>
 <script src="entities-app.js"></script>
 <script src="member-activity-app.js"></script>

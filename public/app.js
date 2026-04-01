@@ -255,7 +255,7 @@ const VALID_TOOLS = new Set([
 const PAGE_META = {
   entities:          { title: 'Entities', desc: 'Import, export, and migrate Productboard entities across workspaces via CSV.' },
   notes:             { title: 'Notes', desc: 'Export, import, delete, and migrate Productboard notes across workspaces.' },
-  companies:         { title: 'Companies', desc: 'Export and import Productboard companies, including custom fields and UUID-based patching.' },
+  companies:         { title: 'Companies & Users', desc: 'Export and import Productboard companies and users, including custom fields, relationships, and UUID-based patching.' },
   'member-activity': { title: 'Member Activity', desc: 'Export Productboard member activity data for license auditing and enablement planning.' },
   teams:             { title: 'Teams & Members', desc: 'Manage Productboard teams — edit names, handles, descriptions, and members. Import and export via CSV.' },
 };
@@ -279,7 +279,7 @@ const DEFAULT_VIEWS = {
 };
 
 const TOOL_VIEWS = {
-  companies:         ['export', 'import', 'companies-delete-csv', 'companies-delete-all', 'companies-source-migration'],
+  companies:         ['export', 'import', 'companies-delete-csv', 'companies-delete-all', 'companies-source-migration', 'users-export', 'users-import', 'users-delete-csv', 'users-delete-all'],
   notes:             ['notes-export', 'notes-import', 'notes-delete-csv', 'notes-delete-all', 'notes-migrate'],
   entities:          ['entities-templates', 'entities-export', 'entities-import', 'entities-delete'],
   'member-activity': ['member-activity-export'],
@@ -464,7 +464,7 @@ document.querySelectorAll('.tool-card:not(.tool-card-soon)').forEach((card) => {
 });
 
 async function loadTool(toolName) {
-  const names = { companies: 'Companies', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', teams: 'Teams' };
+  const names = { companies: 'Companies & Users', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', teams: 'Teams' };
   setText('topbar-tool-name', names[toolName] || toolName);
   showScreen('tool');
   _currentTool = toolName;
@@ -477,7 +477,13 @@ async function loadTool(toolName) {
   $('sidebar-teams').classList.toggle('hidden', toolName !== 'teams');
 
   try {
-    if (toolName === 'teams') {
+    if (toolName === 'companies') {
+      // Combined module: load companies + users partials
+      await Promise.all([
+        loadPartial('companies'),
+        loadPartial('users'),
+      ]);
+    } else if (toolName === 'teams') {
       // Combined module: load all three partials
       await Promise.all([
         loadPartial('teams-crud'),
@@ -493,7 +499,7 @@ async function loadTool(toolName) {
   }
 
   // Init module (idempotent — each module guards against double-init)
-  if (toolName === 'companies')        window.initCompaniesModule?.();
+  if (toolName === 'companies')        { window.initCompaniesModule?.(); window.initUsersModule?.(); }
   if (toolName === 'notes')            window.initNotesModule?.();
   if (toolName === 'entities')         window.initEntitiesModule?.();
   if (toolName === 'member-activity')  { if (typeof initMemberActivityModule === 'function') initMemberActivityModule(); }
@@ -626,6 +632,7 @@ function showView(view, { updateUrl = false } = {}) {
     'team-membership-export', 'team-membership-import',
     'teams-crud-export', 'teams-crud-import', 'teams-crud-delete-csv', 'teams-crud-delete-all',
     'members-teams-mgmt-manage',
+    'users-export', 'users-import', 'users-delete-csv', 'users-delete-all',
   ].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', v !== view);

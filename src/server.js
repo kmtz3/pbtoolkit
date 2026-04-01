@@ -7,6 +7,7 @@ const compression = require('compression');
 const session = require('express-session');
 const rateLimit = require('express-rate-limit');
 const slowDown = require('express-slow-down');
+const APP_VERSION = require(path.join(__dirname, '..', 'package.json')).version;
 
 const validateRouter = require('./routes/validate');
 const companiesRouter = require('./routes/companies');
@@ -16,6 +17,7 @@ const memberActivityRouter = require('./routes/memberActivity');
 const teamMembershipRouter = require('./routes/teamMembership');
 const teamsCrudRouter      = require('./routes/teamsCrud');
 const membersTeamsMgmtRouter = require('./routes/membersTeamsMgmt');
+const usersRouter          = require('./routes/users');
 const authRouter           = require('./routes/auth');
 const feedbackRouter       = require('./routes/feedback');
 
@@ -67,7 +69,7 @@ app.get('/api/auth/status', (req, res) => {
 app.use('/auth', authRouter);
 app.get('/api/config', (_req, res) => {
   res.json({
-    version:            process.env.npm_package_version || require(path.join(__dirname, '..', 'package.json')).version,
+    version:            APP_VERSION,
     feedbackUrl:        process.env.FEEDBACK_URL || null,
     issueUrl:           process.env.ISSUE_URL    || null,
     feedbackFormEnabled: !!(process.env.PB_FEEDBACK_TOKEN || (process.env.BREVO_API_KEY && process.env.BREVO_SENDER_EMAIL && process.env.FEEDBACK_RECIPIENT_EMAIL)),
@@ -107,6 +109,7 @@ if (process.env.NODE_ENV !== 'test') {
 
 app.use('/api/validate', validateRouter);
 app.use('/api', companiesRouter);
+app.use('/api/users', usersRouter);
 app.use('/api/notes', notesRouter);
 app.use('/api/entities', entitiesRouter);
 app.use('/api/member-activity', memberActivityRouter);
