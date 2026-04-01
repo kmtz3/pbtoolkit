@@ -178,7 +178,8 @@ async function runImport(files, mappings, configs, options, pbFetch, withRetry, 
         } catch (err) {
           typeErrors++;
           const msg = parseApiError(err);
-          onLog('error', `Row ${rowNum}: ${msg}`, { entityType: type, row: rowNum });
+          const statusInfo = err.status ? ` (HTTP ${err.status})` : '';
+          onLog('error', `Row ${rowNum}: ${msg}${statusInfo}`, { entityType: type, row: rowNum });
         }
       }
 

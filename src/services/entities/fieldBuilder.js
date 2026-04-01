@@ -13,6 +13,7 @@ const { normalizeSchema } = require('./configCache');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /<?([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})>?/i;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CUSTOM_RE = /^custom__(.+)$/;
 
 // Allowed HTML tags and attributes for PB rich-text fields
@@ -136,6 +137,8 @@ function buildFieldsObject(normalizedRow, entityType, config, options, op) {
 
   function isEmpty(v) { return v === null || v === undefined || String(v).trim() === ''; }
   function skip(v)    { return bypassEmptyCells && !isCreate && isEmpty(v); }
+  /** True when a system field key was actually mapped in the user's column mapping. */
+  function mapped(key) { return key in normalizedRow; }
 
   // --- name (always sent on create to prevent "Unnamed …") ---
   const nameVal = normalizedRow['name'] || '';
@@ -160,19 +163,21 @@ function buildFieldsObject(normalizedRow, entityType, config, options, op) {
     }
   }
 
-  // --- status ---
-  const statusVal = normalizedRow['status'] || '';
-  if (!skip(statusVal)) {
-    if (multiSelectMode === 'set') {
-      if (statusVal) {
+  // --- status (only process if user actually mapped it) ---
+  if (mapped('status')) {
+    const statusVal = normalizedRow['status'] || '';
+    if (!skip(statusVal)) {
+      if (multiSelectMode === 'set') {
+        if (statusVal) {
+          F.status = { name: statusVal };
+        } else if (!isCreate) {
+          F.status = { __clearField: true };
+        }
+      } else if (multiSelectMode === 'addItems' && statusVal) {
         F.status = { name: statusVal };
-      } else if (!isCreate) {
+      } else if (multiSelectMode === 'removeItems' && statusVal && !isCreate) {
         F.status = { __clearField: true };
       }
-    } else if (multiSelectMode === 'addItems' && statusVal) {
-      F.status = { name: statusVal };
-    } else if (multiSelectMode === 'removeItems' && statusVal && !isCreate) {
-      F.status = { __clearField: true };
     }
   }
 
@@ -409,7 +414,7 @@ function normalizeCustomValue(val, typeToken, schema) {
     const n = Number(s);
     return isNaN(n) ? null : Math.round(n * 100) / 100;
   }
-  if (tt === 'date')   return s;
+  if (tt === 'date')   return _normalizeDate(s);
   if (/^(true|false)$/i.test(s)) return /^true$/i.test(s);
   return s;
 }
@@ -465,6 +470,20 @@ function _indexConfigById(config) {
 function _sanitizeTeamName(name) {
   if (name == null) return '';
   return String(name).trim();
+}
+
+/** Normalise a date string to YYYY-MM-DD. Duplicated from fieldFormat.js to avoid circular dep. */
+function _normalizeDate(raw) {
+  const s = String(raw).trim();
+  if (ISO_DATE_RE.test(s)) return s;
+  const cleaned = s.replace(/T$/, '');
+  if (ISO_DATE_RE.test(cleaned)) return cleaned;
+  const d = new Date(cleaned);
+  if (isNaN(d.getTime())) return s;
+  const yyyy = d.getFullYear() < 100 ? d.getFullYear() + 2000 : d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 module.exports = {
