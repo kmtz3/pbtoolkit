@@ -21,7 +21,10 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 function normalizeDate(raw) {
   const s = String(raw).trim();
   if (ISO_DATE_RE.test(s)) return s;
-  const d = new Date(s);
+  // Strip trailing "T" left over from truncated ISO timestamps (e.g. "2025-02-21T")
+  const cleaned = s.replace(/T$/, '');
+  if (ISO_DATE_RE.test(cleaned)) return cleaned;
+  const d = new Date(cleaned);
   if (isNaN(d.getTime())) return s;
   const yyyy = d.getFullYear() < 100 ? d.getFullYear() + 2000 : d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');

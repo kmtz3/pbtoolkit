@@ -100,10 +100,14 @@ const BASE_FIELDS = [
   { key: 'domain',         label: 'domain' },
   { key: 'description',    label: 'description' },
   { key: 'owner_email',    label: 'owner_email' },
+  { key: 'archived',      label: 'archived' },
   { key: 'sourceOrigin',       label: 'source_origin' },
   { key: 'sourceRecordId',     label: 'source_record_id' },
   { key: 'sourceSystem',   label: 'source_system' },
   { key: 'sourceRecordV2', label: 'source_record_id_v2' },
+  { key: 'sourceUrl',     label: 'source_url' },
+  { key: 'created_at',    label: 'created_at' },
+  { key: 'updated_at',    label: 'updated_at' },
 ];
 
 /**
@@ -204,8 +208,16 @@ function buildExportCSV(companies, v1Map, customFields, domainFieldId) {
         row[col.key] = entity.metadata?.source?.system ?? '';
       } else if (col.key === 'sourceRecordV2') {
         row[col.key] = entity.metadata?.source?.recordId ?? '';
+      } else if (col.key === 'sourceUrl') {
+        row[col.key] = entity.metadata?.source?.url ?? '';
       } else if (col.key === 'owner_email') {
         row[col.key] = fields.owner?.email ?? '';
+      } else if (col.key === 'archived') {
+        row[col.key] = fields.archived === true ? 'true' : fields.archived === false ? 'false' : '';
+      } else if (col.key === 'created_at') {
+        row[col.key] = entity.createdAt ?? '';
+      } else if (col.key === 'updated_at') {
+        row[col.key] = entity.updatedAt ?? '';
       } else if (col.key.startsWith('custom__')) {
         row[col.key] = formatFieldValue(fields[col.id], col.schema);
       } else {

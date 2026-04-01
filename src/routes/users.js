@@ -96,6 +96,9 @@ const BASE_FIELDS = [
   { key: 'linked_components',       label: 'linked_components' },
   { key: 'linked_products',         label: 'linked_products' },
   { key: 'linked_subfeatures',      label: 'linked_subfeatures' },
+  { key: 'sourceSystem',             label: 'source_system' },
+  { key: 'sourceRecordId',           label: 'source_record_id' },
+  { key: 'sourceUrl',                label: 'source_url' },
   { key: 'created_at',              label: 'created_at' },
   { key: 'updated_at',              label: 'updated_at' },
 ];
@@ -222,6 +225,9 @@ function buildExportCSV(users, customFields, companyDomainMap) {
       else if (col.key === 'linked_components')    row[col.key] = (linksByType.component || []).join(', ');
       else if (col.key === 'linked_products')      row[col.key] = (linksByType.product || []).join(', ');
       else if (col.key === 'linked_subfeatures')   row[col.key] = (linksByType.subfeature || []).join(', ');
+      else if (col.key === 'sourceSystem')      row[col.key] = entity.metadata?.source?.system ?? '';
+      else if (col.key === 'sourceRecordId')    row[col.key] = entity.metadata?.source?.recordId ?? '';
+      else if (col.key === 'sourceUrl')         row[col.key] = entity.metadata?.source?.url ?? '';
       else if (col.key === 'created_at')        row[col.key] = entity.createdAt ?? '';
       else if (col.key === 'updated_at')        row[col.key] = entity.updatedAt ?? '';
       else if (col.key.startsWith('custom__'))  row[col.key] = formatFieldValue(fields[col.id], col.schema);
