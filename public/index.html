@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <base href="/" />
 
   <!-- Primary SEO -->
   <title>PBToolkit — Productboard Importer, Exporter &amp; Migration Tool</title>
@@ -53,14 +54,24 @@
   }
   </script>
 
+  <!-- Theme -->
+  <meta name="theme-color" content="#355E3B" />
+
   <!-- Assets -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+
+<noscript>
+  <p style="padding:40px;text-align:center;font-family:sans-serif">PBToolkit requires JavaScript to run. Please enable it in your browser settings.</p>
+</noscript>
 
 <!-- ══════════════════════════════════════════
      AUTH SCREEN (shown when no token)
@@ -111,7 +122,23 @@
 
   <!-- Top bar -->
   <header class="topbar">
-    <button class="topbar-logo" id="btn-home"><img src="logo_letters.svg" alt="PBToolkit" height="22" style="display:inline-block;vertical-align:middle" /></button>
+    <button class="topbar-logo" id="btn-home"><svg class="logo-svg" width="343" height="69" viewBox="0 0 343 69" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="PBToolkit">
+      <path d="M29.792 4.99963C30.4779 4.99964 31.3922 5.02923 32.5352 5.08752C33.7112 5.11669 34.7572 5.20442 35.6719 5.35022C39.8857 5.93342 43.3321 7.17268 46.0107 9.06799C48.7219 10.9633 50.7143 13.3542 51.9883 16.2408C53.2623 19.0985 53.8994 22.2917 53.8994 25.8199C53.8994 29.3481 53.246 32.5553 51.9395 35.442C50.6655 38.2996 48.6732 40.6766 45.9619 42.5719C43.2833 44.4672 39.8531 45.7065 35.6719 46.2897C34.7572 46.4063 33.7112 46.494 32.5352 46.5524C31.3596 46.6107 30.4452 46.6393 29.792 46.6393H13.3271V67.984H0V4.99963H29.792ZM13.3281 35.5299H29.2041C29.89 35.5299 30.6415 35.5003 31.458 35.442C32.2745 35.3837 33.026 35.2673 33.7119 35.0924C35.5084 34.655 36.897 33.9264 37.877 32.9059C38.857 31.8561 39.5264 30.7037 39.8857 29.4498C40.2777 28.167 40.4736 26.957 40.4736 25.8199C40.4736 24.6827 40.2777 23.4869 39.8857 22.233C39.5264 20.9502 38.8568 19.7984 37.877 18.778C36.897 17.7283 35.5084 16.9849 33.7119 16.5475C33.026 16.3726 32.2745 16.2552 31.458 16.1969C30.6415 16.1386 29.89 16.11 29.2041 16.11H13.3281V35.5299Z" fill="black"/>
+      <path d="M86.0615 4.99963C91.092 4.99963 95.1594 5.90377 98.2627 7.71155C101.366 9.49026 103.637 11.7361 105.074 14.4479C106.511 17.1596 107.229 19.9005 107.229 22.6705C107.229 26.1986 106.332 29.1289 104.535 31.4615C103.467 32.8743 102.151 34.0014 100.592 34.8473C103.36 35.8401 105.54 37.3649 107.132 39.4225C109.353 42.2509 110.464 45.4146 110.464 48.9137C110.464 52.6751 109.68 55.9849 108.112 58.8424C106.577 61.7 104.224 63.9458 101.056 65.5787C97.8871 67.1824 93.9014 67.984 89.0996 67.984H57.8379V4.99963H86.0615ZM71.3623 56.7867H87.7275C89.5242 56.7867 91.1256 56.4515 92.5303 55.7809C93.9347 55.0811 95.0286 54.1187 95.8125 52.8942C96.6292 51.6403 97.0381 50.1674 97.0381 48.4762C97.038 46.9892 96.6948 45.662 96.0088 44.4957C95.3228 43.3296 94.2775 42.4114 92.873 41.7408C91.501 41.041 89.7855 40.691 87.7275 40.691H71.3623V56.7867ZM71.3623 29.5817H85.8662C87.3687 29.5816 88.7079 29.348 89.8838 28.8815C91.0598 28.4149 91.9908 27.7002 92.6768 26.7379C93.3627 25.7466 93.706 24.4785 93.7061 22.9332C93.7061 21.0088 93.0365 19.3899 91.6973 18.0778C90.358 16.7656 88.4141 16.11 85.8662 16.11H71.3623V29.5817Z" fill="black"/>
+      <g class="hammer-t">
+        <path d="M126.14 19V67.984H138.155V19H126.14Z" fill="#111111"/>
+        <path d="M134.911 0L129.385 0.000569414C127.6 0.00122149 126.139 1.44669 126.14 3.21127L126.14 3.80187L138.154 3.80178L138.155 3.21005C138.155 1.44567 136.695 0.00084953 134.911 0Z" fill="#111111"/>
+        <path d="M116.315 17.8036C115.669 17.8036 115.14 17.2761 115.14 16.6309L115.14 6.17234C115.14 5.52764 115.669 4.99989 116.316 5L141.986 5.00034L159.525 12.282C160.122 12.5301 160.701 12.8094 160.701 13.4551L160.702 16.6307C160.701 17.2764 160.171 17.8044 159.526 17.8036H116.315Z" fill="#8E9E90"/>
+      </g>
+      <g class="hit-o">
+        <path d="M164.204 68.376C160.508 68.376 157.11 67.5173 154.012 65.8C150.913 64.0453 148.449 61.6373 146.62 58.576C144.828 55.4773 143.932 51.9867 143.932 48.104C143.932 44.2213 144.828 40.7493 146.62 37.688C148.449 34.5893 150.913 32.1813 154.012 30.464C157.11 28.7467 160.508 27.888 164.204 27.888C167.937 27.888 171.334 28.7467 174.396 30.464C177.494 32.1813 179.94 34.5893 181.732 37.688C183.524 40.7493 184.42 44.2213 184.42 48.104C184.42 51.9867 183.524 55.4773 181.732 58.576C179.94 61.6373 177.494 64.0453 174.396 65.8C171.297 67.5173 167.9 68.376 164.204 68.376ZM164.204 58.184C167.004 58.184 169.206 57.2693 170.812 55.44C172.454 53.6107 173.276 51.1653 173.276 48.104C173.276 44.968 172.454 42.504 170.812 40.712C169.206 38.8827 167.004 37.968 164.204 37.968C161.366 37.968 159.145 38.8827 157.54 40.712C155.934 42.504 155.132 44.968 155.132 48.104C155.132 51.2027 155.934 53.6667 157.54 55.496C159.145 57.288 161.366 58.184 164.204 58.184Z" fill="#8E9E90"/>
+      </g>
+      <path d="M207.162 68.376C203.466 68.376 200.068 67.5173 196.97 65.8C193.871 64.0453 191.407 61.6373 189.578 58.576C187.786 55.4773 186.89 51.9867 186.89 48.104C186.89 44.2213 187.786 40.7493 189.578 37.688C191.407 34.5893 193.871 32.1813 196.97 30.464C200.068 28.7467 203.466 27.888 207.162 27.888C210.895 27.888 214.292 28.7467 217.354 30.464C220.452 32.1813 222.898 34.5893 224.69 37.688C226.482 40.7493 227.378 44.2213 227.378 48.104C227.378 51.9867 226.482 55.4773 224.69 58.576C222.898 61.6373 220.452 64.0453 217.354 65.8C214.255 67.5173 210.858 68.376 207.162 68.376ZM207.162 58.184C209.962 58.184 212.164 57.2693 213.77 55.44C215.412 53.6107 216.234 51.1653 216.234 48.104C216.234 44.968 215.412 42.504 213.77 40.712C212.164 38.8827 209.962 37.968 207.162 37.968C204.324 37.968 202.103 38.8827 200.498 40.712C198.892 42.504 198.09 44.968 198.09 48.104C198.09 51.2027 198.892 53.6667 200.498 55.496C202.103 57.288 204.324 58.184 207.162 58.184Z" fill="#8E9E90"/>
+      <path d="M242.168 59.584H254.432V67.984H231.192V28.504H242.168V59.584Z" fill="#8E9E90"/>
+      <path d="M280.932 67.984L268.556 50.68V67.984H257.58V28.504H268.556V45.528L280.82 28.504H293.476L278.972 47.656L294.204 67.984H280.932Z" fill="#8E9E90"/>
+      <path d="M308.069 28.504V67.984H297.093V28.504H308.069Z" fill="#8E9E90"/>
+      <path d="M342.935 28.504V37.24H332.407V67.984H321.431V37.24H311.015V28.504H342.935Z" fill="#8E9E90"/>
+    </svg></button>
     <span id="topbar-breadcrumb" class="topbar-breadcrumb hidden">
       <span class="topbar-dot">·</span>
       <span id="topbar-tool-name" class="topbar-tool-name"></span>
@@ -135,47 +162,79 @@
     <div class="home-content">
       <h1 class="home-title">Productboard Data Tools</h1>
       <p class="home-subtitle">Import, export, and migrate Productboard data. Select a tool to get started.</p>
-      <div class="tool-grid">
-
-        <div class="tool-card" data-tool="entities">
-          <span class="tool-card-icon">📦</span>
-          <h2 class="tool-card-name">Entities</h2>
-          <div class="tool-card-desc">Import, export, and migrate product and strategic entities across workspaces.</div>
+      <!-- ── Data Management ── -->
+      <section class="home-section">
+        <h2 class="home-section-title">Data Management</h2>
+        <p class="home-section-desc">Import, export, and migrate product data across workspaces.</p>
+        <div class="tool-grid">
+          <div class="tool-card" data-tool="entities">
+            <span class="tool-card-icon">📦</span>
+            <h3 class="tool-card-name">Entities</h3>
+            <div class="tool-card-desc">Import, export, and migrate product and strategic entities across workspaces.</div>
+          </div>
+          <div class="tool-card" data-tool="notes">
+            <span class="tool-card-icon">📝</span>
+            <h3 class="tool-card-name">Notes</h3>
+            <div class="tool-card-desc">Export, import, delete, and migrate notes across workspaces.</div>
+          </div>
+          <div class="tool-card" data-tool="companies">
+            <span class="tool-card-icon">🏢</span>
+            <h3 class="tool-card-name">Companies</h3>
+            <div class="tool-card-desc">Export and import companies, including custom fields and UUID-based patching.</div>
+          </div>
         </div>
+      </section>
 
-        <div class="tool-card" data-tool="notes">
-          <span class="tool-card-icon">📝</span>
-          <h2 class="tool-card-name">Notes</h2>
-          <div class="tool-card-desc">Export, import, delete, and migrate notes across workspaces.</div>
+      <!-- ── Workspace Administration ── -->
+      <section class="home-section">
+        <h2 class="home-section-title">Workspace Administration</h2>
+        <p class="home-section-desc">Manage teams, membership, and audit member activity.</p>
+        <div class="tool-grid">
+          <div class="tool-card" data-tool="member-activity">
+            <span class="tool-card-icon">📈</span>
+            <div class="tool-card-name">Member Activity</div>
+            <div class="tool-card-desc">Export member activity data for license auditing and enablement planning.</div>
+          </div>
+          <div class="tool-card" data-tool="teams">
+            <span class="tool-card-icon">👥</span>
+            <div class="tool-card-name">Teams &amp; Members</div>
+            <div class="tool-card-desc">Manage teams — edit names, handles, descriptions, and members. Import and export team data and membership via CSV.</div>
+            <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
+          </div>
         </div>
+      </section>
 
-        <div class="tool-card" data-tool="companies">
-          <span class="tool-card-icon">🏢</span>
-          <h2 class="tool-card-name">Companies</h2>
-          <div class="tool-card-desc">Export and import companies, including custom fields and UUID-based patching.</div>
+      <!-- ── Utilities ── -->
+      <section class="home-section">
+        <h2 class="home-section-title">Utilities</h2>
+        <p class="home-section-desc">Small scripts and one-off tools for common tasks.</p>
+        <div class="tool-grid">
+          <div class="tool-card tool-card-soon">
+            <span class="tool-card-icon">🗂</span>
+            <div class="tool-card-name">Merge Duplicate Notes</div>
+            <div class="tool-card-desc">Find and merge duplicate notes with smart data reconciliation — consolidate tags, sources, and linked entities into a single canonical note.</div>
+            <div class="tool-card-footer"><span class="badge badge-muted">Coming soon</span></div>
+          </div>
+          <div class="tool-card tool-card-soon">
+            <span class="tool-card-icon">📏</span>
+            <div class="tool-card-name">Description Validator</div>
+            <div class="tool-card-desc">Audit entity descriptions by type and status to flag empty or too-short fields — surface gaps in PM documentation before they reach stakeholders.</div>
+            <div class="tool-card-footer"><span class="badge badge-muted">Coming soon</span></div>
+          </div>
+          <div class="tool-card tool-card-soon">
+            <span class="tool-card-icon">🏢</span>
+            <div class="tool-card-name">Merge Duplicate Companies</div>
+            <div class="tool-card-desc">Consolidate duplicate companies by merging attached notes, insights, and user associations into a single selected record.</div>
+            <div class="tool-card-footer"><span class="badge badge-muted">Coming soon</span></div>
+          </div>
+          <div class="tool-card tool-card-soon">
+            <span class="tool-card-icon">📅</span>
+            <div class="tool-card-name">Release Seeder</div>
+            <div class="tool-card-desc">Pre-create release groups and populate them with weekly, sprint, monthly, or yearly releases — or extend existing groups with future periods.</div>
+            <div class="tool-card-footer"><span class="badge badge-muted">Coming soon</span></div>
+          </div>
         </div>
-
-        <div class="tool-card" data-tool="member-activity">
-          <span class="tool-card-icon">📈</span>
-          <div class="tool-card-name">Member Activity</div>
-          <div class="tool-card-desc">Export member activity data for license auditing and enablement planning.</div>
-        </div>
-
-        <div class="tool-card" data-tool="team-membership">
-          <span class="tool-card-icon">👥</span>
-          <div class="tool-card-name">Team Membership</div>
-          <div class="tool-card-desc">Bulk-manage team–member assignments via CSV. Export current assignments, then add, remove, or reconcile with a diff preview.</div>
-          <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
-        </div>
-
-        <div class="tool-card" data-tool="teams-crud">
-          <span class="tool-card-icon">🏷️</span>
-          <div class="tool-card-name">Teams Management</div>
-          <div class="tool-card-desc">Create, update, and delete teams in bulk via CSV — manage names, handles, and descriptions.</div>
-          <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
-        </div>
-
-      </div>
+      </section>
     </div>
   </div>
 
@@ -253,22 +312,20 @@
           </button>
         </div>
 
-        <!-- Team Membership nav items -->
-        <div id="sidebar-team-membership" class="hidden">
-          <button class="nav-item active" data-view="team-membership-export" id="nav-team-membership-export">
-            <span class="icon">📤</span> Export
-          </button>
-          <button class="nav-item" data-view="team-membership-import" id="nav-team-membership-import">
-            <span class="icon">📥</span> Import
-          </button>
-        </div>
+        <!-- Teams (combined) nav items -->
+        <div id="sidebar-teams" class="hidden">
+          <span class="nav-group-label">Live Editor</span>
+          <button class="nav-item active" data-view="members-teams-mgmt-manage" id="nav-members-teams-mgmt-manage">Manage memberships</button>
 
-        <!-- Teams CRUD nav items -->
-        <div id="sidebar-teams-crud" class="hidden">
-          <button class="nav-item active" data-view="teams-crud-export"     id="nav-teams-crud-export">Export</button>
-          <button class="nav-item"        data-view="teams-crud-import"     id="nav-teams-crud-import">Import</button>
-          <button class="nav-item"        data-view="teams-crud-delete-csv" id="nav-teams-crud-delete-csv">Delete by CSV</button>
-          <button class="nav-item"        data-view="teams-crud-delete-all" id="nav-teams-crud-delete-all">Delete all</button>
+          <span class="nav-group-label">Team Management</span>
+          <button class="nav-item" data-view="teams-crud-export" id="nav-teams-crud-export">Export</button>
+          <button class="nav-item" data-view="teams-crud-import" id="nav-teams-crud-import">Import</button>
+          <button class="nav-item" data-view="teams-crud-delete-csv" id="nav-teams-crud-delete-csv">Delete by CSV</button>
+          <button class="nav-item" data-view="teams-crud-delete-all" id="nav-teams-crud-delete-all">Delete all</button>
+
+          <span class="nav-group-label">Team Membership</span>
+          <button class="nav-item" data-view="team-membership-export" id="nav-team-membership-export">Export</button>
+          <button class="nav-item" data-view="team-membership-import" id="nav-team-membership-import">Import</button>
         </div>
 
       </nav>
@@ -282,6 +339,22 @@
 
 </div><!-- /app-screen -->
 
+<!-- ══════════════════════════════════════════
+     SHARED CONFIRM / ALERT MODAL
+═══════════════════════════════════════════ -->
+<div id="app-dialog" class="app-dialog-overlay hidden">
+  <div class="app-dialog">
+    <div class="app-dialog-body">
+      <span id="app-dialog-icon" class="app-dialog-icon"></span>
+      <p id="app-dialog-msg" class="app-dialog-msg"></p>
+    </div>
+    <div class="app-dialog-actions" id="app-dialog-actions">
+      <button class="btn btn-ghost btn-sm" id="app-dialog-cancel">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="app-dialog-ok">OK</button>
+    </div>
+  </div>
+</div>
+
 <script src="csv-utils.js"></script>
 <script src="app.js"></script>
 <script src="companies-app.js"></script>
@@ -290,6 +363,7 @@
 <script src="member-activity-app.js"></script>
 <script src="team-membership-app.js"></script>
 <script src="teams-crud-app.js"></script>
+<script src="members-teams-mgmt-app.js"></script>
 
 <!-- ── BOTTOM-LEFT CLUSTER ── -->
 <div class="bottom-left">

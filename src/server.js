@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const helmet = require('helmet');
+const compression = require('compression');
 const session = require('express-session');
 const rateLimit = require('express-rate-limit');
 const slowDown = require('express-slow-down');
@@ -14,7 +15,15 @@ const entitiesRouter = require('./routes/entities');
 const memberActivityRouter = require('./routes/memberActivity');
 const teamMembershipRouter = require('./routes/teamMembership');
 const teamsCrudRouter      = require('./routes/teamsCrud');
+const membersTeamsMgmtRouter = require('./routes/membersTeamsMgmt');
 const authRouter           = require('./routes/auth');
+
+const shouldCompress = (req, res) => {
+  if (req.headers.accept && req.headers.accept.includes('text/event-stream')) {
+    return false;
+  }
+  return compression.filter(req, res);
+};
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -29,8 +38,9 @@ app.use(helmet({
     },
   },
 }));
+app.use(compression({ filter: shouldCompress }));
+app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '1d' }));
 app.use(express.json({ limit: '25mb' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
@@ -99,9 +109,12 @@ app.use('/api/entities', entitiesRouter);
 app.use('/api/member-activity', memberActivityRouter);
 app.use('/api/team-membership', teamMembershipRouter);
 app.use('/api/teams-crud', teamsCrudRouter);
+app.use('/api/members-teams-mgmt', membersTeamsMgmtRouter);
 
 // Fallback to index.html for client-side routing
-app.get('*', (_req, res) => {
+app.get('*', (req, res) => {
+  // Don't serve index.html for what looks like a missing static file
+  if (path.extname(req.path)) return res.status(404).send('Not found');
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 

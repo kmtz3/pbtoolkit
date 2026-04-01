@@ -38,6 +38,158 @@ const show  = (id) => $(id).classList.remove('hidden');
 const hide  = (id) => $(id).classList.add('hidden');
 const setText = (id, t) => { $(id).textContent = t; };
 
+// ── Dialog helpers (replace native alert/confirm) ──────────
+/**
+ * showAlert(msg, opts)  — styled non-blocking alert. Returns a Promise that resolves when dismissed.
+ * showConfirm(msg, opts) — styled confirm dialog. Returns a Promise<boolean>.
+ *
+ * opts.icon  — optional emoji/string shown left of the message (default: '⚠️' for confirm, 'ℹ️' for alert)
+ * opts.okLabel — label for the OK button (default 'OK')
+ * opts.cancelLabel — label for the cancel button (default 'Cancel', confirm only)
+ */
+function showAlert(msg, opts = {}) {
+  return _showDialog(msg, { ...opts, mode: 'alert' });
+}
+function showConfirm(msg, opts = {}) {
+  return _showDialog(msg, { ...opts, mode: 'confirm' });
+}
+function _showDialog(msg, { mode = 'alert', icon, okLabel = 'OK', cancelLabel = 'Cancel', html = false } = {}) {
+  const overlay  = $('app-dialog');
+  const msgEl    = $('app-dialog-msg');
+  const iconEl   = $('app-dialog-icon');
+  const okBtn    = $('app-dialog-ok');
+  const cancelBtn = $('app-dialog-cancel');
+
+  if (html) msgEl.innerHTML = msg;
+  else      msgEl.textContent = msg;
+  iconEl.textContent = icon || (mode === 'confirm' ? '⚠️' : 'ℹ️');
+  okBtn.textContent = okLabel;
+  cancelBtn.textContent = cancelLabel;
+  cancelBtn.classList.toggle('hidden', mode === 'alert');
+  overlay.classList.remove('hidden');
+  okBtn.focus();
+
+  return new Promise((resolve) => {
+    function cleanup() {
+      overlay.classList.add('hidden');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      overlay.removeEventListener('click', onBg);
+      document.removeEventListener('keydown', onKey);
+    }
+    function onOk()     { cleanup(); resolve(true); }
+    function onCancel() { cleanup(); resolve(false); }
+    function onBg(e)    { if (e.target === overlay) { mode === 'alert' ? onOk() : onCancel(); } }
+    function onKey(e)   {
+      if (e.key === 'Escape') { mode === 'alert' ? onOk() : onCancel(); }
+      if (e.key === 'Enter')  onOk();
+    }
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    overlay.addEventListener('click', onBg);
+    document.addEventListener('keydown', onKey);
+  });
+}
+
+// ── Progress helper ────────────────────────────────────────
+/**
+ * setProgress(prefix, msg, pct)
+ *
+ * Update a progress bar + label in one call.
+ * Expects DOM ids: `${prefix}-progress-bar`, `${prefix}-progress-msg`,
+ * and optionally `${prefix}-progress-pct`.
+ */
+function setProgress(prefix, msg, pct) {
+  const bar = $(prefix + '-progress-bar');
+  if (bar) bar.style.width = `${Math.min(100, Math.round(pct))}%`;
+  const msgEl = $(prefix + '-progress-msg');
+  if (msgEl) msgEl.textContent = msg;
+  const pctEl = $(prefix + '-progress-pct');
+  if (pctEl) pctEl.textContent = `${Math.round(pct)}%`;
+}
+
+// ── View-state controller ──────────────────────────────────
+/**
+ * createViewState(prefix, states)
+ *
+ * Manages mutually exclusive visibility states for an operation panel.
+ * Each state maps to a DOM element with id `${prefix}-${state}`.
+ *
+ * Usage:
+ *   const vs = createViewState('notes-export', ['idle', 'running', 'done', 'error', 'stopped']);
+ *   vs.go('running');  // shows notes-export-running, hides all others
+ *   vs.go('idle');     // back to idle
+ *   vs.current;        // 'idle'
+ *
+ * Returns { go(state), reset(), current }
+ */
+function createViewState(prefix, states) {
+  let current = states[0];
+
+  function go(state) {
+    for (const s of states) {
+      const el = $(prefix + '-' + s);
+      if (el) el.classList.toggle('hidden', s !== state);
+    }
+    current = state;
+  }
+
+  go(current);
+
+  return {
+    go,
+    reset() { go(states[0]); },
+    get current() { return current; },
+  };
+}
+
+// ── Routing ─────────────────────────────────────────────────
+const VALID_TOOLS = new Set([
+  'entities', 'notes', 'companies',
+  'member-activity', 'teams',
+]);
+
+const PAGE_META = {
+  entities:          { title: 'Entities', desc: 'Import, export, and migrate Productboard entities across workspaces via CSV.' },
+  notes:             { title: 'Notes', desc: 'Export, import, delete, and migrate Productboard notes across workspaces.' },
+  companies:         { title: 'Companies', desc: 'Export and import Productboard companies, including custom fields and UUID-based patching.' },
+  'member-activity': { title: 'Member Activity', desc: 'Export Productboard member activity data for license auditing and enablement planning.' },
+  teams:             { title: 'Teams & Members', desc: 'Manage Productboard teams — edit names, handles, descriptions, and members. Import and export via CSV.' },
+};
+
+const DEFAULT_TITLE = 'PBToolkit \u2014 Productboard Importer, Exporter & Migration Tool';
+const DEFAULT_DESC  = 'Import, export, and migrate Productboard data via CSV. Bulk-manage entities, notes, and companies across workspaces. Free, open-source, browser-based tool.';
+
+function updatePageMeta(tool) {
+  const meta = tool ? PAGE_META[tool] : null;
+  document.title = meta ? `${meta.title} \u2014 PBToolkit` : DEFAULT_TITLE;
+  const descEl = document.querySelector('meta[name="description"]');
+  if (descEl) descEl.content = meta ? meta.desc : DEFAULT_DESC;
+}
+
+const DEFAULT_VIEWS = {
+  companies:         'export',
+  notes:             'notes-export',
+  entities:          'entities-templates',
+  'member-activity': 'member-activity-export',
+  teams:             'members-teams-mgmt-manage',
+};
+
+const TOOL_VIEWS = {
+  companies:         ['export', 'import', 'companies-delete-csv', 'companies-delete-all', 'companies-source-migration'],
+  notes:             ['notes-export', 'notes-import', 'notes-delete-csv', 'notes-delete-all', 'notes-migrate'],
+  entities:          ['entities-templates', 'entities-export', 'entities-import', 'entities-delete'],
+  'member-activity': ['member-activity-export'],
+  teams:             [
+    'teams-crud-export', 'teams-crud-import', 'teams-crud-delete-csv', 'teams-crud-delete-all',
+    'team-membership-export', 'team-membership-import',
+    'members-teams-mgmt-manage',
+  ],
+};
+
+let _currentTool = null;
+let _currentView = null;
+
 // ── Screen management ───────────────────────────────────────
 // Screens: 'home' | 'tool'
 
@@ -74,15 +226,97 @@ function updateDcToggle() {
   $('dc-eu').classList.toggle('active', useEu);
 }
 
+// ── Router helpers ─────────────────────────────────────────
+function viewToSegment(tool, view) {
+  // Strip tool prefix for cleaner URLs: 'notes-export' → 'export'
+  if (view.startsWith(tool + '-')) return view.slice(tool.length + 1);
+  return view;
+}
+
+function segmentToView(tool, segment) {
+  const views = TOOL_VIEWS[tool] || [];
+  // Try prefixed first: 'export' → 'notes-export'
+  const prefixed = tool + '-' + segment;
+  if (views.includes(prefixed)) return prefixed;
+  // Then try as-is: 'export' (companies)
+  if (views.includes(segment)) return segment;
+  return null;
+}
+
+function buildPath(tool, view) {
+  if (!tool) return '/';
+  if (!view || view === DEFAULT_VIEWS[tool]) return '/' + tool;
+  return '/' + tool + '/' + viewToSegment(tool, view);
+}
+
+function parsePath(pathname) {
+  const segments = pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+  const toolSlug = segments[0] || null;
+  const viewSegment = segments[1] || null;
+  if (!toolSlug || !VALID_TOOLS.has(toolSlug)) return { tool: null, view: null };
+  const view = viewSegment
+    ? (segmentToView(toolSlug, viewSegment) || DEFAULT_VIEWS[toolSlug])
+    : DEFAULT_VIEWS[toolSlug];
+  return { tool: toolSlug, view };
+}
+
+async function navigateTo(tool, view, { pushState = true, replace = false } = {}) {
+  if (!tool || !VALID_TOOLS.has(tool)) {
+    // Go home
+    _currentTool = null;
+    _currentView = null;
+    showScreen('home');
+    updatePageMeta(null);
+    const state = { tool: null, view: null };
+    if (replace) history.replaceState(state, '', '/');
+    else if (pushState) history.pushState(state, '', '/');
+    return;
+  }
+
+  const resolvedView = (view && (TOOL_VIEWS[tool] || []).includes(view))
+    ? view
+    : DEFAULT_VIEWS[tool];
+
+  const toolChanged = _currentTool !== tool;
+  if (toolChanged) await loadTool(tool);
+  if (_currentView !== resolvedView) showView(resolvedView);
+  updatePageMeta(tool);
+
+  const path = buildPath(tool, resolvedView);
+  const state = { tool, view: resolvedView };
+  if (replace) history.replaceState(state, '', path);
+  else if (pushState) history.pushState(state, '', path);
+}
+
+window.addEventListener('popstate', (e) => {
+  const s = e.state;
+  if (!s || !s.tool) navigateTo(null, null, { pushState: false });
+  else navigateTo(s.tool, s.view, { pushState: false });
+});
+
 // ── Boot ───────────────────────────────────────────────────
-function boot() {
-  showScreen('home');
-  updateConnectionStatus();
+async function boot() {
+  const { tool, view } = parsePath(window.location.pathname);
+  const returnPath = sessionStorage.getItem('pb_return_path');
+  sessionStorage.removeItem('pb_return_path');
+
+  if (returnPath) {
+    const r = parsePath(returnPath);
+    if (r.tool) { await navigateTo(r.tool, r.view, { replace: true }); return; }
+  }
+
+  if (tool) {
+    await navigateTo(tool, view, { replace: true });
+  } else {
+    showScreen('home');
+    history.replaceState({ tool: null, view: null }, '', '/');
+    updateConnectionStatus();
+  }
 }
 
 // ── "PB Tools" home button ─────────────────────────────────
-$('btn-home').addEventListener('click', () => showScreen('home'));
-$('btn-back-home').addEventListener('click', () => showScreen('home'));
+$('btn-home').addEventListener('click', () => navigateTo(null));
+$('btn-back-home').addEventListener('click', () => navigateTo(null));
 
 // ── DC toggle ──────────────────────────────────────────────
 $('dc-us').addEventListener('click', () => switchDatacenter(false));
@@ -122,66 +356,48 @@ async function loadPartial(toolName) {
 document.querySelectorAll('.tool-card:not(.tool-card-soon)').forEach((card) => {
   card.addEventListener('click', () => {
     const tool = card.dataset.tool;
-    if (tool) loadTool(tool);
+    if (tool) navigateTo(tool);
   });
 });
 
 async function loadTool(toolName) {
-  const names = { companies: 'Companies', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', 'team-membership': 'Team Membership', 'teams-crud': 'Teams Management' };
+  const names = { companies: 'Companies', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', teams: 'Teams' };
   setText('topbar-tool-name', names[toolName] || toolName);
   showScreen('tool');
+  _currentTool = toolName;
 
   // Show the correct sidebar section
   $('sidebar-companies').classList.toggle('hidden', toolName !== 'companies');
   $('sidebar-notes').classList.toggle('hidden', toolName !== 'notes');
   $('sidebar-entities').classList.toggle('hidden', toolName !== 'entities');
   $('sidebar-member-activity').classList.toggle('hidden', toolName !== 'member-activity');
-  $('sidebar-team-membership').classList.toggle('hidden', toolName !== 'team-membership');
-  $('sidebar-teams-crud').classList.toggle('hidden', toolName !== 'teams-crud');
-
-  document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
+  $('sidebar-teams').classList.toggle('hidden', toolName !== 'teams');
 
   try {
-    await loadPartial(toolName);
+    if (toolName === 'teams') {
+      // Combined module: load all three partials
+      await Promise.all([
+        loadPartial('teams-crud'),
+        loadPartial('team-membership'),
+        loadPartial('members-teams-mgmt'),
+      ]);
+    } else {
+      await loadPartial(toolName);
+    }
   } catch (e) {
     console.error('Failed to load view partial:', e);
     return;
   }
 
-  if (toolName === 'companies') {
-    $('nav-export').classList.add('active');
-    showView('export');
-    window.initCompaniesModule?.();
-  }
-
-  if (toolName === 'notes') {
-    $('nav-notes-export').classList.add('active');
-    showView('notes-export');
-    window.initNotesModule?.();
-  }
-
-  if (toolName === 'entities') {
-    $('nav-entities-templates').classList.add('active');
-    showView('entities-templates');
-    window.initEntitiesModule?.();
-  }
-
-  if (toolName === 'member-activity') {
-    $('nav-member-activity-export').classList.add('active');
-    showView('member-activity-export');
-    if (typeof initMemberActivityModule === 'function') initMemberActivityModule();
-  }
-
-  if (toolName === 'team-membership') {
-    $('nav-team-membership-export').classList.add('active');
-    showView('team-membership-export');
-    if (typeof window.initTeamMembershipModule === 'function') window.initTeamMembershipModule();
-  }
-
-  if (toolName === 'teams-crud') {
-    $('nav-teams-crud-export').classList.add('active');
-    showView('teams-crud-export');
-    if (typeof window.initTeamsCrudModule === 'function') window.initTeamsCrudModule();
+  // Init module (idempotent — each module guards against double-init)
+  if (toolName === 'companies')        window.initCompaniesModule?.();
+  if (toolName === 'notes')            window.initNotesModule?.();
+  if (toolName === 'entities')         window.initEntitiesModule?.();
+  if (toolName === 'member-activity')  { if (typeof initMemberActivityModule === 'function') initMemberActivityModule(); }
+  if (toolName === 'teams') {
+    window.initTeamsCrudModule?.();
+    window.initTeamMembershipModule?.();
+    window.initMembersTeamsMgmtModule?.();
   }
 
   updateConnectionStatus();
@@ -213,6 +429,8 @@ $('btn-connect').addEventListener('click', () => openConnectModal());
 $('btn-close-connect-modal').addEventListener('click', closeConnectModal);
 $('btn-connect-from-tool').addEventListener('click', () => openConnectModal());
 $('btn-connect-oauth').addEventListener('click', () => {
+  // Preserve the current module path so we can return after OAuth callback.
+  if (_currentTool) sessionStorage.setItem('pb_return_path', location.pathname);
   // Redirect to the server-side OAuth initiation route; include the current DC preference.
   location.href = `/auth/pb?eu=${useEu}`;
 });
@@ -253,14 +471,8 @@ $('auth-submit').addEventListener('click', async () => {
       _pendingTokenCallback = null;
       cb();
     }
-    // If the member activity module loaded before a token was set, reload now
-    if (typeof window.maReloadIfNeeded === 'function') window.maReloadIfNeeded();
-    // If the team membership module loaded before a token was set, reload now
-    if (typeof window.tmReloadIfNeeded === 'function') window.tmReloadIfNeeded();
-    // If the companies mapper is open and custom fields failed to load (no token), reload them now
-    if (typeof parsedCSV !== 'undefined' && parsedCSV && $('import-step-map') && !$('import-step-map').classList.contains('hidden')) {
-      loadAndBuildCustomFieldTable();
-    }
+    // Notify all modules so they can re-fetch data with the (new) token
+    window.dispatchEvent(new CustomEvent('pb:connected'));
   } catch (e) {
     showAuthError('Could not connect. Check your network and token.');
   } finally {
@@ -289,21 +501,19 @@ $('btn-disconnect').addEventListener('click', async () => {
   token = '';
   useEu = false;
   updateConnectionStatus();
-  resetCompaniesState();
-  resetNotesState();
   window.dispatchEvent(new CustomEvent('pb:disconnect'));
 });
 
 // ── Tool nav (inside tool view) ─────────────────────────────
 document.querySelectorAll('.nav-item').forEach((btn) => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    showView(btn.dataset.view);
+    showView(btn.dataset.view, { updateUrl: true });
   });
 });
 
-function showView(view) {
+function showView(view, { updateUrl = false } = {}) {
+  _currentView = view;
+
   [
     'export', 'import',
     'companies-delete-csv', 'companies-delete-all', 'companies-source-migration',
@@ -312,10 +522,22 @@ function showView(view) {
     'member-activity-export',
     'team-membership-export', 'team-membership-import',
     'teams-crud-export', 'teams-crud-import', 'teams-crud-delete-csv', 'teams-crud-delete-all',
+    'members-teams-mgmt-manage',
   ].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', v !== view);
   });
+
+  // Activate matching sidebar nav-item
+  document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
+  const navBtn = document.querySelector(`.nav-item[data-view="${view}"]`);
+  if (navBtn) navBtn.classList.add('active');
+
+  if (updateUrl && _currentTool) {
+    const path = buildPath(_currentTool, view);
+    history.pushState({ tool: _currentTool, view }, '', path);
+  }
+
   updateConnectionStatus();
 }
 
@@ -332,10 +554,12 @@ function buildHeaders(t = token, eu = useEu) {
 function subscribeSSE(url, body, { onProgress, onComplete, onError, onLog = null, onAbort = null }) {
   // SSE over POST: read the response body as a stream and parse SSE frames manually
   const ctrl = new AbortController();
+  const headers = buildHeaders();
+  headers.Accept = 'text/event-stream';
 
   fetch(url, {
     method: 'POST',
-    headers: buildHeaders(),
+    headers,
     body: JSON.stringify(body),
     signal: ctrl.signal,
   }).then(async (res) => {
@@ -650,6 +874,6 @@ async function initAuth() {
   } catch (_) {
     // Network error on status check — fall through to manual token path
   }
-  boot();
+  await boot();
 }
 initAuth();
