@@ -304,12 +304,6 @@
     loadMaMetadata(false);
   }
 
-  // Called by app.js after a successful token connect, to auto-reload if the
-  // metadata fetch previously failed (e.g. user opened the page before connecting).
-  function maReloadIfNeeded() {
-    if (!maCacheReady && !maCacheLoading) loadMaMetadata(false);
-  }
-
   window.addEventListener('pb:disconnect', () => {
     maLastCsv      = null;
     maLastFilename = 'member-activity.csv';
@@ -319,7 +313,9 @@
     resetMaExport();
   });
 
-  // Expose to global scope for app.js
+  window.addEventListener('pb:connected', () => {
+    if (!maCacheReady && !maCacheLoading) loadMaMetadata(false);
+  });
+
   window.initMemberActivityModule = initMemberActivityModule;
-  window.maReloadIfNeeded = maReloadIfNeeded;
 })();

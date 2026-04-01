@@ -846,3 +846,12 @@ function initCompaniesModule() {
   // (mappingChangeListenerAdded guards added in loadAndBuildCustomFieldTable)
 }
 window.initCompaniesModule = initCompaniesModule;
+
+// ── pb:disconnect / pb:connected ───────────────────────────
+window.addEventListener('pb:disconnect', resetCompaniesState);
+window.addEventListener('pb:connected', () => {
+  // If the mapper is open and custom fields failed to load (no token), reload now
+  if (parsedCSV && $('import-step-map') && !$('import-step-map').classList.contains('hidden')) {
+    loadAndBuildCustomFieldTable();
+  }
+});

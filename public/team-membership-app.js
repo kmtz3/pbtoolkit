@@ -161,16 +161,6 @@
     tm$('tm-export-btn').disabled = true;
   }
 
-  // Called from app.js after token connect — reload if cache wasn't ready yet.
-  // Guard on the DOM element: if the TM partial hasn't been loaded yet, skip —
-  // initTeamMembershipModule() will call loadTmMetadata() when the user navigates here.
-  // Without this guard, calling loadTmMetadata() before the partial is in the DOM
-  // throws a TypeError on element access, leaving tmCacheLoading stuck at true and
-  // making the refresh button a no-op for the rest of the session.
-  function tmReloadIfNeeded() {
-    if (!tmCacheReady && !tmCacheLoading && tm$('tm-export-team-filter')) loadTmMetadata(false);
-  }
-
   // ── Export tab ────────────────────────────────────────────────────────────
 
   function resetExportState() {
@@ -631,7 +621,7 @@
     loadTmMetadata(false);
   }
 
-  // ── pb:disconnect handler ─────────────────────────────────────────────────
+  // ── pb:disconnect / pb:connected ──────────────────────────────────────────
 
   window.addEventListener('pb:disconnect', () => {
     tmCacheReady   = false;
@@ -647,9 +637,12 @@
     resetImportState();
   });
 
+  window.addEventListener('pb:connected', () => {
+    if (!tmCacheReady && !tmCacheLoading && tm$('tm-export-team-filter')) loadTmMetadata(false);
+  });
+
   // ── Expose to global scope ────────────────────────────────────────────────
 
   window.initTeamMembershipModule = initTeamMembershipModule;
-  window.tmReloadIfNeeded         = tmReloadIfNeeded;
 
 })();

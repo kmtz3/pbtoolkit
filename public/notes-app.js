@@ -782,3 +782,6 @@ function initNotesModule() {
   });
 }
 window.initNotesModule = initNotesModule;
+
+// ── pb:disconnect / pb:connected ───────────────────────────
+window.addEventListener('pb:disconnect', resetNotesState);

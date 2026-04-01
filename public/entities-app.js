@@ -1500,9 +1500,7 @@ function setupEntitiesNav() {
     const btn = document.getElementById(btnId);
     if (!btn) return;
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      showView(viewName);
+      showView(viewName, { updateUrl: true });
     });
   });
 }
@@ -1606,6 +1604,17 @@ function initEntitiesModule() {
     if (content) content.innerHTML = '';
     // Reset export panel
     resetEntExport();
+  });
+
+  window.addEventListener('pb:connected', async () => {
+    // If files were uploaded before disconnect, reload configs and re-map
+    if (Object.keys(entImport.files).length && !entImport.configs) {
+      await entLoadConfigs();
+      Object.entries(entImport.files).forEach(([type, f]) => {
+        const persisted = entLoadSavedMapping(type);
+        entAutoMap(type, f.headers, persisted);
+      });
+    }
   });
 }
 window.initEntitiesModule = initEntitiesModule;
