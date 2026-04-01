@@ -19,7 +19,7 @@ const { sanitizeDescription } = require('../services/entities/fieldBuilder');
 const { formatFieldValue } = require('../services/entities/exporter');
 const { schemaToType, normalizeSchema, EXCLUDED_FIELD_IDS } = require('../services/entities/configCache');
 const { formatCustomFieldValue, isMultiType } = require('../lib/fieldFormat');
-const { buildDomainToIdMap, buildIdToDomainMap } = require('../lib/domainCache');
+const { fetchCompaniesWithDomainKey, buildDomainToIdMap, buildIdToDomainMap } = require('../lib/domainCache');
 
 const STANDARD_FIELD_IDS = new Set(['name', 'email', 'description', 'owner', 'archived']);
 
@@ -265,8 +265,9 @@ router.post('/import/preview', pbAuth, async (req, res) => {
     const pbId = cell(r, mapping.pbIdColumn)?.trim();
     return !pbId || !UUID_RE.test(pbId);
   });
+  const needCompanies = mapping.parentCompanyIdColumn || mapping.parentCompanyDomainColumn;
 
-  const [emailCache, memberEmails] = await Promise.all([
+  const [emailCache, memberEmails, companyDomainCache] = await Promise.all([
     // Email cache: only needed when email column is mapped and some rows lack a valid pb_id
     needEmailCache
       ? fetchAllPages('/v2/entities?type[]=user', 'fetch users for email cache')
@@ -293,7 +294,22 @@ router.post('/import/preview', pbAuth, async (req, res) => {
           })
           .catch(() => new Set())
       : new Set(),
+    // Company lookup: needed when parent company columns are mapped
+    needCompanies
+      ? fetchCompaniesWithDomainKey(pbFetch, withRetry, fetchAllPages, 'companies for user validate')
+      : { companies: [], domainFieldKey: null },
   ]);
+
+  // Build company ID set (for UUID validation) and domain→id map (for domain resolution)
+  const companyIdSet = new Set();
+  const companyDomainMap = {};
+  if (needCompanies) {
+    for (const c of companyDomainCache.companies) {
+      companyIdSet.add(c.id);
+      const domain = companyDomainCache.domainFieldKey ? c.fields?.[companyDomainCache.domainFieldKey] : null;
+      if (domain) companyDomainMap[domain.toLowerCase()] = c.id;
+    }
+  }
 
   let createCount = 0;
   let updateCount = 0;
@@ -337,6 +353,22 @@ router.post('/import/preview', pbAuth, async (req, res) => {
     const owner = cell(row, mapping.ownerColumn)?.trim();
     if (owner && memberEmails.size > 0 && !memberEmails.has(owner.toLowerCase())) {
       errors.push({ row: rowNum, field: mapping.ownerColumn, message: `Owner '${owner}' is not a workspace member — fix the email or enable "Skip owner if member does not exist"` });
+    }
+
+    // Parent company validation
+    const parentIdRaw = cell(row, mapping.parentCompanyIdColumn)?.trim();
+    const parentDomainRaw = cell(row, mapping.parentCompanyDomainColumn)?.trim();
+    if (parentIdRaw) {
+      if (!UUID_RE.test(parentIdRaw)) {
+        warnings.push({ row: rowNum, field: mapping.parentCompanyIdColumn, message: `Parent company ID "${parentIdRaw}" is not a valid UUID — will be skipped` });
+      } else if (!companyIdSet.has(parentIdRaw)) {
+        warnings.push({ row: rowNum, field: mapping.parentCompanyIdColumn, message: `Parent company "${parentIdRaw}" not found in workspace — user will be created/updated without a parent company` });
+      }
+    }
+    if (parentDomainRaw && !parentIdRaw) {
+      if (!companyDomainMap[parentDomainRaw.toLowerCase()]) {
+        warnings.push({ row: rowNum, field: mapping.parentCompanyDomainColumn, message: `Parent company domain "${parentDomainRaw}" not found in workspace — user will be created/updated without a parent company` });
+      }
     }
 
     // Custom field validation
@@ -451,14 +483,14 @@ router.post('/import/run', pbAuth, async (req, res) => {
       const label = name || email || `row ${rowNum}`;
 
       try {
+        let userId;
         if (pbId && UUID_RE.test(pbId)) {
           // UUID present → PATCH
           await withRetry(
             () => patchUser(pbFetch, pbId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails }),
             `patch user row ${rowNum}`
           );
-          // Set parent if mapped
-          await maybeSetParent(pbFetch, withRetry, pbId, row, mapping, companyDomainCache);
+          userId = pbId;
           updated++;
           sse.log('success', `Row ${rowNum}: Updated "${label}"`, { uuid: pbId, row: rowNum });
         } else if (email && emailCache[email.toLowerCase()]) {
@@ -468,19 +500,25 @@ router.post('/import/run', pbAuth, async (req, res) => {
             () => patchUser(pbFetch, existingId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails }),
             `patch by email row ${rowNum}`
           );
-          await maybeSetParent(pbFetch, withRetry, existingId, row, mapping, companyDomainCache);
+          userId = existingId;
           updated++;
           sse.log('success', `Row ${rowNum}: Updated "${label}" by email match`, { uuid: existingId, row: rowNum });
         } else {
-          // CREATE
+          // CREATE (without inline relationships — parent set separately below)
           const newUser = await withRetry(
-            () => createUser(pbFetch, row, mapping, bypassHtmlFormatter, companyDomainCache, memberEmails),
+            () => createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmails),
             `create user row ${rowNum}`
           );
-          const newId = newUser.id;
-          if (email) emailCache[email.toLowerCase()] = newId;
+          userId = newUser.id;
+          if (email) emailCache[email.toLowerCase()] = userId;
           created++;
-          sse.log('success', `Row ${rowNum}: Created "${label}"`, { uuid: newId, row: rowNum });
+          sse.log('success', `Row ${rowNum}: Created "${label}"`, { uuid: userId, row: rowNum });
+        }
+
+        // Set parent company (separate call — failure warns but doesn't fail the row)
+        const parentResult = await maybeSetParent(pbFetch, withRetry, userId, row, mapping, companyDomainCache);
+        if (parentResult.warning) {
+          sse.log('warn', `Row ${rowNum}: ${parentResult.warning}`, { row: rowNum });
         }
       } catch (err) {
         errorCount++;
@@ -517,7 +555,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
  * Create a new user via POST /v2/entities.
  * Note: `archived` is NOT included on create (API rejects it).
  */
-async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, companyDomainCache, memberEmails) {
+async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmails) {
   const fields = {};
 
   const name = cell(row, mapping.nameColumn)?.trim();
@@ -542,21 +580,7 @@ async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, companyDom
     }
   }
 
-  // Resolve parent company
-  const relationships = [];
-  const parentId = resolveParentCompanyId(row, mapping, companyDomainCache);
-  if (parentId) {
-    relationships.push({ type: 'parent', target: { id: parentId } });
-  }
-
-  const payload = {
-    data: {
-      type: 'user',
-      fields,
-      ...(relationships.length && { relationships }),
-    },
-  };
-
+  const payload = { data: { type: 'user', fields } };
   const response = await pbFetch('post', '/v2/entities', payload);
   return response.data;
 }
@@ -628,18 +652,41 @@ function resolveParentCompanyId(row, mapping, companyDomainCache) {
 }
 
 /**
- * Set parent company relationship on an existing user (PATCH path).
+ * Set parent company relationship on an existing user.
+ * Returns { set, warning? } so the caller can log appropriately.
  */
 async function maybeSetParent(pbFetch, withRetry, userId, row, mapping, companyDomainCache) {
-  const parentId = resolveParentCompanyId(row, mapping, companyDomainCache);
-  if (!parentId) return;
+  const hasIdCol = mapping.parentCompanyIdColumn;
+  const hasDomainCol = mapping.parentCompanyDomainColumn;
+  if (!hasIdCol && !hasDomainCol) return { set: false };
 
-  await withRetry(
-    () => pbFetch('put', `/v2/entities/${userId}/relationships/parent`, {
-      data: { target: { id: parentId } },
-    }),
-    `set parent for user ${userId}`
-  );
+  const rawId = hasIdCol ? cell(row, mapping.parentCompanyIdColumn)?.trim() : null;
+  const rawDomain = hasDomainCol ? cell(row, mapping.parentCompanyDomainColumn)?.trim() : null;
+  if (!rawId && !rawDomain) return { set: false };
+
+  const parentId = resolveParentCompanyId(row, mapping, companyDomainCache);
+  if (!parentId) {
+    if (rawId && !UUID_RE.test(rawId)) {
+      return { set: false, warning: `Parent company ID "${rawId}" is not a valid UUID — skipped` };
+    }
+    if (rawDomain) {
+      return { set: false, warning: `Parent company domain "${rawDomain}" not found in workspace — skipped` };
+    }
+    return { set: false, warning: `Parent company value could not be resolved — skipped` };
+  }
+
+  try {
+    await withRetry(
+      () => pbFetch('put', `/v2/entities/${userId}/relationships/parent`, {
+        data: { target: { id: parentId } },
+      }),
+      `set parent for user ${userId}`
+    );
+    return { set: true };
+  } catch (err) {
+    const detail = parseApiError(err);
+    return { set: false, warning: `Failed to set parent company ${parentId} — ${detail}` };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -150,8 +150,6 @@ function buildUsersBaseMappingTable() {
     { id: 'users-map-desc',            label: 'Description',             displayType: 'RichText', required: false },
     { id: 'users-map-owner',           label: 'Owner',                   displayType: 'Member',   required: false, hint: 'Email of the workspace member who owns this user' },
     { id: 'users-map-archived',        label: 'Archived',                displayType: 'Boolean',  required: false, hint: 'true/false — only applied on PATCH (ignored on create)' },
-    { id: 'users-map-parent-id',       label: 'Parent Company ID',       displayType: 'uuid',     required: false, hint: 'UUID of the parent company' },
-    { id: 'users-map-parent-domain',   label: 'Parent Company Domain',   displayType: 'domain',   required: false, hint: 'Domain of the parent company (resolved to UUID)' },
   ];
 
   for (const f of baseFields) {
@@ -212,9 +210,11 @@ async function loadUsersCustomFieldTable() {
     if (usersCustomFields.length === 0) {
       $('users-custom-fields-loading').textContent = 'No custom fields found for user entities.';
       show('users-custom-fields-loading');
+      buildUsersRelationshipFields();
       return;
     }
     buildUsersCustomFieldTable(usersCustomFields);
+    buildUsersRelationshipFields();
     restoreUsersMapping();
   } catch (e) {
     $('users-custom-fields-loading').textContent = `Failed to load custom fields: ${e.message}`;
@@ -246,6 +246,35 @@ function buildUsersCustomFieldTable(fields) {
     );
     if (match) sel.value = match;
   }
+}
+
+function buildUsersRelationshipFields() {
+  const tbody = $('users-mapping-rows');
+
+  const groupTr = document.createElement('tr');
+  groupTr.className = 'mapping-group-row';
+  groupTr.innerHTML = '<td colspan="3" class="mapping-group-label">Relationships</td>';
+  tbody.appendChild(groupTr);
+
+  const relFields = [
+    { id: 'users-map-parent-id',       label: 'Parent Company ID',       displayType: 'uuid',     required: false, hint: 'UUID of the parent company' },
+    { id: 'users-map-parent-domain',   label: 'Parent Company Domain',   displayType: 'domain',   required: false, hint: 'Domain of the parent company (resolved to UUID)' },
+  ];
+
+  for (const f of relFields) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        ${f.label} <span class="info-icon" data-tip="${esc(f.hint)}">i</span>
+      </td>
+      <td><span class="badge badge-muted">${f.displayType}</span></td>
+      <td>${buildUsersColumnSelect(f.id, true)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  usersAutoDetectMappings();
+  restoreUsersMapping();
 }
 
 // ══════════════════════════════════════════════════════════
