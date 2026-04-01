@@ -224,13 +224,27 @@ function buildExportCSV(companies, v1Map, customFields, domainFieldId) {
  * Body: { csvText: string, mapping: Mapping, clearEmptyFields: boolean }
  */
 router.post('/import/preview', pbAuth, async (req, res) => {
-  const { csvText, mapping } = req.body;
+  const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
+  const { csvText, mapping, options = {} } = req.body;
   if (!csvText || !mapping) return res.status(400).json({ error: 'Missing csvText or mapping' });
 
   const { rows, errors: parseErrors } = parseCSV(csvText);
 
   if (parseErrors.length) {
     return res.json({ valid: false, totalRows: 0, errors: parseErrors.map((e) => ({ row: null, message: e })) });
+  }
+
+  // Fetch workspace members for owner validation when owner column is mapped
+  // and skipInvalidOwner is not enabled
+  let memberEmails = new Set();
+  if (mapping.ownerColumn && !options.skipInvalidOwner) {
+    try {
+      const members = await fetchAllPages('/v2/members', 'fetch members for owner validation');
+      for (const m of members) {
+        const email = m.fields?.email?.toLowerCase();
+        if (email) memberEmails.add(email);
+      }
+    } catch (_) { /* non-fatal */ }
   }
 
   const errors = [];
@@ -257,6 +271,12 @@ router.post('/import/preview', pbAuth, async (req, res) => {
 
     if (pbId && !UUID_RE.test(pbId.trim())) {
       errors.push({ row: rowNum, field: mapping.pbIdColumn, message: `Invalid UUID format: '${pbId}'` });
+    }
+
+    // Owner validation
+    const owner = cell(row, mapping.ownerColumn)?.trim();
+    if (owner && memberEmails.size > 0 && !memberEmails.has(owner.toLowerCase())) {
+      errors.push({ row: rowNum, field: mapping.ownerColumn, message: `Owner '${owner}' is not a workspace member — fix the email or enable "Skip owner if member does not exist"` });
     }
 
     for (const cf of mapping.customFields || []) {

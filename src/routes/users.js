@@ -279,7 +279,7 @@ function buildExportCSV(users, customFields, companyDomainMap) {
  */
 router.post('/import/preview', pbAuth, async (req, res) => {
   const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
-  const { csvText, mapping } = req.body;
+  const { csvText, mapping, options = {} } = req.body;
   if (!csvText || !mapping) return res.status(400).json({ error: 'Missing csvText or mapping' });
 
   const { rows, errors: parseErrors } = parseCSV(csvText);
@@ -310,8 +310,8 @@ router.post('/import/preview', pbAuth, async (req, res) => {
           })
           .catch(() => ({}))
       : {},
-    // Member emails: only needed when owner column is mapped
-    mapping.ownerColumn
+    // Member emails: only needed when owner column is mapped and skipInvalidOwner is off
+    mapping.ownerColumn && !options.skipInvalidOwner
       ? fetchAllPages('/v2/members', 'fetch members for owner validation')
           .then((members) => {
             const set = new Set();
@@ -363,10 +363,10 @@ router.post('/import/preview', pbAuth, async (req, res) => {
       emailsSeen.add(lower);
     }
 
-    // Owner validation
+    // Owner validation — blocking error when skipInvalidOwner is off
     const owner = cell(row, mapping.ownerColumn)?.trim();
     if (owner && memberEmails.size > 0 && !memberEmails.has(owner.toLowerCase())) {
-      warnings.push({ row: rowNum, field: mapping.ownerColumn, message: `Owner '${owner}' not found as a workspace member` });
+      errors.push({ row: rowNum, field: mapping.ownerColumn, message: `Owner '${owner}' is not a workspace member — fix the email or enable "Skip owner if member does not exist"` });
     }
 
     // Custom field validation

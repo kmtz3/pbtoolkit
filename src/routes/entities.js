@@ -203,9 +203,9 @@ router.post('/preview', pbAuth, async (req, res) => {
     return res.status(400).json({ error: 'Missing files object' });
   }
 
-  // If skipInvalidOwner is enabled, fetch workspace members for owner validation
+  // Validate owner emails against workspace members when skipInvalidOwner is OFF
   let memberEmails = null;
-  if (options.skipInvalidOwner) {
+  if (!options.skipInvalidOwner) {
     try {
       const members = await fetchAllPages('/v2/members', 'fetch members for owner validation');
       memberEmails = new Set(members.map((m) => (m.fields?.email || '').toLowerCase()).filter(Boolean));
@@ -262,11 +262,12 @@ router.post('/preview', pbAuth, async (req, res) => {
       rows.forEach((row, i) => {
         const ownerVal = (cell(row, ownerCol) || '').trim().toLowerCase();
         if (ownerVal && !memberEmails.has(ownerVal)) {
-          results[entityType].warnings.push({
+          results[entityType].errors.push({
             row: i + 2, // 1-indexed, row 1 is header
             field: ownerCol,
-            message: `Owner email '${ownerVal}' does not match any workspace member — owner will be skipped during import`,
+            message: `Owner '${ownerVal}' is not a workspace member — fix the email or enable "Skip owner if member does not exist"`,
           });
+          totalErrors++;
         }
       });
     }

@@ -268,7 +268,7 @@ async function runUsersValidation() {
     const res = await fetch('/api/users/import/preview', {
       method: 'POST',
       headers: buildHeaders(),
-      body: JSON.stringify({ csvText: usersParsedCSV.raw, mapping }),
+      body: JSON.stringify({ csvText: usersParsedCSV.raw, mapping, options: { skipInvalidOwner: $('users-imp-skip-invalid-owner')?.checked || false } }),
     });
     const data = await res.json();
 
