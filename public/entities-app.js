@@ -635,6 +635,7 @@ function entBuildPreviewPayload() {
       multiSelectMode:          msMode ? msMode.value : 'set',
       bypassEmptyCells:         document.getElementById('ent-bypass-empty')?.checked  || false,
       bypassHtmlFormatter:      document.getElementById('ent-bypass-html')?.checked   || false,
+      skipInvalidOwner:         document.getElementById('ent-skip-invalid-owner')?.checked || false,
       fiscal_year_start_month:  parseInt(document.getElementById('ent-fiscal-month')?.value || '1', 10),
       autoGenerateExtKeys:      document.getElementById('ent-autogen-extkeys')?.checked || false,
       workspaceCode:            (document.getElementById('ent-workspace-code')?.value || '').trim().toUpperCase(),

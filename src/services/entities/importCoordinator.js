@@ -68,6 +68,8 @@ async function runImport(files, mappings, configs, options, pbFetch, withRetry, 
     multiSelectMode          = 'set',
     bypassEmptyCells         = false,
     bypassHtmlFormatter      = false,
+    skipInvalidOwner         = false,
+    _memberEmails            = null,
     fiscal_year_start_month  = 1,
     autoGenerateExtKeys      = false,
     workspaceCode            = '',
@@ -137,7 +139,7 @@ async function runImport(files, mappings, configs, options, pbFetch, withRetry, 
         try {
           if (row._pbId) {
             // ── PATCH ──────────────────────────────────────────────────────
-            const payload = buildPatchPayload(row, type, config, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, fiscal_year_start_month });
+            const payload = buildPatchPayload(row, type, config, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, skipInvalidOwner, _memberEmails, fiscal_year_start_month });
             await withRetry(
               () => pbFetch('patch', `/v2/entities/${encodeURIComponent(row._pbId)}`, payload),
               `patch:${type}`,
@@ -153,7 +155,7 @@ async function runImport(files, mappings, configs, options, pbFetch, withRetry, 
               autoCounter++;
             }
 
-            const payload = buildCreatePayload(row, type, config, idCache, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, fiscal_year_start_month });
+            const payload = buildCreatePayload(row, type, config, idCache, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, skipInvalidOwner, _memberEmails, fiscal_year_start_month });
             const resp = await withRetry(
               () => pbFetch('post', '/v2/entities', payload),
               `create:${type}`,

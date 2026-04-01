@@ -7,7 +7,7 @@
  *
  * Phase 2 — CSV Parser & Validator
  *   GET  /api/entities/configs           Return entity field configs as JSON (for mapping UI)
- *   POST /api/entities/preview           Validate CSVs + mappings; return errors per entity/row/field
+ *   POST /api/entities/preview           Validate CSVs + mappings; optionally validate owner emails against members
  *   POST /api/entities/normalize-keys    Single-file CSV transform: rewrite UUID ext_keys → WSID-TYPE-NNN
  *
  * Phase 3 — Exports + Migration
@@ -193,13 +193,26 @@ router.get('/configs', pbAuth, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /preview  — validate CSVs + mappings; no API calls
+// POST /preview  — validate CSVs + mappings; optionally fetches members for owner validation
 // ---------------------------------------------------------------------------
 
-router.post('/preview', (req, res) => {
+router.post('/preview', pbAuth, async (req, res) => {
+  const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
   const { files, mappings = {}, options = {} } = req.body;
   if (!files || typeof files !== 'object') {
     return res.status(400).json({ error: 'Missing files object' });
+  }
+
+  // If skipInvalidOwner is enabled, fetch workspace members for owner validation
+  let memberEmails = null;
+  if (options.skipInvalidOwner) {
+    try {
+      const members = await fetchAllPages('/v2/members', 'fetch members for owner validation');
+      memberEmails = new Set(members.map((m) => (m.fields?.email || '').toLowerCase()).filter(Boolean));
+    } catch (err) {
+      console.error('entities/preview: failed to fetch members for owner validation:', err.message);
+      return res.status(500).json({ error: `Failed to fetch workspace members: ${parseApiError(err)}` });
+    }
   }
 
   const results = {};
@@ -241,6 +254,22 @@ router.post('/preview', (req, res) => {
     results[entityType].errors.push(...errors);
     results[entityType].warnings.push(...warnings);
     totalErrors += errors.length;
+
+    // Owner email validation against workspace members
+    if (memberEmails) {
+      const cols = (mapping && mapping.columns) ? mapping.columns : {};
+      const ownerCol = cols['owner'] || 'Owner';
+      rows.forEach((row, i) => {
+        const ownerVal = (cell(row, ownerCol) || '').trim().toLowerCase();
+        if (ownerVal && !memberEmails.has(ownerVal)) {
+          results[entityType].warnings.push({
+            row: i + 2, // 1-indexed, row 1 is header
+            field: ownerCol,
+            message: `Owner email '${ownerVal}' does not match any workspace member — owner will be skipped during import`,
+          });
+        }
+      });
+    }
   }
 
   res.json({ valid: totalErrors === 0, results });
@@ -551,10 +580,24 @@ router.post('/normalize-keys-multi', async (req, res) => {
  * Body: { files, mappings, options }
  */
 router.post('/run', pbAuth, async (req, res) => {
-  const { pbFetch, withRetry } = res.locals.pbClient;
+  const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
   const sse = startSSE(res);
   const { files, mappings, options } = req.body || {};
 
+  // If skipInvalidOwner is enabled, pre-fetch workspace members and inject the email set into options
+  let resolvedOptions = options || {};
+  if (resolvedOptions.skipInvalidOwner) {
+    try {
+      const members = await fetchAllPages('/v2/members', 'fetch members for owner validation');
+      const memberEmails = new Set(members.map((m) => (m.fields?.email || '').toLowerCase()).filter(Boolean));
+      resolvedOptions = { ...resolvedOptions, _memberEmails: memberEmails };
+    } catch (err) {
+      console.error('entities/run: failed to fetch members for owner validation:', err.message);
+      sse.error(`Failed to fetch workspace members: ${parseApiError(err)}`);
+      sse.done();
+      return;
+    }
+  }
 
   try {
     const configs = await fetchEntityConfigs(pbFetch, withRetry);
@@ -562,7 +605,7 @@ router.post('/run', pbAuth, async (req, res) => {
       files    || {},
       mappings || {},
       configs,
-      options  || {},
+      resolvedOptions,
       pbFetch,
       withRetry,
       {

@@ -233,6 +233,10 @@
                     <input type="checkbox" id="ent-bypass-html" />
                     Bypass HTML formatter <span class="info-icon" data-tip="Send description HTML as-is, without sanitization">i</span>
                   </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="ent-skip-invalid-owner" />
+                    Skip owner if member does not exist <span class="info-icon" data-tip="When enabled, rows with an owner email that doesn't match a workspace member will have the owner field silently skipped instead of causing an API error">i</span>
+                  </label>
                   <div>
                     <label class="checkbox-row">
                       <input type="checkbox" id="ent-autogen-extkeys" />
