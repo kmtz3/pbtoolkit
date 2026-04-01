@@ -20,7 +20,6 @@ const {
 } = require('./meta');
 const { schemaToType } = require('./configCache');
 const { extractCursor } = require('../../lib/pbClient');
-const { normalizeDate } = require('../../lib/fieldFormat');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,10 +55,8 @@ function formatFieldValue(val, schema) {
     case 'Member':
     case 'User':
       return val?.email || '';
-    case 'Date': {
-      const raw = typeof val === 'string' ? val : (val?.date || '');
-      return raw ? normalizeDate(raw) : '';
-    }
+    case 'Date':
+      return typeof val === 'string' ? val : (val?.date || '');
     default:
       if (Array.isArray(val)) {
         return val.map((v) => (v && typeof v === 'object' ? v.name || v.email || '' : String(v))).filter(Boolean).join(', ');

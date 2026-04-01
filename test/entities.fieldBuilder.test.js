@@ -268,13 +268,13 @@ describe('buildCreatePayload — teams singular/plural', () => {
     assert.equal(payload.data.fields.teams[0].name, 'Eng');
   });
 
-  test('objective → team (singular), only first item', () => {
+  test('objective → teams (plural), all items included', () => {
     const row = makeRow({ _type: 'objective', name: 'My Obj', teams: 'Eng, PM' });
     const payload = buildCreatePayload(row, 'objective', EMPTY_CONFIG, EMPTY_CACHE, {});
-    assert.ok(Array.isArray(payload.data.fields.team));
-    assert.equal(payload.data.fields.team.length, 1);
-    assert.equal(payload.data.fields.team[0].name, 'Eng');
-    assert.equal(payload.data.fields.teams, undefined);
+    assert.ok(Array.isArray(payload.data.fields.teams));
+    assert.equal(payload.data.fields.teams.length, 2);
+    assert.equal(payload.data.fields.teams[0].name, 'Eng');
+    assert.equal(payload.data.fields.teams[1].name, 'PM');
   });
 });
 

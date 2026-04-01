@@ -88,6 +88,13 @@ before(async () => {
         return;
       }
 
+      // GET /v2/entities?type[]=company — used by fetchAllPages for delete/all
+      if (req.method === 'GET' && req.url.startsWith('/v2/entities')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: mockSearchCompanies, links: { next: null } }));
+        return;
+      }
+
       res.writeHead(204); res.end();
     });
   });
@@ -159,14 +166,14 @@ test('delete/all: uses POST /v2/entities/search to collect IDs, then deletes via
   assert.equal(complete.total, 2);
   assert.equal(complete.deleted, 2);
 
-  // v2 search used for collecting IDs (not offset GET /companies)
+  // v2 GET used for collecting IDs (fetchAllPages, not offset GET /companies v1)
   assert.ok(
-    calls.post.some((p) => p.startsWith('/v2/entities/search')),
-    'Should have used POST /v2/entities/search to collect IDs'
+    calls.get.some((p) => p.startsWith('/v2/entities')),
+    'Should have used GET /v2/entities?type[]=company to collect IDs'
   );
   assert.ok(
-    !calls.get.some((p) => p.startsWith('/companies')),
-    'Should NOT have used GET /companies for ID collection'
+    !calls.get.some((p) => /^\/companies($|\?)/.test(p)),
+    'Should NOT have used GET /companies (v1) for ID collection'
   );
 
   // v2 delete used

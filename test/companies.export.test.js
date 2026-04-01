@@ -209,13 +209,13 @@ test('POST /api/export: CSV includes standard fields, custom fields, and source 
   assert.ok(complete?.csv, 'Should have CSV content');
 
   const csv = complete.csv;
-  // Standard fields
-  assert.ok(csv.includes('PB Company ID'), 'CSV should have PB Company ID column');
-  assert.ok(csv.includes('Company Name'), 'CSV should have Company Name column');
-  assert.ok(csv.includes('Domain'), 'CSV should have Domain column');
+  // Standard fields (snake_case labels for auto-detect on re-import)
+  assert.ok(csv.includes('pb_id'), 'CSV should have pb_id column');
+  assert.ok(csv.includes('name'), 'CSV should have name column');
+  assert.ok(csv.includes('domain'), 'CSV should have domain column');
   // Source columns
-  assert.ok(csv.includes('Source Origin'), 'CSV should have Source Origin column');
-  assert.ok(csv.includes('Source Record ID'), 'CSV should have Source Record ID column');
+  assert.ok(csv.includes('source_origin'), 'CSV should have source_origin column');
+  assert.ok(csv.includes('source_record_id'), 'CSV should have source_record_id column');
   // Custom field columns
   assert.ok(csv.includes('MRR'), 'CSV should have MRR column');
   assert.ok(csv.includes('Tier'), 'CSV should have Tier column');
@@ -237,9 +237,9 @@ test('POST /api/export: v2 source columns populated from metadata.source (system
   assert.ok(complete?.csv, 'Should have CSV content');
 
   const csv = complete.csv;
-  // Column headers should use new naming
-  assert.ok(csv.includes('Source System (v2)'), 'CSV should have Source System (v2) column');
-  assert.ok(csv.includes('Source Record ID (v2)'), 'CSV should have Source Record ID (v2) column');
+  // Column headers should use snake_case naming
+  assert.ok(csv.includes('source_system'), 'CSV should have source_system column');
+  assert.ok(csv.includes('source_record_id_v2'), 'CSV should have source_record_id_v2 column');
 
   // Acme Corp row should have v2 source data from metadata.source.system/recordId
   const lines = csv.split('\n');

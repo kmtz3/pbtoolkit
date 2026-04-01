@@ -292,13 +292,13 @@ describe('entityToRow — system field values', () => {
     assert.equal(row['Teams'], 'Eng, PM');
   });
 
-  test('objective team (singular) field handled', () => {
-    const config = makeConfig([makeSystemField('teams', 'Team')]); // config ID is 'teams'
+  test('objective teams field handled (plural, like all entity types)', () => {
+    const config = makeConfig([makeSystemField('teams', 'Teams')]);
     const row = entityToRow(
-      makeEntity('id', { team: { name: 'Strategy' } }), // API returns 'team' singular
+      makeEntity('id', { teams: [{ name: 'Strategy' }] }), // API returns 'teams' plural
       'objective', config
     );
-    assert.equal(row['Team'], 'Strategy');
+    assert.equal(row['Teams'], 'Strategy');
   });
 
   test('archived=true → "TRUE" string', () => {
