@@ -18,21 +18,21 @@ let usersDeleteController = null;
 let usersDeleteAllController = null;
 
 function resetUsersState() {
-  usersParsedCSV = null;
+  // Clear token-dependent state but preserve CSV file, mapping, and settings
+  // so the user doesn't lose work when disconnecting and reconnecting.
   usersCustomFields = [];
   usersLastExportCSV = null;
   usersLastExportFilename = 'users.csv';
-  if (usersClearImportDropzone) usersClearImportDropzone();
-  if (usersClearDeleteDropzone) usersClearDeleteDropzone();
   resetUsersExport();
-  ['users-import-step-map', 'users-import-step-options', 'users-import-step-validate', 'users-import-step-run', 'users-import-summary-box'].forEach((id) => {
+  // Hide validation/run results (stale without token) but keep map + options visible if CSV loaded
+  ['users-import-step-validate', 'users-import-step-run', 'users-import-summary-box'].forEach((id) => {
     const el = $(id); if (el) el.classList.add('hidden');
   });
-  usersDeleteParsedCSV = null;
-  usersExportCtrl = null;
-  usersImportController = null;
-  usersDeleteController = null;
-  usersDeleteAllController = null;
+  // Abort any in-flight operations
+  if (usersExportCtrl) { usersExportCtrl.abort(); usersExportCtrl = null; }
+  if (usersImportController) { usersImportController.abort(); usersImportController = null; }
+  if (usersDeleteController) { usersDeleteController.abort(); usersDeleteController = null; }
+  if (usersDeleteAllController) { usersDeleteAllController.abort(); usersDeleteAllController = null; }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -340,8 +340,9 @@ function runUsersImport() {
   const msMode = document.querySelector('input[name="users-imp-ms-mode"]:checked');
   const options = {
     multiSelectMode:     msMode ? msMode.value : 'set',
-    bypassEmptyCells:    $('users-imp-bypass-empty')?.checked  || false,
-    bypassHtmlFormatter: $('users-imp-bypass-html')?.checked   || false,
+    bypassEmptyCells:    $('users-imp-bypass-empty')?.checked        || false,
+    bypassHtmlFormatter: $('users-imp-bypass-html')?.checked         || false,
+    skipInvalidOwner:    $('users-imp-skip-invalid-owner')?.checked  || false,
   };
 
   usersImportController = subscribeSSE(

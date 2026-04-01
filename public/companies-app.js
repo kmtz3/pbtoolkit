@@ -144,6 +144,7 @@ function buildBaseMappingTable() {
     { id: 'map-name',          label: 'Name',             displayType: 'Text',     required: false, hint: 'Required when creating a new company (no pb_id provided)' },
     { id: 'map-domain',        label: 'Domain',           displayType: 'domain',   required: false, hint: 'Required when pb_id is not provided — used for lookup and new company creation' },
     { id: 'map-desc',          label: 'Description',      displayType: 'RichText', required: false },
+    { id: 'map-owner',         label: 'Owner',            displayType: 'Member',   required: false, hint: 'Email of the workspace member who owns this company' },
     { id: 'map-source-origin', label: 'Source Origin',    displayType: 'Text',     required: false },
     { id: 'map-source-record', label: 'Source Record ID', displayType: 'Text',     required: false },
   ];
@@ -189,6 +190,7 @@ function autoDetectBaseMappings() {
     'map-name':          ['name', 'company name', 'company_name'],
     'map-domain':        ['domain', 'website', 'url'],
     'map-desc':          ['description', 'desc', 'notes'],
+    'map-owner':         ['owner', 'owner_email', 'owner email'],
     'map-source-origin': ['sourceorigin', 'source_origin', 'source origin'],
     'map-source-record': ['sourcerecordid', 'source_record_id', 'source record id'],
   };
@@ -351,8 +353,9 @@ function runImport() {
   const msMode = document.querySelector('input[name="imp-ms-mode"]:checked');
   const options = {
     multiSelectMode:     msMode ? msMode.value : 'set',
-    bypassEmptyCells:    $('imp-bypass-empty')?.checked  || false,
-    bypassHtmlFormatter: $('imp-bypass-html')?.checked   || false,
+    bypassEmptyCells:    $('imp-bypass-empty')?.checked           || false,
+    bypassHtmlFormatter: $('imp-bypass-html')?.checked            || false,
+    skipInvalidOwner:    $('imp-skip-invalid-owner')?.checked     || false,
   };
 
   importController = subscribeSSE(
@@ -393,6 +396,15 @@ function runImport() {
         appendLogEntry({ level: 'error', message: msg, ts: new Date().toISOString() });
         show('btn-import-download-log');
       },
+
+      onAbort: () => {
+        hide('btn-stop-import');
+        setText('import-run-title', 'Import stopped');
+        setImportProgress('Stopped by user', 100);
+        appendLogEntry({ level: 'warn', message: 'Import stopped by user', ts: new Date().toISOString() });
+        show('btn-import-download-log');
+        importController = null;
+      },
     }
   );
 }
@@ -411,6 +423,7 @@ function buildMapping() {
     nameColumn:       $('map-name')?.value                 || null,
     domainColumn:     $('map-domain')?.value               || null,
     descColumn:       $('map-desc')?.value                 || null,
+    ownerColumn:      $('map-owner')?.value                || null,
     sourceOriginCol:  $('map-source-origin')?.value        || null,
     sourceRecordCol:  $('map-source-record')?.value        || null,
 
@@ -447,6 +460,7 @@ function restoreCompaniesMapping() {
     'map-name':          saved.nameColumn,
     'map-domain':        saved.domainColumn,
     'map-desc':          saved.descColumn,
+    'map-owner':         saved.ownerColumn,
     'map-source-origin': saved.sourceOriginCol,
     'map-source-record': saved.sourceRecordCol,
   };
@@ -768,7 +782,7 @@ function initCompaniesModule() {
     show('import-step-options');
   });
   $('btn-stop-import').addEventListener('click', () => {
-    if (window._importController) { window._importController.abort(); window._importController = null; }
+    if (importController) { importController.abort(); importController = null; }
   });
   $('btn-import-download-log').addEventListener('click', () => {
     downloadLogCsv(appendLogEntry, 'companies-import');

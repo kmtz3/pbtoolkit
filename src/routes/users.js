@@ -18,6 +18,7 @@ const { pbAuth } = require('../middleware/pbAuth');
 const { sanitizeDescription } = require('../services/entities/fieldBuilder');
 const { formatFieldValue } = require('../services/entities/exporter');
 const { schemaToType, normalizeSchema, EXCLUDED_FIELD_IDS } = require('../services/entities/configCache');
+const { formatCustomFieldValue, isMultiType } = require('../lib/fieldFormat');
 
 const STANDARD_FIELD_IDS = new Set(['name', 'email', 'description', 'owner', 'archived']);
 
@@ -289,27 +290,40 @@ router.post('/import/preview', pbAuth, async (req, res) => {
   const errors = [];
   const warnings = [];
 
-  // Build email cache from existing users for PATCH-by-email detection
-  let emailCache = {};
-  try {
-    const existingUsers = await fetchAllPages('/v2/entities?type[]=user', 'fetch users for email cache');
-    for (const u of existingUsers) {
-      const email = u.fields?.email?.toLowerCase();
-      if (email && !emailCache[email]) emailCache[email] = u.id;
-    }
-  } catch (_) { /* non-fatal — email dedup won't work */ }
+  // Only fetch what we actually need, and fetch in parallel
+  const needEmailCache = mapping.emailColumn && rows.some((r) => {
+    const pbId = cell(r, mapping.pbIdColumn)?.trim();
+    return !pbId || !UUID_RE.test(pbId);
+  });
 
-  // Build member email set for owner validation
-  let memberEmails = new Set();
-  if (mapping.ownerColumn) {
-    try {
-      const members = await fetchAllPages('/v2/members', 'fetch members for owner validation');
-      for (const m of members) {
-        const email = m.fields?.email?.toLowerCase();
-        if (email) memberEmails.add(email);
-      }
-    } catch (_) { /* non-fatal */ }
-  }
+  const [emailCache, memberEmails] = await Promise.all([
+    // Email cache: only needed when email column is mapped and some rows lack a valid pb_id
+    needEmailCache
+      ? fetchAllPages('/v2/entities?type[]=user', 'fetch users for email cache')
+          .then((users) => {
+            const cache = {};
+            for (const u of users) {
+              const email = u.fields?.email?.toLowerCase();
+              if (email && !cache[email]) cache[email] = u.id;
+            }
+            return cache;
+          })
+          .catch(() => ({}))
+      : {},
+    // Member emails: only needed when owner column is mapped
+    mapping.ownerColumn
+      ? fetchAllPages('/v2/members', 'fetch members for owner validation')
+          .then((members) => {
+            const set = new Set();
+            for (const m of members) {
+              const email = m.fields?.email?.toLowerCase();
+              if (email) set.add(email);
+            }
+            return set;
+          })
+          .catch(() => new Set())
+      : new Set(),
+  ]);
 
   let createCount = 0;
   let updateCount = 0;
@@ -388,6 +402,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
     multiSelectMode     = 'set',
     bypassEmptyCells    = false,
     bypassHtmlFormatter = false,
+    skipInvalidOwner    = false,
   } = options;
   if (!csvText || !mapping) return res.status(400).json({ error: 'Missing csvText or mapping' });
 
@@ -420,12 +435,27 @@ router.post('/import/run', pbAuth, async (req, res) => {
     }
     sse.progress(`Email cache built (${Object.keys(emailCache).length} users)`, 10);
 
-    // Step 2: Build company lookup if parent columns mapped
+    // Step 2: Build company lookup + member set (in parallel where needed)
     let companyDomainCache = {};
-    if (mapping.parentCompanyIdColumn || mapping.parentCompanyDomainColumn) {
-      sse.progress('Building company lookup…', 12);
-      companyDomainCache = await buildDomainToIdCache(pbFetch, withRetry, fetchAllPages);
-      sse.progress(`Company lookup built (${Object.keys(companyDomainCache).length} domains)`, 15);
+    let memberEmails = new Set();
+    const needCompanies = mapping.parentCompanyIdColumn || mapping.parentCompanyDomainColumn;
+    const needMembers = skipInvalidOwner && mapping.ownerColumn;
+
+    if (needCompanies || needMembers) {
+      sse.progress('Building lookups…', 12);
+      const [companies, members] = await Promise.all([
+        needCompanies
+          ? buildDomainToIdCache(pbFetch, withRetry, fetchAllPages)
+          : {},
+        needMembers
+          ? fetchAllPages('/v2/members', 'fetch members for owner validation')
+              .then((ms) => { const s = new Set(); for (const m of ms) { const e = m.fields?.email?.toLowerCase(); if (e) s.add(e); } return s; })
+              .catch(() => new Set())
+          : new Set(),
+      ]);
+      companyDomainCache = companies;
+      memberEmails = members;
+      sse.progress(`Lookups built`, 15);
     }
 
     // Step 3: Process each row
@@ -454,7 +484,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
         if (pbId && UUID_RE.test(pbId)) {
           // UUID present → PATCH
           await withRetry(
-            () => patchUser(pbFetch, pbId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter }),
+            () => patchUser(pbFetch, pbId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails }),
             `patch user row ${rowNum}`
           );
           // Set parent if mapped
@@ -465,7 +495,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
           // Email match → PATCH
           const existingId = emailCache[email.toLowerCase()];
           await withRetry(
-            () => patchUser(pbFetch, existingId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter }),
+            () => patchUser(pbFetch, existingId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails }),
             `patch by email row ${rowNum}`
           );
           await maybeSetParent(pbFetch, withRetry, existingId, row, mapping, companyDomainCache);
@@ -474,7 +504,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
         } else {
           // CREATE
           const newUser = await withRetry(
-            () => createUser(pbFetch, row, mapping, bypassHtmlFormatter, companyDomainCache),
+            () => createUser(pbFetch, row, mapping, bypassHtmlFormatter, companyDomainCache, memberEmails),
             `create user row ${rowNum}`
           );
           const newId = newUser.id;
@@ -557,7 +587,7 @@ async function buildDomainToIdCache(pbFetch, withRetry, fetchAllPages) {
  * Create a new user via POST /v2/entities.
  * Note: `archived` is NOT included on create (API rejects it).
  */
-async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, companyDomainCache) {
+async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, companyDomainCache, memberEmails) {
   const fields = {};
 
   const name = cell(row, mapping.nameColumn)?.trim();
@@ -570,18 +600,15 @@ async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, companyDom
   if (rawDesc) fields.description = bypassHtmlFormatter ? rawDesc : sanitizeDescription(rawDesc);
 
   const owner = cell(row, mapping.ownerColumn)?.trim();
-  if (owner) fields.owner = { email: owner };
+  if (owner && (memberEmails.size === 0 || memberEmails.has(owner.toLowerCase()))) {
+    fields.owner = { email: owner };
+  }
 
   // Custom fields
   for (const cf of mapping.customFields || []) {
     const rawVal = cell(row, cf.csvColumn);
     if (rawVal !== '' && rawVal != null) {
-      fields[cf.fieldId] = cf.fieldType === 'number'                                  ? Number(rawVal)
-                         : cf.fieldType === 'select'                                  ? { name: rawVal }
-                         : cf.fieldType === 'multiselect' || cf.fieldType === 'tags'  ? String(rawVal).split(',').map((x) => x.trim()).filter(Boolean).map((n) => ({ name: n }))
-                         : cf.fieldType === 'member'                                  ? { email: String(rawVal).trim() }
-                         : cf.fieldType === 'richtext'                                ? sanitizeDescription(rawVal)
-                         : rawVal;
+      fields[cf.fieldId] = formatCustomFieldValue(rawVal, cf.fieldType);
     }
   }
 
@@ -608,7 +635,7 @@ async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, companyDom
  * PATCH an existing user via PATCH /v2/entities/{id}.
  */
 async function patchUser(pbFetch, userId, row, mapping, options) {
-  const { multiSelectMode = 'set', bypassEmptyCells = false, bypassHtmlFormatter = false } = options || {};
+  const { multiSelectMode = 'set', bypassEmptyCells = false, bypassHtmlFormatter = false, memberEmails = new Set() } = options || {};
   const ops = [];
 
   const name = cell(row, mapping.nameColumn)?.trim();
@@ -627,26 +654,23 @@ async function patchUser(pbFetch, userId, row, mapping, options) {
   }
 
   const owner = cell(row, mapping.ownerColumn)?.trim();
-  if (owner) ops.push({ op: 'set', path: 'owner', value: { email: owner } });
-  else if (!bypassEmptyCells) ops.push({ op: 'clear', path: 'owner' });
+  if (owner && (memberEmails.size === 0 || memberEmails.has(owner.toLowerCase()))) {
+    ops.push({ op: 'set', path: 'owner', value: { email: owner } });
+  } else if (!owner && !bypassEmptyCells) {
+    ops.push({ op: 'clear', path: 'owner' });
+  }
 
   const archived = cell(row, mapping.archivedColumn)?.trim().toLowerCase();
   if (archived === 'true') ops.push({ op: 'set', path: 'archived', value: true });
   else if (archived === 'false') ops.push({ op: 'set', path: 'archived', value: false });
 
   // Custom fields
-  const MULTI_TYPES = new Set(['multiselect', 'member', 'tag', 'tags']);
   for (const cf of mapping.customFields || []) {
     const rawVal = cell(row, cf.csvColumn);
     const isEmpty = rawVal === '' || rawVal == null;
     if (!isEmpty) {
-      const value = cf.fieldType === 'number'                                  ? Number(rawVal)
-                  : cf.fieldType === 'select'                                  ? { name: rawVal }
-                  : cf.fieldType === 'multiselect' || cf.fieldType === 'tags'  ? String(rawVal).split(',').map((x) => x.trim()).filter(Boolean).map((n) => ({ name: n }))
-                  : cf.fieldType === 'member'                                  ? { email: String(rawVal).trim() }
-                  : cf.fieldType === 'richtext'                                ? sanitizeDescription(rawVal)
-                  : rawVal;
-      const opName = MULTI_TYPES.has(cf.fieldType) ? multiSelectMode : 'set';
+      const value = formatCustomFieldValue(rawVal, cf.fieldType);
+      const opName = isMultiType(cf.fieldType) ? multiSelectMode : 'set';
       ops.push({ op: opName, path: cf.fieldId, value });
     } else if (!bypassEmptyCells) {
       ops.push({ op: 'clear', path: cf.fieldId });

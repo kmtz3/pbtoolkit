@@ -23,7 +23,7 @@
                   <span id="users-export-progress-msg">Starting…</span>
                   <span id="users-export-progress-pct">0%</span>
                 </div>
-                <button class="btn btn-ghost mt-8" id="btn-stop-users-export">⏹ Stop</button>
+                <button class="btn btn-danger btn-sm mt-8" id="btn-stop-users-export">⏹ Stop</button>
               </div>
 
               <div id="users-export-stopped" class="hidden">
@@ -134,13 +134,17 @@
                     <input type="checkbox" id="users-imp-bypass-html" />
                     Bypass HTML formatter <span class="info-icon" data-tip="Send description HTML as-is, without sanitization">i</span>
                   </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="users-imp-skip-invalid-owner" />
+                    Skip owner if member does not exist <span class="info-icon" data-tip="When enabled, rows with an owner email that doesn't match a workspace member will have the owner field silently skipped instead of causing an API error">i</span>
+                  </label>
                 </div>
               </div>
               <hr class="panel-divider mt-16" />
               <div class="flex gap-8 mt-16 items-center flex-wrap">
                 <button class="btn btn-secondary" id="btn-users-validate">✔ Validate</button>
                 <button class="btn btn-primary" id="btn-users-run-import">📥 Import</button>
-                <button class="btn btn-ghost hidden" id="btn-users-stop-import">⏹ Stop</button>
+                <button class="btn btn-danger btn-sm hidden" id="btn-users-stop-import">⏹ Stop</button>
               </div>
             </div>
           </div>

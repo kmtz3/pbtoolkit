@@ -23,7 +23,7 @@
                   <span id="export-progress-msg">Starting…</span>
                   <span id="export-progress-pct">0%</span>
                 </div>
-                <button class="btn btn-ghost mt-8" id="btn-stop-export">⏹ Stop</button>
+                <button class="btn btn-danger btn-sm mt-8" id="btn-stop-export">⏹ Stop</button>
               </div>
 
               <div id="export-stopped" class="hidden">
@@ -139,13 +139,17 @@
                     <input type="checkbox" id="imp-bypass-html" />
                     Bypass HTML formatter <span class="info-icon" data-tip="Send description HTML as-is, without sanitization">i</span>
                   </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="imp-skip-invalid-owner" />
+                    Skip owner if member does not exist <span class="info-icon" data-tip="When enabled, rows with an owner email that doesn't match a workspace member will have the owner field silently skipped instead of causing an API error">i</span>
+                  </label>
                 </div>
               </div>
               <hr class="panel-divider mt-16" />
               <div class="flex gap-8 mt-16 items-center flex-wrap">
                 <button class="btn btn-secondary" id="btn-validate">✔ Validate</button>
                 <button class="btn btn-primary" id="btn-run-import">📥 Import</button>
-                <button class="btn btn-ghost hidden" id="btn-stop-import">⏹ Stop</button>
+                <button class="btn btn-danger btn-sm hidden" id="btn-stop-import">⏹ Stop</button>
               </div>
             </div>
           </div>
@@ -369,7 +373,7 @@
                   <span class="text-sm text-muted" id="csm-v1v2-progress-msg">Starting…</span>
                   <div class="flex items-center gap-8">
                     <span class="text-sm text-muted" id="csm-v1v2-progress-pct">0%</span>
-                    <button class="btn btn-ghost btn-sm" id="btn-stop-csm-v1v2">⏹ Stop</button>
+                    <button class="btn btn-danger btn-sm" id="btn-stop-csm-v1v2">⏹ Stop</button>
                   </div>
                 </div>
                 <div class="progress-wrap">
@@ -408,7 +412,7 @@
                   <span class="text-sm text-muted" id="csm-v2v1-progress-msg">Starting…</span>
                   <div class="flex items-center gap-8">
                     <span class="text-sm text-muted" id="csm-v2v1-progress-pct">0%</span>
-                    <button class="btn btn-ghost btn-sm" id="btn-stop-csm-v2v1">⏹ Stop</button>
+                    <button class="btn btn-danger btn-sm" id="btn-stop-csm-v2v1">⏹ Stop</button>
                   </div>
                 </div>
                 <div class="progress-wrap">
