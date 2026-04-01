@@ -17,9 +17,11 @@ const { UUID_RE } = require('../lib/constants');
 const { pbAuth } = require('../middleware/pbAuth');
 const { sanitizeDescription } = require('../services/entities/fieldBuilder');
 const { formatFieldValue } = require('../services/entities/exporter');
-const { fetchAllEntitiesPost } = require('../lib/pbClient');
-const { schemaToType, normalizeSchema, EXCLUDED_FIELD_IDS, STANDARD_FIELD_IDS } = require('../services/entities/configCache');
+const { schemaToType, normalizeSchema, EXCLUDED_FIELD_IDS } = require('../services/entities/configCache');
 const { formatCustomFieldValue, isMultiType } = require('../lib/fieldFormat');
+const { buildDomainToIdMap } = require('../lib/domainCache');
+
+const STANDARD_FIELD_IDS = new Set(['name', 'description', 'owner']);
 
 /**
  * Parse a company configuration response into a customFields array,
@@ -89,17 +91,19 @@ router.get('/fields', pbAuth, async (_req, res) => {
 // --- EXPORT ---
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Base fields always exported
+// Base fields always exported.
+// Labels use snake_case to match the import auto-detect hints in companies-app.js,
+// so a re-imported export CSV auto-maps columns without manual intervention.
 const BASE_FIELDS = [
-  { key: 'id',             label: 'PB Company ID' },
-  { key: 'name',           label: 'Company Name' },
-  { key: 'domain',         label: 'Domain' },
-  { key: 'description',    label: 'Description' },
+  { key: 'id',             label: 'pb_id' },
+  { key: 'name',           label: 'name' },
+  { key: 'domain',         label: 'domain' },
+  { key: 'description',    label: 'description' },
   { key: 'owner_email',    label: 'owner_email' },
-  { key: 'sourceOrigin',       label: 'Source Origin (v1 – will be removed once engineers consolidate source fields)' },
-  { key: 'sourceRecordId',     label: 'Source Record ID (v1 – will be removed once engineers consolidate source fields)' },
-  { key: 'sourceSystem',   label: 'Source System (v2)' },
-  { key: 'sourceRecordV2', label: 'Source Record ID (v2)' },
+  { key: 'sourceOrigin',       label: 'source_origin' },
+  { key: 'sourceRecordId',     label: 'source_record_id' },
+  { key: 'sourceSystem',   label: 'source_system' },
+  { key: 'sourceRecordV2', label: 'source_record_id_v2' },
 ];
 
 /**
@@ -355,7 +359,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
 
     // Step 2: Build domain → id cache
     sse.progress('Building domain cache from Productboard…', 5);
-    const domainCache = await buildDomainCache(pbFetch, withRetry, fetchAllPages);
+    const domainCache = await buildDomainToIdMap(pbFetch, withRetry, fetchAllPages, 'domain cache for company import');
     sse.progress(`Domain cache built (${Object.keys(domainCache).length} companies)`, 12);
 
     // Step 2: Process each row
@@ -444,66 +448,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
   }
 });
 
-/**
- * Build domain → companyId map from the v2 entity list.
- *
- * The v2 list/search endpoint returns the domain field under a workspace-specific
- * UUID key (e.g. "b37b798e-...") rather than the logical "domain" string key that
- * appears in single-entity GETs and the config endpoint. The UUID is consistent
- * within a workspace but varies between workspaces and is not discoverable from
- * the config alone.
- *
- * Strategy: fetch all companies from v2 list (cursor-paginated, covers both
- * legacy v1-created companies and v2-only companies created via PBToolkit), then
- * do ONE individual GET to discover the UUID key by cross-referencing with the
- * normalised "domain" key that single-entity GETs always return.
- *
- * TODO: once PB fixes the domain field key inconsistency in list/search responses
- * (so "domain" string key is returned consistently instead of a workspace-specific
- * UUID), remove the individual GET discovery loop and read domain directly from
- * entity.fields.domain in the list response.
- */
-async function buildDomainCache(pbFetch, withRetry, fetchAllPages) {
-  const map = {};
-
-  const companies = await fetchAllPages('/v2/entities?type[]=company', 'domain cache fetch');
-  if (companies.length === 0) return map;
-
-  // Discover the workspace-specific UUID key for the domain field.
-  // Do individual GETs on companies until we find one with a domain set.
-  let domainFieldKey = null;
-  for (const candidate of companies) {
-    let singleDomain;
-    try {
-      const r = await withRetry(
-        () => pbFetch('get', `/v2/entities/${candidate.id}`),
-        'domain field key discovery'
-      );
-      singleDomain = r.data?.fields?.domain;
-    } catch (_) { continue; }
-
-    if (!singleDomain) continue;
-
-    // Find which UUID key in the list entity has the same value as the normalised domain
-    for (const [key, val] of Object.entries(candidate.fields || {})) {
-      if (typeof val === 'string' && val.toLowerCase() === singleDomain.toLowerCase()) {
-        domainFieldKey = key;
-        break;
-      }
-    }
-    if (domainFieldKey) break;
-  }
-
-  if (!domainFieldKey) return map;
-
-  for (const entity of companies) {
-    const domain = entity.fields?.[domainFieldKey];
-    if (domain && typeof domain === 'string') {
-      map[domain.toLowerCase()] = entity.id;
-    }
-  }
-  return map;
-}
+// Domain cache extracted to src/lib/domainCache.js — shared with users.js.
 
 /**
  * POST /v2/entities — create a new company with all fields inline.
@@ -678,11 +623,10 @@ router.post('/companies/delete/all', pbAuth, async (_req, res) => {
 
 
   try {
-    // Phase 1: Collect all company IDs via v2 cursor search
+    // Phase 1: Collect all company IDs via GET (more reliable than POST /search)
     sse.progress('Collecting all company IDs…', 5);
-    const entities = await fetchAllEntitiesPost(
-      pbFetch, withRetry,
-      { data: { types: ['company'] } },
+    const entities = await res.locals.pbClient.fetchAllPages(
+      '/v2/entities?type[]=company',
       'fetch all company IDs for delete'
     );
     const allIds = entities.map((e) => e.id);

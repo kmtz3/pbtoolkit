@@ -19,6 +19,7 @@ const { sanitizeDescription } = require('../services/entities/fieldBuilder');
 const { formatFieldValue } = require('../services/entities/exporter');
 const { schemaToType, normalizeSchema, EXCLUDED_FIELD_IDS } = require('../services/entities/configCache');
 const { formatCustomFieldValue, isMultiType } = require('../lib/fieldFormat');
+const { buildDomainToIdMap, buildIdToDomainMap } = require('../lib/domainCache');
 
 const STANDARD_FIELD_IDS = new Set(['name', 'email', 'description', 'owner', 'archived']);
 
@@ -115,7 +116,7 @@ router.post('/export', pbAuth, async (_req, res) => {
 
     // Step 2: Fetch all companies → build id→domain lookup
     sse.progress('Fetching companies for parent lookup…', 12);
-    const companyDomainMap = await buildCompanyDomainMap(pbFetch, withRetry, fetchAllPages);
+    const companyDomainMap = await buildIdToDomainMap(pbFetch, withRetry, fetchAllPages, 'fetch companies for user export');
     sse.progress(`Company lookup built (${Object.keys(companyDomainMap).length} companies)`, 15);
 
     // Step 3: Fetch all users
@@ -156,44 +157,7 @@ router.post('/export', pbAuth, async (_req, res) => {
   }
 });
 
-/**
- * Build companyId → { domain } lookup using the same domain discovery trick
- * as buildDomainCache in companies.js (workspace-specific UUID key).
- */
-async function buildCompanyDomainMap(pbFetch, withRetry, fetchAllPages) {
-  const map = {};
-  const companies = await fetchAllPages('/v2/entities?type[]=company', 'fetch companies for user export');
-  if (companies.length === 0) return map;
-
-  // Discover the workspace-specific UUID key for the domain field
-  let domainFieldKey = null;
-  for (const candidate of companies) {
-    let singleDomain;
-    try {
-      const r = await withRetry(
-        () => pbFetch('get', `/v2/entities/${candidate.id}`),
-        'domain field key discovery'
-      );
-      singleDomain = r.data?.fields?.domain;
-    } catch (_) { continue; }
-
-    if (!singleDomain) continue;
-
-    for (const [key, val] of Object.entries(candidate.fields || {})) {
-      if (typeof val === 'string' && val.toLowerCase() === singleDomain.toLowerCase()) {
-        domainFieldKey = key;
-        break;
-      }
-    }
-    if (domainFieldKey) break;
-  }
-
-  for (const entity of companies) {
-    const domain = domainFieldKey ? entity.fields?.[domainFieldKey] : null;
-    map[entity.id] = { domain: domain || '' };
-  }
-  return map;
-}
+// Company domain map extracted to src/lib/domainCache.js — shared with companies.js.
 
 /**
  * Follow relationship pagination for a user entity.
@@ -445,7 +409,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
       sse.progress('Building lookups…', 12);
       const [companies, members] = await Promise.all([
         needCompanies
-          ? buildDomainToIdCache(pbFetch, withRetry, fetchAllPages)
+          ? buildDomainToIdMap(pbFetch, withRetry, fetchAllPages, 'domain cache for user import')
           : {},
         needMembers
           ? fetchAllPages('/v2/members', 'fetch members for owner validation')
@@ -541,47 +505,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
   }
 });
 
-/**
- * Build domain → companyId cache using the same domain discovery trick
- * as buildDomainCache in companies.js.
- */
-async function buildDomainToIdCache(pbFetch, withRetry, fetchAllPages) {
-  const map = {};
-  const companies = await fetchAllPages('/v2/entities?type[]=company', 'domain cache for user import');
-  if (companies.length === 0) return map;
-
-  let domainFieldKey = null;
-  for (const candidate of companies) {
-    let singleDomain;
-    try {
-      const r = await withRetry(
-        () => pbFetch('get', `/v2/entities/${candidate.id}`),
-        'domain field key discovery'
-      );
-      singleDomain = r.data?.fields?.domain;
-    } catch (_) { continue; }
-
-    if (!singleDomain) continue;
-
-    for (const [key, val] of Object.entries(candidate.fields || {})) {
-      if (typeof val === 'string' && val.toLowerCase() === singleDomain.toLowerCase()) {
-        domainFieldKey = key;
-        break;
-      }
-    }
-    if (domainFieldKey) break;
-  }
-
-  if (!domainFieldKey) return map;
-
-  for (const entity of companies) {
-    const domain = entity.fields?.[domainFieldKey];
-    if (domain && typeof domain === 'string') {
-      map[domain.toLowerCase()] = entity.id;
-    }
-  }
-  return map;
-}
+// Domain-to-ID cache extracted to src/lib/domainCache.js — shared with companies.js.
 
 /**
  * Create a new user via POST /v2/entities.

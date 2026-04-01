@@ -496,7 +496,10 @@ function updateUsersDeleteCSVPreview() {
 
   const lines = usersDeleteParsedCSV.raw.trim().split('\n').slice(1);
   const uuids = lines
-    .map((l) => l.split(',')[colIdx]?.trim().replace(/^"|"$/g, ''))
+    .map((l) => {
+      const cols = l.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+      return cols[colIdx]?.trim().replace(/^"|"$/g, '');
+    })
     .filter((v) => UUID_PATTERN.test(v))
     .slice(0, 5);
 
@@ -548,6 +551,16 @@ function startUsersDeleteCSV(uuidColumn) {
         setText('users-delete-csv-run-title', 'Deletion failed');
         $('users-delete-csv-summary-alert').innerHTML = `<div class="alert alert-danger"><span class="alert-icon">⚠️</span><span>${esc(msg)}</span></div>`;
         show('btn-users-delete-download-log');
+      },
+
+      onAbort: () => {
+        hide('btn-stop-users-delete-csv');
+        hide('users-delete-csv-running');
+        show('users-delete-csv-results');
+        setText('users-delete-csv-run-title', 'Deletion stopped');
+        $('users-delete-csv-summary-alert').innerHTML = `<div class="alert alert-warn"><span class="alert-icon">⏹</span><span>Deletion stopped by user.</span></div>`;
+        show('btn-users-delete-download-log');
+        usersDeleteController = null;
       },
     }
   );

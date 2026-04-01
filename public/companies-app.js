@@ -191,8 +191,8 @@ function autoDetectBaseMappings() {
     'map-domain':        ['domain', 'website', 'url'],
     'map-desc':          ['description', 'desc', 'notes'],
     'map-owner':         ['owner', 'owner_email', 'owner email'],
-    'map-source-origin': ['sourceorigin', 'source_origin', 'source origin'],
-    'map-source-record': ['sourcerecordid', 'source_record_id', 'source record id'],
+    'map-source-origin': ['source_origin', 'sourceorigin', 'source origin'],
+    'map-source-record': ['source_record_id', 'sourcerecordid', 'source record id'],
   };
 
   for (const [selectId, candidates] of Object.entries(hints)) {
@@ -601,10 +601,13 @@ function updateCompaniesDeleteCSVPreview() {
   const colIdx = headers.indexOf(col);
   if (colIdx < 0) return;
 
-  // Extract first 5 valid UUIDs for preview
+  // Extract first 5 valid UUIDs for preview (quote-aware split)
   const lines = companiesDeleteParsedCSV.raw.trim().split('\n').slice(1);
   const uuids = lines
-    .map((l) => l.split(',')[colIdx]?.trim().replace(/^"|"$/g, ''))
+    .map((l) => {
+      const cols = l.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+      return cols[colIdx]?.trim().replace(/^"|"$/g, '');
+    })
     .filter((v) => UUID_PATTERN.test(v))
     .slice(0, 5);
 
@@ -661,6 +664,16 @@ function startCompaniesDeleteCSV(uuidColumn) {
         setText('companies-delete-csv-run-title', 'Deletion failed');
         $('companies-delete-csv-summary-alert').innerHTML = `<div class="alert alert-danger"><span class="alert-icon">⚠️</span><span>${esc(msg)}</span></div>`;
         show('btn-companies-delete-download-log');
+      },
+
+      onAbort: () => {
+        hide('btn-stop-companies-delete-csv');
+        hide('companies-delete-csv-running');
+        show('companies-delete-csv-results');
+        setText('companies-delete-csv-run-title', 'Deletion stopped');
+        $('companies-delete-csv-summary-alert').innerHTML = `<div class="alert alert-warn"><span class="alert-icon">⏹</span><span>Deletion stopped by user.</span></div>`;
+        show('btn-companies-delete-download-log');
+        companiesDeleteController = null;
       },
     }
   );
