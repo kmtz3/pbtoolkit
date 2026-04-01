@@ -204,8 +204,8 @@ test('import/run create: uses POST /v2/entities with metadata.source inline', as
   assert.equal(createBody.data.fields.domain, 'acme.com');
   assert.deepEqual(
     createBody.data.metadata?.source,
-    { externalSystemName: 'salesforce', externalRecordId: 'sf-001' },
-    'source should be written as v2 metadata.source in the same POST',
+    { system: 'salesforce', recordId: 'sf-001' },
+    'source should use new v2 field names (system/recordId)',
   );
 
   // No separate v1 PATCH for source (source is now inline in the v2 POST above)
@@ -241,9 +241,9 @@ test('import/run update-by-UUID: uses PATCH /v2/entities/{id} with metadata.sour
   assert.equal(calls.v2Patch.length, 1, 'Should have called PATCH /v2/entities/{id}');
   assert.ok(calls.v2Patch[0].path.includes(COMPANY_UUID_1));
   assert.equal(
-    calls.v2Patch[0].body.data.metadata?.source?.externalSystemName,
+    calls.v2Patch[0].body.data.metadata?.source?.system,
     'hubspot',
-    'source should be written as v2 metadata.source in the same PATCH',
+    'source should use new v2 field name (system)',
   );
 
   // No separate v1 PATCH for source

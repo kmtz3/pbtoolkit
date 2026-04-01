@@ -55,7 +55,7 @@ const mockV2Config = {
   },
 };
 
-// GET /v2/entities?type[]=company response — inline custom fields
+// GET /v2/entities?type[]=company response — inline custom fields + v2 metadata.source
 const mockV2EntitiesResponse = {
   data: [
     {
@@ -66,6 +66,7 @@ const mockV2EntitiesResponse = {
         [FIELD_UUID_MRR]:  50000,
         [FIELD_UUID_TIER]: 'enterprise',
       },
+      metadata: { source: { system: 'salesforce', recordId: 'sf-001', url: null } },
     },
     {
       id: COMPANY_UUID_2,
@@ -75,6 +76,7 @@ const mockV2EntitiesResponse = {
         [FIELD_UUID_MRR]:  12000,
         [FIELD_UUID_TIER]: 'starter',
       },
+      metadata: { source: { system: null, recordId: null, url: null } },
     },
   ],
   links: { next: null },
@@ -220,4 +222,29 @@ test('POST /api/export: CSV includes standard fields, custom fields, and source 
   // Data values
   assert.ok(csv.includes('Acme Corp'), 'CSV should include company name');
   assert.ok(csv.includes('salesforce'), 'CSV should include source origin from v1 enrichment');
+});
+
+test('POST /api/export: v2 source columns populated from metadata.source (system/recordId)', async () => {
+  clearCalls();
+
+  const res = await request(app)
+    .post('/api/export')
+    .set('x-pb-token', 'test-token')
+    .set('Content-Type', 'application/json')
+    .send({});
+
+  const complete = parseCompleteEvent(res.text);
+  assert.ok(complete?.csv, 'Should have CSV content');
+
+  const csv = complete.csv;
+  // Column headers should use new naming
+  assert.ok(csv.includes('Source System (v2)'), 'CSV should have Source System (v2) column');
+  assert.ok(csv.includes('Source Record ID (v2)'), 'CSV should have Source Record ID (v2) column');
+
+  // Acme Corp row should have v2 source data from metadata.source.system/recordId
+  const lines = csv.split('\n');
+  const acmeLine = lines.find((l) => l.includes('Acme Corp'));
+  assert.ok(acmeLine, 'Should have Acme Corp row');
+  assert.ok(acmeLine.includes('salesforce'), 'Acme row should include salesforce from v2 metadata.source.system');
+  assert.ok(acmeLine.includes('sf-001'), 'Acme row should include sf-001 from v2 metadata.source.recordId');
 });
