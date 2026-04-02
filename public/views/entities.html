@@ -8,6 +8,14 @@
             <div class="panel-header">
               <h2 class="panel-title">Entity templates</h2>
               <div class="panel-subtitle">Download CSV templates pre-populated with your workspace's custom fields.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Select types</strong> — check the entity types you need templates for.</li>
+                  <li><strong>Download</strong> — click "Download selected" to get CSV files with all standard and custom field headers pre-filled.</li>
+                  <li><strong>Fill &amp; import</strong> — add your data rows, then upload via the Import tab. The importer auto-maps template headers.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -45,6 +53,15 @@
             <div class="panel-header">
               <h2 class="panel-title">Export entities</h2>
               <div class="panel-subtitle">Download entities as CSV files — single type or full workspace export.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Select types</strong> — check the entity types you want to export.</li>
+                  <li><strong>Migration mode</strong> — enable to rewrite UUID ext_keys to human-readable codes and convert relationship columns.</li>
+                  <li><strong>Normalize tab</strong> — upload previously exported CSVs to rewrite ext_keys offline (no API calls).</li>
+                  <li><strong>Stop</strong> — use the "Stop" button to cancel a running export.</li>
+                </ul>
+              </details>
             </div>
             <!-- Tab bar -->
             <div class="ent-tab-bar" id="ent-export-tab-bar" style="padding:0 24px">
@@ -171,6 +188,17 @@
             <div class="panel-header">
               <h2 class="panel-title">Import entities</h2>
               <div class="panel-subtitle">Upload CSV files for the entity types you want to import. Process multiple types in one run — entities are created in dependency order.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Upload</strong> — drop CSV files onto the entity type tiles (one file per type). You can import multiple types at once.</li>
+                  <li><strong>Map columns</strong> — template-format headers are auto-mapped. Adjust mappings per entity type using the tabs.</li>
+                  <li><strong>Options</strong> — configure multi-select mode, bypass settings, auto-generate ext_keys, and fiscal year start.</li>
+                  <li><strong>Validate first</strong> — use "Validate" to check for errors before running the import.</li>
+                  <li><strong>Dependency order</strong> — entities are created parent-first so relationships resolve correctly.</li>
+                  <li><strong>Live log</strong> — the log streams results in real time; download it afterwards for review.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -317,6 +345,15 @@
             <div class="panel-header">
               <h2 class="panel-title">Delete entities by CSV</h2>
               <div class="panel-subtitle">Upload exported CSV files for each entity type you want to delete. Use the column picker on each tile to select the ID column. Entities are deleted in child-first order.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Upload</strong> — drop CSV files onto the entity type tiles (you can use export CSVs directly).</li>
+                  <li><strong>Pick ID column</strong> — select which column contains the entity UUIDs on each tile.</li>
+                  <li><strong>Safe mode</strong> — when enabled, entities with children not in your CSVs are skipped instead of cascade-deleted.</li>
+                  <li><strong>Child-first order</strong> — deletion runs from leaf entities up to parents, avoiding dependency errors.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">

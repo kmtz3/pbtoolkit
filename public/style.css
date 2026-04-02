@@ -22,6 +22,7 @@
   --c-info-bg:     #eff6ff;
   --c-border:      #e5e7eb;
   --c-border-focus:#74b87e;
+  --c-bg-hover:    #f3f4f6;
 
   --r-sm: 3px;
   --r-md: 5px;
@@ -1612,26 +1613,29 @@ input:focus, select:focus, textarea:focus {
 .mtm-member-remove:hover { color: var(--c-danger); }
 
 /* How-to-use expandable */
-.mtm-howto {
+.howto {
   margin-top: 8px;
   font-size: 13px;
   color: var(--c-muted);
 }
-.mtm-howto summary {
+.howto[open] {
+  margin-bottom: 12px;
+}
+.howto summary {
   cursor: pointer;
   font-weight: 600;
   font-size: 12px;
   color: var(--c-brand);
   list-style: none;
 }
-.mtm-howto summary::before { content: '▸ '; }
-.mtm-howto[open] summary::before { content: '▾ '; }
-.mtm-howto ul {
+.howto summary::before { content: '▸ '; font-size: 20px; vertical-align: -2px; margin-right: 2px; }
+.howto[open] summary::before { content: '▾ '; font-size: 20px; vertical-align: -2px; margin-right: 2px; }
+.howto ul {
   margin: 8px 0 0;
   padding-left: 18px;
   line-height: 1.7;
 }
-.mtm-howto kbd {
+.howto kbd {
   background: var(--c-bg);
   border: 1px solid var(--c-border);
   border-radius: 3px;

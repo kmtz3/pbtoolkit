@@ -4,7 +4,7 @@
     <div class="panel-header">
       <h2 class="panel-title">Members &amp; Teams</h2>
       <div class="panel-subtitle">View and manage team membership in real time.</div>
-      <details class="mtm-howto">
+      <details class="howto">
         <summary>How to use</summary>
         <ul>
           <li><strong>Edit team details</strong> — click a team name, handle, or description to edit inline. Press Enter to save, Escape to cancel.</li>
@@ -62,10 +62,10 @@
 </div>
 
 <!-- ── Create Team Modal ── -->
-<div id="mtm-create-modal" class="mtm-modal-overlay hidden">
+<div id="mtm-create-modal" class="mtm-modal-overlay hidden" role="dialog" aria-labelledby="mtm-create-title">
   <div class="mtm-modal">
     <div class="mtm-modal-header">
-      <h3 class="mtm-modal-title">Create new team</h3>
+      <h3 class="mtm-modal-title" id="mtm-create-title">Create new team</h3>
       <button class="mtm-modal-close" id="btn-mtm-create-modal-close">&times;</button>
     </div>
     <div class="mtm-modal-body">
@@ -91,10 +91,10 @@
 </div>
 
 <!-- ── Delete Team Confirmation Modal ── -->
-<div id="mtm-delete-modal" class="mtm-modal-overlay hidden">
+<div id="mtm-delete-modal" class="mtm-modal-overlay hidden" role="dialog" aria-labelledby="mtm-delete-title">
   <div class="mtm-modal">
     <div class="mtm-modal-header">
-      <h3 class="mtm-modal-title">Delete team</h3>
+      <h3 class="mtm-modal-title" id="mtm-delete-title">Delete team</h3>
       <button class="mtm-modal-close" id="btn-mtm-delete-modal-close">&times;</button>
     </div>
     <div class="mtm-modal-body">
@@ -113,10 +113,10 @@
 </div>
 
 <!-- ── Add Member Modal ── -->
-<div id="mtm-add-modal" class="mtm-modal-overlay hidden">
+<div id="mtm-add-modal" class="mtm-modal-overlay hidden" role="dialog" aria-labelledby="mtm-add-title">
   <div class="mtm-modal">
     <div class="mtm-modal-header">
-      <h3 class="mtm-modal-title">Add member to <span id="mtm-add-modal-team-name"></span></h3>
+      <h3 class="mtm-modal-title" id="mtm-add-title">Add member to <span id="mtm-add-modal-team-name"></span></h3>
       <button class="mtm-modal-close" id="btn-mtm-add-modal-close">&times;</button>
     </div>
     <div class="mtm-modal-body">

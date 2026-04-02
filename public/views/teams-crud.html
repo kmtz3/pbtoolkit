@@ -6,6 +6,13 @@
             <div class="panel-header">
               <h2 class="panel-title">Export teams</h2>
               <div class="panel-subtitle">Download all Productboard teams as a CSV file.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Export</strong> — click "Export teams" to download all teams as CSV (id, name, handle, description).</li>
+                  <li><strong>Edit &amp; re-import</strong> — modify the CSV and upload it via the Import tab to update teams in bulk.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -58,6 +65,15 @@
             <div class="panel-header">
               <h2 class="panel-title">Import teams</h2>
               <div class="panel-subtitle">Upload a CSV to create new teams and update existing ones. A diff preview is shown before any changes are applied.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Upload</strong> — drop a CSV file (or click to browse), then map columns to team fields.</li>
+                  <li><strong>Matching</strong> — rows with a pb_id update that team; rows without try to match by handle; unmatched rows create new teams.</li>
+                  <li><strong>Preview</strong> — click "Preview changes" to see creates, updates, and unchanged teams before applying.</li>
+                  <li><strong>Live log</strong> — the log streams results in real time; download it afterwards for review.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -255,6 +271,15 @@
             <div class="panel-header">
               <h2 class="panel-title">Delete teams from CSV</h2>
               <div class="panel-subtitle">Upload a CSV containing team UUIDs or handles and permanently delete those teams.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Upload</strong> — drop a CSV containing team UUIDs or handles (you can use an export CSV).</li>
+                  <li><strong>Select columns</strong> — pick the UUID and/or handle columns. Enable "Try handle if UUID not found" as a fallback.</li>
+                  <li><strong>Preview</strong> — review which teams will be deleted before confirming.</li>
+                  <li><strong>Irreversible</strong> — this action cannot be undone. Export your teams first if you need a backup.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -385,6 +410,13 @@
             <div class="panel-header">
               <h2 class="panel-title">Delete all teams</h2>
               <div class="panel-subtitle">Permanently delete every team in your Productboard workspace.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Confirm</strong> — type DELETE to enable the button. This permanently removes every team in your workspace.</li>
+                  <li><strong>Export first</strong> — there is no way to recover deleted teams, so export a backup beforehand.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">

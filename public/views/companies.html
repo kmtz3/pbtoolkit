@@ -4,6 +4,14 @@
             <div class="panel-header">
               <h2 class="panel-title">Export companies</h2>
               <div class="panel-subtitle">Download all Productboard companies as a CSV file, including custom fields.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Export</strong> — click "Export companies" to download all companies as a CSV (includes custom fields).</li>
+                  <li><strong>Stop</strong> — use the "Stop" button to cancel a running export.</li>
+                  <li><strong>Download</strong> — the CSV downloads automatically when complete; click "Download CSV" to grab it again.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -63,6 +71,17 @@
             <div class="panel-header">
               <h2 class="panel-title">Import companies</h2>
               <div class="panel-subtitle">Upload a CSV, map columns to Productboard fields, then run the import.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Upload</strong> — drop a CSV file (or click to browse), then map CSV columns to Productboard fields.</li>
+                  <li><strong>Auto-mapping</strong> — columns are auto-mapped when headers match common names (pb_id, name, domain, etc.).</li>
+                  <li><strong>Saved mappings</strong> — your mappings are saved to the browser and auto-restore on your next upload.</li>
+                  <li><strong>Options</strong> — configure multi-select mode and bypass settings before importing.</li>
+                  <li><strong>Validate first</strong> — use "Validate" to check for errors before running the import.</li>
+                  <li><strong>Live log</strong> — the log streams results in real time; download it afterwards for review.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -230,6 +249,14 @@
             <div class="panel-header">
               <h2 class="panel-title">Delete companies from CSV</h2>
               <div class="panel-subtitle">Upload a CSV containing company UUIDs and permanently delete those companies.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Upload</strong> — drop a CSV containing company UUIDs (you can use an export CSV — just pick the ID column).</li>
+                  <li><strong>Select column</strong> — choose which column contains the UUIDs, then confirm deletion.</li>
+                  <li><strong>Irreversible</strong> — this action cannot be undone. Export your companies first if you need a backup.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -309,6 +336,13 @@
             <div class="panel-header">
               <h2 class="panel-title">Delete all companies</h2>
               <div class="panel-subtitle">Permanently delete every company in your Productboard workspace.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Confirm</strong> — type DELETE to enable the button. This permanently removes every company in your workspace.</li>
+                  <li><strong>Export first</strong> — there is no way to recover deleted companies, so export a backup beforehand.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
@@ -355,6 +389,14 @@
             <div class="panel-header">
               <h2 class="panel-title">Source migration</h2>
               <div class="panel-subtitle">Sync source identity fields between the legacy v1 API and v2 metadata.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>V1 → V2</strong> — copies source identity fields from the legacy API into v2 metadata.</li>
+                  <li><strong>V2 → V1</strong> — copies v2 metadata back into legacy fields.</li>
+                  <li><strong>Independent</strong> — each direction runs separately. Use "Stop" to cancel mid-process.</li>
+                </ul>
+              </details>
             </div>
             <hr class="panel-divider mt-12" />
             <div class="panel-body">
