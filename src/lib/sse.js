@@ -15,7 +15,7 @@ function startSSE(res) {
   res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
   res.flushHeaders();
 
-  const heartbeat = setInterval(() => res.write(':\n\n'), 25000);
+  const heartbeat = setInterval(() => { if (!aborted) res.write(':\n\n'); }, 25000);
 
   // Must listen on `res`, not `req`. req 'close' fires on HTTP half-close
   // (request body consumed) before any rows are processed, causing premature abort.
@@ -24,6 +24,7 @@ function startSSE(res) {
   res.on('close', () => { clearInterval(heartbeat); aborted = true; });
 
   const send = (event, data) => {
+    if (aborted) return;
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 

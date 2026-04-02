@@ -19,10 +19,21 @@ pbtoolkit/
 │   ├── entities.fieldBuilder.test.js
 │   ├── entities.importCoordinator.test.js
 │   ├── entities.validator.test.js
+│   ├── configCache.test.js
+│   ├── csvParser.test.js
+│   ├── domainCache.test.js
+│   ├── feedback.test.js
+│   ├── fieldFormat.test.js
 │   ├── memberActivity.metadata.test.js
+│   ├── membersTeamsMgmt.test.js
+│   ├── notes-export.test.js
 │   ├── notes-import.test.js
+│   ├── pbAuth.test.js
+│   ├── sse.test.js
 │   ├── team-membership.export.bench.js
+│   ├── teamMembership.test.js
 │   ├── teamsCrud.test.js
+│   ├── users.test.js
 │   └── utils.test.js
 ├── src/
 │   ├── server.js              # Express entry point — mounts all routers
@@ -31,18 +42,25 @@ pbtoolkit/
 │   │   ├── csvUtils.js        # papaparse wrappers
 │   │   ├── sse.js             # Server-Sent Events helper
 │   │   ├── constants.js       # shared constants: UUID_RE
-│   │   └── errorUtils.js      # shared helpers: parseApiError()
+│   │   ├── errorUtils.js      # shared helpers: parseApiError()
+│   │   ├── fieldFormat.js     # shared custom-field formatting for v2 entity imports
+│   │   └── domainCache.js     # shared company domain cache (workspace-specific UUID key discovery)
 │   ├── middleware/
 │   │   └── pbAuth.js          # token validation + pbClient injection
 │   └── routes/
 │       ├── auth.js            # GET /auth/pb + GET /auth/pb/callback + POST /auth/pb/disconnect (OAuth 2.0 PKCE)
 │       ├── companies.js       # GET /api/fields + POST /api/export + POST /api/import/* + POST /api/companies/* (unified)
 │       ├── notes.js           # POST /api/notes/* (export, import, delete, migrate)
-│       ├── entities.js        # GET/POST /api/entities/* (templates, configs, preview, normalize-keys)
+│       ├── entities.js        # GET/POST /api/entities/* (templates, configs, preview, export, import)
 │       ├── memberActivity.js  # GET /api/member-activity/metadata + POST /api/member-activity/export (SSE)
 │       ├── teamMembership.js  # GET /api/team-membership/metadata + GET /api/team-membership/export + POST /api/team-membership/preview + POST /api/team-membership/import (SSE)
-│       └── teamsCrud.js       # GET /api/teams-crud/export + POST /api/teams-crud/preview + POST /api/teams-crud/import (SSE) + POST /api/teams-crud/delete/preview + POST /api/teams-crud/delete/by-csv (SSE) + POST /api/teams-crud/delete/all (SSE)
+│       ├── teamsCrud.js       # GET /api/teams-crud/export + POST /api/teams-crud/preview + POST /api/teams-crud/import (SSE) + POST /api/teams-crud/delete/by-csv (SSE) + POST /api/teams-crud/delete/all (SSE)
+│       ├── membersTeamsMgmt.js # GET /api/members-teams-mgmt/load + PATCH/POST/DELETE team & member ops (live editor)
+│       ├── users.js           # GET/POST /api/users/* (export, import/preview, import/run, delete)
+│       ├── validate.js        # GET /api/validate (token validation)
+│       └── feedback.js        # POST /api/feedback (bug report → PB note or Brevo email fallback)
 ├── src/services/
+│   ├── teamCache.js           # shared team+member session cache (used by teamMembership + membersTeamsMgmt)
 │   └── entities/
 │       ├── meta.js            # ENTITY_ORDER, TYPE_CODE, labels, syntheticColumns(), relationshipColumns()
 │       ├── configCache.js     # fetchEntityConfigs() — per-request GET /v2/entities/configurations
@@ -59,17 +77,21 @@ pbtoolkit/
 │   ├── app.js                 # Shared utilities: auth, DOM helpers, SSE, makeLogAppender, loadPartial()
 │   ├── companies-app.js       # Companies module frontend JS
 │   ├── notes-app.js           # Notes module frontend JS
-│   ├── entities-app.js        # Entities module frontend JS (separate script tag)
-│   ├── member-activity-app.js # Member Activity module frontend JS (separate script tag)
-│   ├── team-membership-app.js # Team Membership module frontend JS (separate script tag)
-│   ├── teams-crud-app.js      # Teams CRUD module frontend JS (separate script tag)
+│   ├── entities-app.js        # Entities module frontend JS
+│   ├── member-activity-app.js # Member Activity module frontend JS
+│   ├── team-membership-app.js # Team Membership module frontend JS
+│   ├── teams-crud-app.js      # Teams CRUD module frontend JS
+│   ├── members-teams-mgmt-app.js # Live team editor frontend JS
+│   ├── users-app.js           # Users module frontend JS
 │   ├── views/                 # HTML partials, one per module (lazy-loaded into #view-area)
 │   │   ├── companies.html
 │   │   ├── notes.html
 │   │   ├── entities.html
 │   │   ├── member-activity.html
 │   │   ├── team-membership.html
-│   │   └── teams-crud.html
+│   │   ├── teams-crud.html
+│   │   ├── members-teams-mgmt.html
+│   │   └── users.html
 │   ├── csv-utils.js           # Frontend CSV utilities (papaparse wrappers for browser)
 │   └── style.css              # CSS custom properties design system
 ├── Dockerfile
@@ -87,8 +109,10 @@ pbtoolkit/
 // src/server.js
 app.get('/api/config', (_req, res) => {
   res.json({
-    feedbackUrl: process.env.FEEDBACK_URL || null,
-    issueUrl:    process.env.ISSUE_URL    || null,
+    version:             APP_VERSION,
+    feedbackUrl:         process.env.FEEDBACK_URL || null,
+    issueUrl:            process.env.ISSUE_URL    || null,
+    feedbackFormEnabled: !!(process.env.PB_FEEDBACK_TOKEN || (process.env.BREVO_API_KEY && process.env.BREVO_SENDER_EMAIL && process.env.FEEDBACK_RECIPIENT_EMAIL)),
   });
 });
 ```

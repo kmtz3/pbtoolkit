@@ -342,10 +342,6 @@ function entReadMappingFromUI(entityType) {
   return { columns };
 }
 
-function escHtml(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 // Render the mapping table for one entity type into a container element
 function renderMappingTable(container, entityType, csvHeaders, configs, savedMapping) {
   const defs    = entGetFieldDefs(entityType, configs);
@@ -362,19 +358,19 @@ function renderMappingTable(container, entityType, csvHeaders, configs, savedMap
     }
 
     const currentVal    = (mapping.columns && mapping.columns[def.id]) || '';
-    const headerOptions = csvHeaders.map((h) => `<option value="${escHtml(h)}"${h === currentVal ? ' selected' : ''}>${escHtml(h)}</option>`).join('');
+    const headerOptions = csvHeaders.map((h) => `<option value="${esc(h)}"${h === currentVal ? ' selected' : ''}>${esc(h)}</option>`).join('');
     const typeBadge = def.displayType
-      ? `<span class="badge badge-muted">${escHtml(def.displayType)}</span>`
+      ? `<span class="badge badge-muted">${esc(def.displayType)}</span>`
       : def.badge
-        ? `<span class="badge badge-muted">${escHtml(def.badge)}</span>`
+        ? `<span class="badge badge-muted">${esc(def.badge)}</span>`
         : '';
     const reqBadge = def.required ? ' <span class="badge badge-danger">required</span>' : '';
 
-    const hintHtml = def.hint ? ` <span class="info-icon" data-tip="${escHtml(def.hint)}">i</span>` : '';
+    const hintHtml = def.hint ? ` <span class="info-icon" data-tip="${esc(def.hint)}">i</span>` : '';
     return `${groupHeader}<tr>
-      <td>${escHtml(def.label)}${reqBadge}${hintHtml}</td>
+      <td>${esc(def.label)}${reqBadge}${hintHtml}</td>
       <td>${typeBadge}</td>
-      <td><select data-field-id="${escHtml(def.id)}"><option value="">(⇢ skip)</option>${headerOptions}</select></td>
+      <td><select data-field-id="${esc(def.id)}"><option value="">(⇢ skip)</option>${headerOptions}</select></td>
     </tr>`;
   }).join('');
 
@@ -493,7 +489,7 @@ function entCheckParentWarning() {
   }
 
   if (missing.length) {
-    warnMsg.innerHTML = 'Missing parent files:<ul>' + missing.map((m) => `<li>${escHtml(m)}</li>`).join('') + '</ul>';
+    warnMsg.innerHTML = 'Missing parent files:<ul>' + missing.map((m) => `<li>${esc(m)}</li>`).join('') + '</ul>';
     warnEl.classList.remove('hidden');
   } else {
     warnEl.classList.add('hidden');
@@ -704,8 +700,8 @@ function renderValidationResults(data) {
     .map((type) => {
       const r = allResults[type];
       const rows = [
-        ...(r.errors   || []).map((e) => `<tr><td>${e.row || '—'}</td><td class="col-tag">${escHtml(e.field || '')}</td><td style="color:var(--c-danger)">${escHtml(e.message)}</td></tr>`),
-        ...(r.warnings || []).map((w) => `<tr><td>${w.row || '—'}</td><td class="col-tag">${escHtml(w.field || '')}</td><td style="color:var(--c-warn)">${escHtml(w.message)}</td></tr>`),
+        ...(r.errors   || []).map((e) => `<tr><td>${e.row || '—'}</td><td class="col-tag">${esc(e.field || '')}</td><td style="color:var(--c-danger)">${esc(e.message)}</td></tr>`),
+        ...(r.warnings || []).map((w) => `<tr><td>${w.row || '—'}</td><td class="col-tag">${esc(w.field || '')}</td><td style="color:var(--c-warn)">${esc(w.message)}</td></tr>`),
       ].join('');
       const errCount  = (r.errors   || []).length;
       const warnCount = (r.warnings || []).length;
@@ -1277,7 +1273,7 @@ function entDelUpdatePreview() {
     return `<tr>
       <td>${ENT_LABELS[type]}</td>
       <td>${f.rowCount.toLocaleString()}</td>
-      <td><code>${escHtml(col)}</code></td>
+      <td><code>${esc(col)}</code></td>
     </tr>`;
   }).join('');
 
@@ -1307,7 +1303,7 @@ async function entDelHandleFile(entityType, file) {
     const colPick = document.getElementById(`ent-del-col-${entityType}`);
     const sel     = document.getElementById(`ent-del-sel-${entityType}`);
     if (colPick && sel) {
-      sel.innerHTML = headers.map((h) => `<option value="${escHtml(h)}"${h === colAuto ? ' selected' : ''}>${escHtml(h)}</option>`).join('');
+      sel.innerHTML = headers.map((h) => `<option value="${esc(h)}"${h === colAuto ? ' selected' : ''}>${esc(h)}</option>`).join('');
       colPick.classList.remove('hidden');
     }
   }
@@ -1417,7 +1413,7 @@ function runEntityDelete() {
       entDelSetRunning(false);
       const resultsEl = document.getElementById('ent-delete-results');
       if (resultsEl) {
-        resultsEl.innerHTML = `<div class="alert alert-danger"><span class="alert-icon">❌</span><span>${escHtml(msg)}</span></div>`;
+        resultsEl.innerHTML = `<div class="alert alert-danger"><span class="alert-icon">❌</span><span>${esc(msg)}</span></div>`;
         resultsEl.classList.remove('hidden');
       }
       setText('ent-delete-run-title', 'Deletion failed');

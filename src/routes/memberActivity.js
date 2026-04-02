@@ -168,7 +168,7 @@ router.get('/metadata', pbAuth, async (req, res) => {
       return res.status(status).json({ error: 'Invalid or unauthorized token.' });
     }
     console.error('member-activity metadata error:', err.message);
-    res.status(500).json({ error: err.message || 'Failed to load workspace data.' });
+    res.status(500).json({ error: parseApiError(err) || 'Failed to load workspace data.' });
   }
 });
 
@@ -359,7 +359,7 @@ router.post('/export', pbAuth, async (req, res) => {
     } catch (err) {
       console.error('member-activity analytics fetch error:', err.message);
       if (err.status === 404 || err.status === 501) {
-        sse.error(`Analytics API error (${err.status}): ${err.message}`);
+        sse.error(`Analytics API error (${err.status}): ${parseApiError(err)}`);
         return;
       }
       throw err;

@@ -3,6 +3,7 @@
 // Depends on: app.js globals — $(), show(), hide(), setText(), buildHeaders(),
 //             subscribeSSE(), requireToken(), triggerDownload()
 // show()/hide() are used directly (no module-scoped wrappers needed).
+let _maInitDone = false;
 // ══════════════════════════════════════════════════════════════════════════════
 
 (function () {
@@ -255,8 +256,8 @@
 
   function initMemberActivityModule() {
     // Only wire up listeners once
-    if (ma$('btn-ma-export').__maInit) return;
-    ma$('btn-ma-export').__maInit = true;
+    if (_maInitDone) return;
+    _maInitDone = true;
 
     // Date preset
     ma$('ma-date-preset').addEventListener('change', updateCustomDateVisibility);

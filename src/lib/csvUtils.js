@@ -11,6 +11,7 @@ const Papa = require('papaparse');
 function parseCSV(csvString) {
   const result = Papa.parse(csvString.trim(), {
     header: true,
+    delimiter: ',',
     skipEmptyLines: true,
     transformHeader: (h) => h.trim(),
   });

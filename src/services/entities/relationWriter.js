@@ -68,8 +68,8 @@ async function writeRelations(allRows, idCache, pbFetch, withRetry, onLog) {
       if (!targetId) { skippedLinks++; onLog('warn', `Skipped link — initiative target not resolved: ${tok}`, { entityType: row._type, extKey: row._extKey }); continue; }
       if (targetId === selfId || linked.has(targetId)) continue;
       linked.add(targetId);
-      relationshipLinks += await _postLink(selfId, targetId, 'feature-initiative', row, pbFetch, withRetry, onLog);
-      if (relationshipLinks < 0) { errors++; relationshipLinks = Math.abs(relationshipLinks) - 1; }
+      const r = await _postLinkRaw(selfId, targetId, 'feature-initiative', row, pbFetch, withRetry, onLog);
+      if (r.ok) relationshipLinks++; else errors++;
     }
   }
 

@@ -84,6 +84,7 @@ To disconnect, click **Disconnect** in the top-right corner. This clears the ses
 | Member Activity | ✅ Live | Export member activity and license utilization data |
 | Team Membership | ✅ Live | Export and bulk-import team assignments via CSV diff preview |
 | Teams Management | ✅ Live | Export, create/update, and delete teams via CSV |
+| Users | ✅ Live | Export, import, and delete workspace users with custom fields |
 
 ---
 
@@ -185,7 +186,6 @@ Covers all Productboard entity types: objectives, key results, initiatives, prod
 
 ### Known API quirks
 
-- **Objectives — `team` vs `teams` field key**: The Productboard API returns and expects the team field as `team` (singular) for objectives, while all other entity types use `teams` (plural). This is handled automatically by PBToolkit in both export (reading) and import (writing).
 - **Objectives — search endpoint**: The `POST /v2/entities/search` endpoint silently returns empty results for `objective` type despite being documented. PBToolkit uses `GET /v2/entities?type[]=objective` instead.
 
 ### What's coming
@@ -304,6 +304,49 @@ Upload a CSV with `id` and/or `handle` columns. A preview step resolves each row
 ### Delete all
 
 Deletes **every** team in the workspace. Requires confirmation. Irreversible.
+
+---
+
+## Users
+
+Bulk-manages workspace users via three tabs: **Export** (download all users as CSV), **Import** (create and update users via a guided four-step flow), and **Delete** (remove users by CSV or delete all).
+
+### Export users
+
+Fetches all users and generates a downloadable CSV, including any custom fields configured for the user entity type. Company parent associations are resolved to domain names for readability.
+
+Output filename: `users-YYYY-MM-DD.csv`.
+
+### Import users
+
+A four-step guided flow: **Upload → Map columns → Validate → Run**.
+
+**Base fields:**
+
+| PB Field | Notes |
+|---|---|
+| pb_id | If present, row will PATCH that user directly |
+| Name | Required when creating a new user |
+| Email | Used for matching when no pb_id — if a workspace user with that email exists, the row PATCHes them |
+| Description | Rich text |
+| Owner | Email of the workspace member who owns this user |
+| Archived | `true`/`false` — only applied on PATCH |
+| Parent Company (by ID or domain) | Associates user with a company; domain takes priority if both are mapped |
+
+**Run logic per row:**
+- Has UUID → PATCH that user directly
+- No UUID, email matches a workspace user → PATCH matched user
+- No UUID, no email match → POST (create)
+
+Custom fields are resolved and written in the same v2 API call. A **Stop** button is available during import.
+
+### Delete users by CSV
+
+Upload a CSV with a `pb_id` column. Each UUID is deleted individually with a live log.
+
+### Delete all users
+
+Deletes **every** user in the workspace. Requires confirmation. Irreversible.
 
 ---
 
