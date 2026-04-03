@@ -209,11 +209,11 @@
         <h2 class="home-section-title">Utilities</h2>
         <p class="home-section-desc">Small scripts and one-off tools for common tasks.</p>
         <div class="tool-grid">
-          <div class="tool-card tool-card-soon">
+          <div class="tool-card" data-tool="notes-merge">
             <span class="tool-card-icon">🗂</span>
             <div class="tool-card-name">Merge Duplicate Notes</div>
             <div class="tool-card-desc">Find and merge duplicate notes with smart data reconciliation — consolidate tags, sources, and linked entities into a single canonical note.</div>
-            <div class="tool-card-footer"><span class="badge badge-muted">Coming soon</span></div>
+            <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
           </div>
           <div class="tool-card tool-card-soon">
             <span class="tool-card-icon">📏</span>
@@ -337,6 +337,9 @@
           </button>
         </div>
 
+        <!-- Merge Duplicate Notes (no submodule nav) -->
+        <div id="sidebar-notes-merge" class="hidden"></div>
+
         <!-- Teams (combined) nav items -->
         <div id="sidebar-teams" class="hidden">
           <span class="nav-group-label">Live Editor</span>
@@ -390,6 +393,7 @@
 <script src="team-membership-app.js"></script>
 <script src="teams-crud-app.js"></script>
 <script src="members-teams-mgmt-app.js"></script>
+<script src="notes-merge-app.js"></script>
 
 <!-- ── BOTTOM-LEFT CLUSTER ── -->
 <div class="bottom-left">

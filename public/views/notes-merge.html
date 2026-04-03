@@ -1,0 +1,263 @@
+        <!-- ══════════════════════════════════════════
+             MERGE DUPLICATE NOTES
+        ═══════════════════════════════════════════ -->
+        <div id="view-notes-merge-view" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Merge duplicate notes <span class="badge badge-beta">Beta</span></div>
+              <div class="panel-subtitle">Find and merge duplicate notes — consolidating tags, product links, owners, and state into a single canonical note before deleting duplicates.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Export first</strong> — download a full notes export before running. This is your only rollback option — re-import via Notes → Import.</li>
+                  <li><strong>Configure</strong> — optionally scope by date range, choose which note to keep, and enable loose matching if needed.</li>
+                  <li><strong>Scan</strong> — click "Scan for duplicates" to detect groups. No changes are made during scan.</li>
+                  <li><strong>Preview</strong> — review the duplicate groups table carefully. Download the preview CSV for offline review.</li>
+                  <li><strong>Merge</strong> — confirm and run. Tags, product links, and owner followers are consolidated into the target; secondary notes are deleted.</li>
+                  <li><strong>Limitations</strong> — source data (origin / record ID) from secondary notes <strong>cannot be transferred</strong> and will be discarded. Restored notes receive new IDs. Note content is never merged — only metadata is consolidated.</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ════════════════════════════════
+                   IDLE: safety gate + config
+              ════════════════════════════════ -->
+              <div id="nm-idle">
+
+                <!-- Safety gate -->
+                <div class="alert alert-warn" style="margin-bottom:16px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span>
+                    <strong>Before scanning, download a full notes export from Notes → Export.</strong>
+                    This is your only rollback option — deleted notes can be re-imported but will
+                    receive new IDs and source data cannot be restored.
+                  </span>
+                </div>
+
+                <div class="field" style="margin-bottom:20px;">
+                  <label class="checkbox-label" id="nm-gate-label">
+                    <input type="checkbox" id="nm-gate-checkbox">
+                    I have downloaded a notes export and understand this action permanently deletes notes
+                  </label>
+                </div>
+
+                <!-- Config (unlocked by gate checkbox) -->
+                <div id="nm-config" style="opacity:0.4;pointer-events:none;">
+
+                  <!-- Date range -->
+                  <div class="field">
+                    <label>Date range <span class="label-hint">(optional — leave blank to scan all notes)</span></label>
+                    <div class="input-row" style="gap:8px;align-items:center;">
+                      <input type="date" id="nm-date-from" class="form-input" style="width:160px;" />
+                      <span style="color:var(--c-muted);font-size:13px;">to</span>
+                      <input type="date" id="nm-date-to" class="form-input" style="width:160px;" />
+                    </div>
+                  </div>
+
+                  <!-- Target selection -->
+                  <div class="field">
+                    <label>Keep which note?
+                      <span class="info-icon" data-tip="Newest — best when duplicates come from integration re-runs. Oldest — best when the original note was manually processed. Most metadata — keeps the note with the most tags and product links regardless of age.">i</span>
+                    </label>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+                      <label class="checkbox-label">
+                        <input type="radio" name="nm-target-mode" value="newest" checked> Newest
+                        <span class="label-hint">— most recently created note</span>
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="radio" name="nm-target-mode" value="oldest"> Oldest
+                        <span class="label-hint">— earliest created note</span>
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="radio" name="nm-target-mode" value="most-metadata"> Most metadata
+                        <span class="label-hint">— note with most tags + product links</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- Loose match -->
+                  <div class="field">
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="nm-loose-match">
+                      Loose match
+                      <span class="info-icon" data-tip="Matches notes with the same content and customer even if their titles differ. Use with caution — review the preview carefully before merging.">i</span>
+                    </label>
+                    <div class="label-hint" style="margin-top:4px;margin-left:20px;">
+                      When unchecked (default), title + content + customer must all match exactly.
+                    </div>
+                  </div>
+
+                  <button class="btn btn-primary" id="nm-scan-btn">Scan for duplicates</button>
+
+                </div><!-- /nm-config -->
+              </div><!-- /nm-idle -->
+
+              <!-- ════════════════════════════════
+                   SCANNING: progress bar
+              ════════════════════════════════ -->
+              <div id="nm-scanning" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="nm-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="nm-progress-msg">Starting scan…</span>
+                  <span id="nm-progress-pct" style="margin-left:auto;"></span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="nm-scan-stop">⏹ Cancel</button>
+              </div><!-- /nm-scanning -->
+
+              <!-- ════════════════════════════════
+                   PREVIEW: table + merge button
+              ════════════════════════════════ -->
+              <div id="nm-preview" class="hidden">
+
+                <!-- Summary -->
+                <div id="nm-preview-summary" class="alert alert-info" style="margin-bottom:16px;">
+                  <span class="alert-icon">🔍</span>
+                  <span id="nm-preview-summary-text"></span>
+                </div>
+
+                <!-- No duplicates -->
+                <div id="nm-no-duplicates" class="hidden">
+                  <div class="alert alert-ok" style="margin-bottom:16px;">
+                    <span class="alert-icon">✅</span>
+                    <span>No duplicate groups found. Nothing to merge.</span>
+                  </div>
+                  <button class="btn btn-secondary" id="nm-no-dup-rescan">Adjust criteria and re-scan</button>
+                </div>
+
+                <!-- Groups table -->
+                <div id="nm-groups-wrap">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                    <strong style="font-size:13px;">Duplicate groups</strong>
+                    <button class="btn btn-ghost btn-sm" id="nm-download-preview-csv">↓ Download preview CSV</button>
+                  </div>
+
+                  <!-- Source data warning -->
+                  <div class="alert alert-warn" style="margin-bottom:12px;font-size:12px;">
+                    <span class="alert-icon" style="font-size:13px;">ℹ️</span>
+                    <span>Source data (origin / record ID) from secondary notes <strong>cannot be transferred</strong> and will be discarded. These are shown in the table for reference.</span>
+                  </div>
+
+                  <div id="nm-groups-table-wrap" style="overflow-x:auto;margin-bottom:16px;">
+                    <table class="mapping-table" id="nm-groups-table">
+                      <thead>
+                        <tr>
+                          <th>Group</th>
+                          <th>Role</th>
+                          <th>Title</th>
+                          <th>Customer</th>
+                          <th>Owner</th>
+                          <th>Tags</th>
+                          <th>Links</th>
+                          <th>Source</th>
+                          <th>State</th>
+                          <th>Created</th>
+                        </tr>
+                      </thead>
+                      <tbody id="nm-groups-tbody"></tbody>
+                    </table>
+                  </div>
+
+                  <!-- Partial matches (collapsible) -->
+                  <div id="nm-partial-matches-wrap" class="hidden" style="margin-bottom:16px;">
+                    <details>
+                      <summary style="cursor:pointer;font-size:13px;color:var(--c-muted);user-select:none;">
+                        ▸ <span id="nm-partial-count"></span> partial match group(s) — same content &amp; customer, different titles (no action taken)
+                      </summary>
+                      <div id="nm-partial-table-wrap" style="overflow-x:auto;margin-top:8px;">
+                        <table class="mapping-table" id="nm-partial-table">
+                          <thead>
+                            <tr>
+                              <th>Group</th>
+                              <th>Title</th>
+                              <th>Customer</th>
+                              <th>Owner</th>
+                              <th>State</th>
+                              <th>Created</th>
+                            </tr>
+                          </thead>
+                          <tbody id="nm-partial-tbody"></tbody>
+                        </table>
+                      </div>
+                    </details>
+                  </div>
+
+                  <!-- Oversized groups warning -->
+                  <div id="nm-oversized-warn" class="alert alert-warn hidden" style="margin-bottom:12px;font-size:12px;">
+                    <span class="alert-icon">⚠️</span>
+                    <span id="nm-oversized-warn-text"></span>
+                  </div>
+
+                  <!-- Merge action -->
+                  <div style="display:flex;gap:8px;align-items:center;">
+                    <button class="btn btn-danger" id="nm-merge-btn">Merge &amp; delete duplicates</button>
+                    <button class="btn btn-secondary" id="nm-rescan-btn">Re-scan</button>
+                  </div>
+
+                </div><!-- /nm-groups-wrap -->
+              </div><!-- /nm-preview -->
+
+              <!-- ════════════════════════════════
+                   RUNNING: live log
+              ════════════════════════════════ -->
+              <div id="nm-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="nm-run-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="nm-run-progress-msg">Starting…</span>
+                  <span id="nm-run-progress-pct" style="margin-left:auto;"></span>
+                </div>
+
+                <div id="nm-run-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Live log</span>
+                    <span id="nm-run-log-counts" class="live-log-counts"></span>
+                  </div>
+                  <div id="nm-run-log-entries" class="live-log-scroll"></div>
+                </div>
+
+                <button class="btn btn-danger btn-sm mt-8" id="nm-run-stop">⏹ Stop</button>
+              </div><!-- /nm-running -->
+
+              <!-- ════════════════════════════════
+                   RESULTS: summary + download
+              ════════════════════════════════ -->
+              <div id="nm-results" class="hidden">
+                <div id="nm-results-summary"></div>
+
+                <div id="nm-results-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Log</span>
+                    <span id="nm-results-log-counts" class="live-log-counts"></span>
+                    <button class="btn btn-ghost btn-sm hidden" id="nm-results-download-log" style="margin-left:auto;">↓ Download log</button>
+                  </div>
+                  <div id="nm-results-log-entries" class="live-log-scroll"></div>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:16px;">
+                  <button class="btn btn-ghost btn-sm" id="nm-download-audit">↓ Download audit log (JSON)</button>
+                  <button class="btn btn-secondary" id="nm-start-over">Start over</button>
+                </div>
+              </div><!-- /nm-results -->
+
+              <!-- ════════════════════════════════
+                   ERROR
+              ════════════════════════════════ -->
+              <div id="nm-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="nm-error-msg"></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:12px;">
+                  <button class="btn btn-secondary" id="nm-error-retry">Start over</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="nm-error-download-log">↓ Download log</button>
+                </div>
+              </div><!-- /nm-error -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-notes-merge-view -->
