@@ -856,6 +856,249 @@
     );
   }
 
+  // ══════════════════════════════════════════════════════════
+  // DELETE EMPTY NOTES submodule
+  // ══════════════════════════════════════════════════════════
+
+  let _emptyData       = null;  // { emptyNotes, stats } from last scan
+  let _selectedEmpty   = new Set(); // note objects selected for deletion
+  let _emptyScanCtrl   = null;
+  let _emptyRunCtrl    = null;
+  let _emptyLogAppender = null;
+  let _lastDeletedNotes = []; // notes sent in the last delete call, for "Back to preview"
+  let _emptyVs         = null;
+
+  const NE_STATES = ['idle', 'scanning', 'preview', 'running', 'results', 'error'];
+
+  function neGo(state) { if (_emptyVs) _emptyVs.go(state); }
+  function neText(id, text) { nm$(id) && (nm$(id).textContent = text); }
+  function neShow(id) { nm$(id)?.classList.remove('hidden'); }
+  function neHide(id) { nm$(id)?.classList.add('hidden'); }
+
+  function resetEmptyNotes() {
+    if (_emptyScanCtrl) { _emptyScanCtrl.abort(); _emptyScanCtrl = null; }
+    if (_emptyRunCtrl)  { _emptyRunCtrl.abort();  _emptyRunCtrl  = null; }
+    _emptyData        = null;
+    _selectedEmpty.clear();
+    _lastDeletedNotes = [];
+    if (_emptyLogAppender) _emptyLogAppender.reset();
+    neGo('idle');
+  }
+
+  // ── Scan ──────────────────────────────────────────────────
+  function startEmptyScan() {
+    if (!token) { requireToken(() => startEmptyScan()); return; }
+
+    const createdFrom = nm$('ne-date-from')?.value ? nm$('ne-date-from').value + 'T00:00:00.000Z' : '';
+    const createdTo   = nm$('ne-date-to')?.value   ? nm$('ne-date-to').value   + 'T23:59:59.999Z' : '';
+
+    neGo('scanning');
+    setProgress('ne', 'Starting scan…', 0);
+
+    _emptyScanCtrl = subscribeSSE('/api/notes-merge/scan-empty', { createdFrom, createdTo }, {
+      onProgress({ message, percent }) {
+        setProgress('ne', message, percent ?? 0);
+      },
+      onComplete(data) {
+        _emptyData = data;
+        renderEmptyPreview(data);
+        neGo('preview');
+      },
+      onError(msg) {
+        neText('ne-error-msg', msg);
+        neHide('ne-back-to-preview-error');
+        neHide('ne-error-download-log');
+        neGo('error');
+      },
+      onAbort() { neGo('idle'); },
+    });
+  }
+
+  // ── Render preview ────────────────────────────────────────
+  function renderEmptyPreview(data) {
+    const { emptyNotes = [], stats } = data;
+    const summaryEl = nm$('ne-preview-summary-text');
+    if (summaryEl) {
+      summaryEl.textContent = emptyNotes.length === 0
+        ? `Scanned ${stats.totalNotes.toLocaleString()} notes — none are empty.`
+        : `Found ${emptyNotes.length} empty note(s) out of ${stats.totalNotes.toLocaleString()} total.`;
+    }
+
+    if (emptyNotes.length === 0) {
+      neShow('ne-no-empty');
+      neHide('ne-notes-wrap');
+      return;
+    }
+
+    neHide('ne-no-empty');
+    neShow('ne-notes-wrap');
+    _selectedEmpty.clear();
+
+    const tbody = nm$('ne-notes-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    emptyNotes.forEach((note) => {
+      const tr = document.createElement('tr');
+      tr.style.cssText = 'height:36px;';
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.style.cssText = 'cursor:pointer;';
+      cb.addEventListener('change', () => {
+        if (cb.checked) _selectedEmpty.add(note);
+        else _selectedEmpty.delete(note);
+        updateEmptySelectionUI();
+      });
+
+      const tdCb = document.createElement('td');
+      tdCb.appendChild(cb);
+
+      tr.appendChild(tdCb);
+      tr.insertAdjacentHTML('beforeend', `
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+            title="${esc(note.title)}">${esc(note.title) || '<em style="color:var(--c-muted)">untitled</em>'}</td>
+        <td style="font-size:12px;">${esc(note.customer_email || note.customer_company || '—')}</td>
+        <td style="font-size:12px;">${esc(note.owner_email || '—')}</td>
+        <td style="font-size:12px;">${esc(note.state)}</td>
+        <td style="font-size:11px;color:var(--c-muted);">${esc(note.created_at ? note.created_at.slice(0, 10) : '—')}</td>
+      `);
+
+      tr.addEventListener('mouseenter', () => { tr.style.background = 'var(--c-bg-hover,#f1f5f9)'; });
+      tr.addEventListener('mouseleave', () => { tr.style.background = ''; });
+
+      tbody.appendChild(tr);
+    });
+
+    updateEmptySelectionUI();
+  }
+
+  function updateEmptySelectionUI() {
+    const total      = _emptyData?.emptyNotes?.length ?? 0;
+    const anySelected = _selectedEmpty.size > 0;
+    const allSelected = _selectedEmpty.size === total && total > 0;
+
+    const deleteBtn = nm$('ne-delete-btn');
+    if (deleteBtn) deleteBtn.textContent = anySelected
+      ? `Delete selected (${_selectedEmpty.size})`
+      : `Delete empty notes`;
+
+    if (anySelected) {
+      neShow('ne-unselect-all');
+      neShow('ne-invert-selection');
+    } else {
+      neHide('ne-unselect-all');
+      neHide('ne-invert-selection');
+    }
+
+    const selectAllBtn = nm$('ne-select-all');
+    if (selectAllBtn) selectAllBtn.textContent = allSelected ? 'Deselect all' : 'Select all';
+  }
+
+  // ── Delete ────────────────────────────────────────────────
+  function startEmptyDelete() {
+    if (!_emptyData?.emptyNotes?.length) return;
+    const notes = _selectedEmpty.size > 0 ? [..._selectedEmpty] : _emptyData.emptyNotes;
+    showConfirm(
+      `Permanently delete ${notes.length} empty note(s)?\n\nThis cannot be undone. Continue?`,
+      { confirmText: 'Delete', danger: true }
+    ).then((confirmed) => {
+      if (!confirmed) return;
+      runEmptyDelete(notes);
+    });
+  }
+
+  function runEmptyDelete(notes) {
+    _lastDeletedNotes = notes;
+    if (_emptyLogAppender) _emptyLogAppender.reset();
+
+    neGo('running');
+    setProgress('ne-run', 'Starting…', 0);
+
+    _emptyRunCtrl = subscribeSSE('/api/notes-merge/delete-empty', { notes }, {
+      onProgress({ message, percent }) {
+        setProgress('ne-run', message, percent ?? 0);
+      },
+      onLog(entry) {
+        if (_emptyLogAppender) _emptyLogAppender(entry);
+      },
+      onComplete(data) {
+        renderEmptyResults(data);
+        neGo('results');
+        transferLog(
+          'ne-run-log', 'ne-run-log-entries', 'ne-run-log-counts',
+          'ne-results-log', 'ne-results-log-entries', 'ne-results-log-counts'
+        );
+      },
+      onError(msg) {
+        neText('ne-error-msg', msg);
+        if (_emptyLogAppender) {
+          const counts = _emptyLogAppender.getCounts();
+          if (counts.success + counts.error > 0) neShow('ne-error-download-log');
+        }
+        const canGoBack = _emptyData && _lastDeletedNotes.length < _emptyData.emptyNotes.length;
+        if (canGoBack) neShow('ne-back-to-preview-error');
+        else           neHide('ne-back-to-preview-error');
+        neGo('error');
+      },
+      onAbort() {
+        renderEmptyResults({ deleted: 0, errors: 0, stopped: true });
+        neGo('results');
+        transferLog(
+          'ne-run-log', 'ne-run-log-entries', 'ne-run-log-counts',
+          'ne-results-log', 'ne-results-log-entries', 'ne-results-log-counts'
+        );
+      },
+    });
+  }
+
+  function backToEmptyPreview() {
+    if (!_emptyData) return;
+
+    // Remove deleted notes from state and DOM
+    const deletedIds = new Set(_lastDeletedNotes.map(n => n.id));
+    _emptyData.emptyNotes = _emptyData.emptyNotes.filter(n => !deletedIds.has(n.id));
+    for (const n of _lastDeletedNotes) _selectedEmpty.delete(n);
+
+    // Rebuild table from remaining notes
+    renderEmptyPreview(_emptyData);
+
+    // Update summary
+    const remaining = _emptyData.emptyNotes.length;
+    const summaryEl = nm$('ne-preview-summary-text');
+    if (summaryEl) summaryEl.textContent = remaining === 0
+      ? 'All empty notes deleted.'
+      : `${remaining} empty note(s) remaining.`;
+
+    if (remaining === 0) {
+      neHide('ne-notes-wrap');
+      neShow('ne-no-empty');
+    }
+
+    _lastDeletedNotes = [];
+    neGo('preview');
+  }
+
+  function renderEmptyResults(data) {
+    const { deleted = 0, errors = 0, stopped = false } = data;
+    const summaryEl = nm$('ne-results-summary');
+    if (!summaryEl) return;
+
+    const alertClass = (stopped || errors > 0) ? 'alert-warn' : 'alert-ok';
+    const icon       = stopped ? '⏹' : errors > 0 ? '⚠️' : '✅';
+    const status     = stopped ? 'Stopped' : 'Complete';
+    summaryEl.innerHTML = `
+      <div class="alert ${alertClass}">
+        <span class="alert-icon">${icon}</span>
+        <span>${status} — ${deleted} note(s) deleted · ${errors} error(s)</span>
+      </div>
+    `;
+
+    const canGoBack = _emptyData && _lastDeletedNotes.length < _emptyData.emptyNotes.length + _lastDeletedNotes.length;
+    if (canGoBack) neShow('ne-back-to-preview');
+    else           neHide('ne-back-to-preview');
+  }
+
   // ── Init ──────────────────────────────────────────────────
   function initNotesMergeModule() {
     if (_inited) return;
@@ -975,6 +1218,77 @@
     // No pb:connected handler needed — scan is always user-initiated.
     // Token disconnect — reset everything
     window.addEventListener('pb:disconnect', resetNotesMerge);
+
+    // ── Delete Empty Notes submodule ─────────────────────────
+    _emptyVs = createViewState('ne', NE_STATES);
+    _emptyLogAppender = makeLogAppender('ne-run-log', 'ne-run-log-entries', 'ne-run-log-counts', 'note');
+
+    // Cap date pickers at today
+    const neFromInput = nm$('ne-date-from');
+    const neToInput   = nm$('ne-date-to');
+    if (neFromInput) neFromInput.max = today;
+    if (neToInput)   neToInput.max   = today;
+
+    // Scan
+    nm$('ne-scan-btn')?.addEventListener('click', startEmptyScan);
+    nm$('ne-scan-stop')?.addEventListener('click', () => {
+      if (_emptyScanCtrl) { _emptyScanCtrl.abort(); _emptyScanCtrl = null; }
+    });
+
+    // Preview actions
+    nm$('ne-select-all')?.addEventListener('click', () => {
+      const notes  = _emptyData?.emptyNotes ?? [];
+      const allSel = _selectedEmpty.size === notes.length && notes.length > 0;
+      if (allSel) {
+        _selectedEmpty.clear();
+        nm$('ne-notes-tbody')?.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+      } else {
+        notes.forEach(n => _selectedEmpty.add(n));
+        nm$('ne-notes-tbody')?.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = true; });
+      }
+      updateEmptySelectionUI();
+    });
+
+    nm$('ne-unselect-all')?.addEventListener('click', () => {
+      _selectedEmpty.clear();
+      nm$('ne-notes-tbody')?.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+      updateEmptySelectionUI();
+    });
+
+    nm$('ne-invert-selection')?.addEventListener('click', () => {
+      const notes = _emptyData?.emptyNotes ?? [];
+      nm$('ne-notes-tbody')?.querySelectorAll('input[type=checkbox]').forEach((cb, i) => {
+        cb.checked = !cb.checked;
+        if (cb.checked) _selectedEmpty.add(notes[i]);
+        else _selectedEmpty.delete(notes[i]);
+      });
+      updateEmptySelectionUI();
+    });
+
+    nm$('ne-delete-btn')?.addEventListener('click', startEmptyDelete);
+    nm$('ne-rescan-btn')?.addEventListener('click', () => { _emptyData = null; neGo('idle'); });
+    nm$('ne-no-empty-rescan')?.addEventListener('click', () => { _emptyData = null; neGo('idle'); });
+
+    // Running
+    nm$('ne-run-stop')?.addEventListener('click', () => {
+      if (_emptyRunCtrl) { _emptyRunCtrl.abort(); _emptyRunCtrl = null; }
+    });
+
+    // Results
+    nm$('ne-results-download-log')?.addEventListener('click', () => {
+      if (_emptyLogAppender) downloadLogCsv(_emptyLogAppender, 'notes-empty-delete');
+    });
+    nm$('ne-back-to-preview')?.addEventListener('click', backToEmptyPreview);
+    nm$('ne-start-over')?.addEventListener('click', resetEmptyNotes);
+
+    // Error
+    nm$('ne-back-to-preview-error')?.addEventListener('click', backToEmptyPreview);
+    nm$('ne-error-retry')?.addEventListener('click', resetEmptyNotes);
+    nm$('ne-error-download-log')?.addEventListener('click', () => {
+      if (_emptyLogAppender) downloadLogCsv(_emptyLogAppender, 'notes-empty-delete');
+    });
+
+    window.addEventListener('pb:disconnect', resetEmptyNotes);
   }
 
   window.initNotesMergeModule = initNotesMergeModule;
