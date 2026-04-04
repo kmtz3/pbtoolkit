@@ -14,7 +14,9 @@
   let _runCtrl     = null;  // AbortController for run SSE
   let _logAppender = null;  // makeLogAppender bound to run log panel
   let _inited      = false;
-  let _groupCardEls = new Map(); // group → <details> el, for in-place re-render after target swap
+  let _groupCardEls    = new Map(); // group → <details> el, for in-place re-render after target swap
+  let _selectedGroups  = new Set(); // groups with checkbox checked
+  let _lastMergedGroups = [];       // groups sent in the last runMerge call, used by "Back to preview"
 
   // ── DOM helpers ───────────────────────────────────────────
   function nm$(id) { return document.getElementById(id); }
@@ -130,6 +132,7 @@
     if (listEl) {
       listEl.innerHTML = '';
       _groupCardEls.clear();
+      _selectedGroups.clear();
       groups.forEach((group, gi) => {
         listEl.appendChild(buildGroupBlock(group, gi));
       });
@@ -165,6 +168,21 @@
     }
   }
 
+  function updateSelectionUI() {
+    const anySelected = _selectedGroups.size > 0;
+    const mergeBtn = nm$('nm-merge-btn');
+    if (mergeBtn) mergeBtn.textContent = anySelected
+      ? `Merge & delete selected (${_selectedGroups.size})`
+      : 'Merge & delete duplicates';
+    if (anySelected) {
+      nmShow('nm-unselect-all');
+      nmShow('nm-invert-selection');
+    } else {
+      nmHide('nm-unselect-all');
+      nmHide('nm-invert-selection');
+    }
+  }
+
   /** Build a collapsible <details> block for one duplicate group. */
   function buildGroupBlock(group, gi) {
     // Preserve original note order across target swaps
@@ -185,6 +203,18 @@
       'display:flex;align-items:center;gap:10px;min-width:0;',
       'background:var(--c-bg-alt,#f8f9fa);font-size:13px;font-weight:500;user-select:none;',
     ].join('');
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = _selectedGroups.has(group);
+    checkbox.style.cssText = 'cursor:pointer;flex-shrink:0;';
+    checkbox.title = 'Select group for bulk merge';
+    checkbox.addEventListener('click', (e) => { e.stopPropagation(); });
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) _selectedGroups.add(group);
+      else _selectedGroups.delete(group);
+      updateSelectionUI();
+    });
 
     const groupLabel = document.createElement('span');
     groupLabel.style.cssText = 'white-space:nowrap;';
@@ -217,7 +247,7 @@
       runSingleGroupMerge(group, gi + 1);
     });
 
-    summary.append(groupLabel, countLabel, titleLabel, customerLabel, spacer, compareHint, mergeOneBtn);
+    summary.append(checkbox, groupLabel, countLabel, titleLabel, customerLabel, spacer, compareHint, mergeOneBtn);
     details.appendChild(summary);
 
     // Compact table
@@ -340,6 +370,10 @@
     nmText('nm-cmp-group-nav',   `${_splitGroupIndex + 1} / ${totalGroups}`);
     nmText('nm-cmp-sec-nav',     `${_splitSecIndex + 1} / ${totalSec}`);
 
+    // Sync modal checkbox with _selectedGroups
+    const modalCb = nm$('nm-cmp-group-select');
+    if (modalCb) modalCb.checked = _selectedGroups.has(_splitGroup);
+
     // Group nav buttons
     const prevGrpBtn = nm$('nm-cmp-prev-group');
     const nextGrpBtn = nm$('nm-cmp-next-group');
@@ -359,7 +393,7 @@
       ? renderNoteCardMerged(_splitGroup)
       : renderNoteCard(target, 'TARGET — kept', false, null);
     if (rightEl) {
-      rightEl.innerHTML = renderNoteCard(sec, `DUPLICATE ${_splitSecIndex + 1} — will be deleted`, true, target);
+      rightEl.innerHTML = renderNoteCard(sec, `DUPLICATE ${_splitSecIndex + 1} — will be deleted`, true, target, showMerged);
       const makeTargetBtn = document.createElement('button');
       makeTargetBtn.className = 'btn btn-secondary';
       makeTargetBtn.textContent = 'Set as target';
@@ -483,7 +517,7 @@
    *   - Data that will be permanently lost   → red with a "lost" tooltip
    *   - Data identical to the target         → muted
    */
-  function renderNoteCard(note, label, isSecondary, target) {
+  function renderNoteCard(note, label, isSecondary, target, showMerged = false) {
     const lost = (html, reason) =>
       `<span style="color:var(--c-danger,#ef4444);" title="${esc(reason)}">${html} <span style="font-size:10px;">✕ lost</span></span>`;
     const muted = (html) =>
@@ -554,9 +588,9 @@
       linksHtml = esc(links);
     }
 
-    // Owner: secondary owner becomes a follower — not lost, just note it
+    // Owner: secondary owner becomes a follower only when it differs from the target's
     let ownerHtml = esc(note.owner_email || '—');
-    if (isSecondary && note.owner_email) {
+    if (isSecondary && note.owner_email && note.owner_email !== target?.owner_email) {
       ownerHtml += ` <span style="font-size:10px;color:var(--c-muted);">(→ follower)</span>`;
     }
 
@@ -566,7 +600,7 @@
       ? 'font-size:12px;background:var(--c-bg-alt,#f8f9fa);border:1px solid var(--c-border,#e2e8f0);border-radius:4px;padding:8px;max-height:100px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;margin-bottom:12px;line-height:1.5;color:var(--c-muted);'
       : 'font-size:12px;background:var(--c-bg-alt,#f8f9fa);border:1px solid var(--c-border,#e2e8f0);border-radius:4px;padding:8px;max-height:100px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;margin-bottom:12px;line-height:1.5;';
 
-    const lossLegend = isSecondary
+    const lossLegend = isSecondary && showMerged
       ? `<div style="font-size:11px;color:var(--c-danger,#ef4444);margin-bottom:10px;">Items in red will be permanently lost.</div>`
       : '';
 
@@ -619,37 +653,39 @@
   // ── Run merge ─────────────────────────────────────────────
   function startMerge() {
     if (!_scanData?.groups?.length) return;
+    const groups = _selectedGroups.size > 0 ? [..._selectedGroups] : _scanData.groups;
+    const notesToDelete = groups.reduce((n, g) => n + g.secondaries.length, 0);
+    const label = _selectedGroups.size > 0
+      ? `Merge ${groups.length} selected group(s) and permanently delete ${notesToDelete} note(s)?`
+      : `This will merge ${groups.length} group(s) and permanently delete ${notesToDelete} note(s).`;
 
     showConfirm(
-      `This will merge ${_scanData.stats.groupsFound} group(s) and permanently delete ${_scanData.stats.notesToDelete} note(s).\n\nThis cannot be undone. Continue?`,
+      `${label}\n\nThis cannot be undone. Continue?`,
       { confirmText: 'Merge & delete', danger: true }
     ).then((confirmed) => {
       if (!confirmed) return;
-      runMerge();
+      runMerge(groups);
     });
   }
 
   function runSingleGroupMerge(group, groupNum) {
     showConfirm(
-      `Merge group ${groupNum}?\n\nThis will consolidate metadata from ${group.secondaries.length} secondary note(s) into "${group.target.title || 'untitled'}" and permanently delete the secondaries.\n\nThis cannot be undone.`,
+      `Merge group ${groupNum}?\n\nThis will consolidate metadata from ${group.secondaries.length} duplicate(s) into "${group.target.title || 'untitled'}" and permanently delete them.\n\nThis cannot be undone.`,
       { confirmText: 'Merge this group', danger: true }
     ).then((confirmed) => {
       if (!confirmed) return;
-      // Temporarily replace scanData.groups with just this one group so runMerge() sends only it
-      const saved = _scanData.groups;
-      _scanData.groups = [group];
-      runMerge();
-      _scanData.groups = saved;
+      runMerge([group]);
     });
   }
 
-  function runMerge() {
+  function runMerge(groups) {
+    _lastMergedGroups = groups ?? _scanData.groups;
     if (_logAppender) _logAppender.reset();
 
     nmGo('running');
     setProgress('nm-run', 'Starting…', 0);
 
-    _runCtrl = subscribeSSE('/api/notes-merge/run', { groups: _scanData.groups }, {
+    _runCtrl = subscribeSSE('/api/notes-merge/run', { groups: _lastMergedGroups }, {
       onProgress({ message, percent }) {
         setProgress('nm-run', message, percent ?? 0);
       },
@@ -670,6 +706,10 @@
         if (_logAppender && _logAppender.getCounts().success + _logAppender.getCounts().error > 0) {
           nmShow('nm-error-download-log');
         }
+        // Show "Back to preview" only when a partial preview exists to return to
+        const canGoBack = _scanData && _lastMergedGroups.length < (_scanData.groups.length + _lastMergedGroups.length);
+        if (canGoBack) nmShow('nm-back-to-preview-error');
+        else           nmHide('nm-back-to-preview-error');
         nmGo('error');
       },
       onAbort() {
@@ -679,6 +719,46 @@
                     'nm-results-log', 'nm-results-log-entries', 'nm-results-log-counts');
       },
     });
+  }
+
+  function backToPreview() {
+    if (!_scanData) return;
+
+    // Remove merged groups from state and DOM
+    for (const group of _lastMergedGroups) {
+      _scanData.groups = _scanData.groups.filter(g => g !== group);
+      _selectedGroups.delete(group);
+      const cardEl = _groupCardEls.get(group);
+      if (cardEl) cardEl.remove();
+      _groupCardEls.delete(group);
+      if (_splitGroup === group) closeCompareModal();
+    }
+
+    // Re-number remaining group headers
+    nm$('nm-groups-list')?.querySelectorAll('details[data-gi]').forEach((el, i) => {
+      el.dataset.gi = i;
+      // groupLabel is the 2nd child of summary (after checkbox)
+      const summaryChildren = el.querySelector('summary')?.children;
+      if (summaryChildren?.[1]) summaryChildren[1].textContent = `Group ${i + 1}`;
+    });
+
+    // Update summary line
+    const remaining = _scanData.groups.length;
+    const remainingToDelete = _scanData.groups.reduce((n, g) => n + g.secondaries.length, 0);
+    const summaryEl = nm$('nm-preview-summary-text');
+    if (summaryEl) summaryEl.textContent = remaining === 0
+      ? 'All groups merged.'
+      : `${remaining} group(s) remaining · ${remainingToDelete} note(s) to delete.`;
+
+    updateSelectionUI();
+
+    if (remaining === 0) {
+      nmHide('nm-groups-wrap');
+      nmShow('nm-no-duplicates');
+    }
+
+    _lastMergedGroups = [];
+    nmGo('preview');
   }
 
   function renderResults(data) {
@@ -706,6 +786,11 @@
     } else {
       nmHide('nm-download-audit');
     }
+
+    // Show "Back to preview" only when there's a partial preview to return to
+    const canGoBack = _scanData && _lastMergedGroups.length < (_scanData.groups.length + _lastMergedGroups.length);
+    if (canGoBack) nmShow('nm-back-to-preview');
+    else           nmHide('nm-back-to-preview');
   }
 
   /**
@@ -787,7 +872,38 @@
       if (btn) btn.textContent = anyOpen ? 'Expand all' : 'Collapse all';
     });
 
+    // Unselect all
+    nm$('nm-unselect-all')?.addEventListener('click', () => {
+      _selectedGroups.clear();
+      nm$('nm-groups-list')?.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+      updateSelectionUI();
+    });
+
+    // Invert selection
+    nm$('nm-invert-selection')?.addEventListener('click', () => {
+      nm$('nm-groups-list')?.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.checked = !cb.checked;
+        const group = [..._groupCardEls.entries()].find(([, el]) => el.contains(cb))?.[0];
+        if (!group) return;
+        if (cb.checked) _selectedGroups.add(group);
+        else _selectedGroups.delete(group);
+      });
+      updateSelectionUI();
+    });
+
     // Compare modal controls
+    nm$('nm-cmp-group-select')?.addEventListener('change', (e) => {
+      if (!_splitGroup) return;
+      if (e.target.checked) _selectedGroups.add(_splitGroup);
+      else _selectedGroups.delete(_splitGroup);
+      // Sync the corresponding group card checkbox
+      const cardEl = _groupCardEls.get(_splitGroup);
+      if (cardEl) {
+        const cb = cardEl.querySelector('input[type=checkbox]');
+        if (cb) cb.checked = e.target.checked;
+      }
+      updateSelectionUI();
+    });
     nm$('nm-split-preview-merge')?.addEventListener('change', () => { if (_splitGroup) renderSplitPanel(); });
     nm$('nm-cmp-prev-group')?.addEventListener('click', () => navigateGroup(-1));
     nm$('nm-cmp-next-group')?.addEventListener('click', () => navigateGroup(+1));
@@ -818,9 +934,11 @@
     nm$('nm-results-download-log')?.addEventListener('click', () => {
       if (_logAppender) downloadLogCsv(_logAppender, 'notes-merge');
     });
+    nm$('nm-back-to-preview')?.addEventListener('click', backToPreview);
     nm$('nm-start-over')?.addEventListener('click', resetNotesMerge);
 
     // Error
+    nm$('nm-back-to-preview-error')?.addEventListener('click', backToPreview);
     nm$('nm-error-retry')?.addEventListener('click', resetNotesMerge);
     nm$('nm-error-download-log')?.addEventListener('click', () => {
       if (_logAppender) downloadLogCsv(_logAppender, 'notes-merge');
