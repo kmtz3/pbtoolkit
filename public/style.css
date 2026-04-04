@@ -244,35 +244,60 @@ body {
 .btn-back-home:hover { background: var(--c-border); color: var(--c-text); }
 
 /* ── Sidebar collapse toggle ── */
+.nav-section-row {
+  display: flex;
+  align-items: center;
+}
+.nav-section-row .nav-section-label {
+  flex: 1;
+  border-bottom: none;  /* border lives on the row now */
+  padding-bottom: 8px;
+  margin-bottom: 0;
+}
+.nav-section-row {
+  border-bottom: 1px solid var(--c-border);
+  margin-bottom: 4px;
+  padding-bottom: 0;
+}
+
 .sidebar-collapse-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin-left: auto;
-  margin-bottom: 4px;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
   border: 1px solid var(--c-border);
   border-radius: var(--r-sm);
   background: none;
   cursor: pointer;
   color: var(--c-muted);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
-  flex-shrink: 0;
+  margin-right: 14px;
+  margin-bottom: 8px;
   transition: background .15s, color .15s;
 }
 .sidebar-collapse-toggle:hover { background: var(--c-border); color: var(--c-text); }
 
 /* Collapsed state: narrow sidebar, icon flips, nav content hidden */
 .main-content.sidebar-collapsed {
-  grid-template-columns: 36px 1fr;
+  grid-template-columns: 44px 1fr;
 }
-.main-content.sidebar-collapsed .sidebar-nav > *:not(.sidebar-collapse-toggle) {
+.main-content.sidebar-collapsed .sidebar-nav > *:not(.nav-section-row) {
   display: none;
 }
+.main-content.sidebar-collapsed .nav-section-row .nav-section-label {
+  display: none;
+}
+.main-content.sidebar-collapsed .nav-section-row {
+  border-bottom: none;
+  justify-content: center;
+  padding: 4px 0;
+}
 .main-content.sidebar-collapsed .sidebar-collapse-toggle {
-  margin-left: 0;
+  margin-right: 0;
+  margin-bottom: 0;
   /* flip ‹‹ to ›› */
   transform: rotate(180deg);
 }
