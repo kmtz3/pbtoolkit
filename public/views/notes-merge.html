@@ -267,6 +267,166 @@
         </div><!-- /view-notes-merge-view -->
 
         <!-- ══════════════════════════════════════════
+             DELETE EMPTY NOTES
+        ═══════════════════════════════════════════ -->
+        <div id="view-notes-merge-empty" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Delete empty notes <span class="badge badge-beta">Beta</span></div>
+              <div class="panel-subtitle">Find and delete notes that have no content body. Optionally scope by creation date.</div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ════════════════════════════════
+                   IDLE: date range + scan button
+              ════════════════════════════════ -->
+              <div id="ne-idle">
+                <div class="field">
+                  <label>Date range <span class="label-hint">(optional — leave blank to scan all notes)</span></label>
+                  <div class="input-row" style="gap:8px;align-items:center;">
+                    <input type="date" id="ne-date-from" class="form-input" style="width:160px;" />
+                    <span style="color:var(--c-muted);font-size:13px;">to</span>
+                    <input type="date" id="ne-date-to" class="form-input" style="width:160px;" />
+                  </div>
+                </div>
+                <button class="btn btn-primary" id="ne-scan-btn">Find empty notes</button>
+              </div><!-- /ne-idle -->
+
+              <!-- ════════════════════════════════
+                   SCANNING: progress bar
+              ════════════════════════════════ -->
+              <div id="ne-scanning" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="ne-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="ne-progress-msg">Starting scan…</span>
+                  <span id="ne-progress-pct" style="margin-left:auto;"></span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="ne-scan-stop">⏹ Cancel</button>
+              </div><!-- /ne-scanning -->
+
+              <!-- ════════════════════════════════
+                   PREVIEW: note list + delete button
+              ════════════════════════════════ -->
+              <div id="ne-preview" class="hidden">
+
+                <!-- Summary -->
+                <div id="ne-preview-summary" class="alert alert-info" style="margin-bottom:16px;">
+                  <span class="alert-icon">🔍</span>
+                  <span id="ne-preview-summary-text"></span>
+                </div>
+
+                <!-- No empty notes found -->
+                <div id="ne-no-empty" class="hidden">
+                  <div class="alert alert-ok" style="margin-bottom:16px;">
+                    <span class="alert-icon">✅</span>
+                    <span>No empty notes found. Nothing to delete.</span>
+                  </div>
+                  <button class="btn btn-secondary" id="ne-no-empty-rescan">Adjust date range and re-scan</button>
+                </div>
+
+                <!-- Notes list -->
+                <div id="ne-notes-wrap">
+
+                  <!-- Toolbar -->
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                    <button class="btn btn-ghost btn-sm" id="ne-select-all">Select all</button>
+                    <button class="btn btn-ghost btn-sm hidden" id="ne-unselect-all">Unselect all</button>
+                    <button class="btn btn-ghost btn-sm hidden" id="ne-invert-selection">Invert selection</button>
+                  </div>
+
+                  <!-- Notes table -->
+                  <div style="overflow-x:auto;margin-bottom:16px;">
+                    <table class="mapping-table" id="ne-notes-table">
+                      <thead>
+                        <tr>
+                          <th style="width:32px;"></th>
+                          <th>Title</th>
+                          <th>Customer</th>
+                          <th>Owner</th>
+                          <th>State</th>
+                          <th>Created</th>
+                        </tr>
+                      </thead>
+                      <tbody id="ne-notes-tbody"></tbody>
+                    </table>
+                  </div>
+
+                  <!-- Delete action -->
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <button class="btn btn-danger" id="ne-delete-btn">Delete empty notes</button>
+                    <button class="btn btn-secondary" id="ne-rescan-btn">Adjust date range</button>
+                  </div>
+
+                </div><!-- /ne-notes-wrap -->
+              </div><!-- /ne-preview -->
+
+              <!-- ════════════════════════════════
+                   RUNNING: live log
+              ════════════════════════════════ -->
+              <div id="ne-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="ne-run-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="ne-run-progress-msg">Starting…</span>
+                  <span id="ne-run-progress-pct" style="margin-left:auto;"></span>
+                </div>
+
+                <div id="ne-run-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Live log</span>
+                    <span id="ne-run-log-counts" class="live-log-counts"></span>
+                  </div>
+                  <div id="ne-run-log-entries" class="live-log-scroll"></div>
+                </div>
+
+                <button class="btn btn-danger btn-sm mt-8" id="ne-run-stop">⏹ Stop</button>
+              </div><!-- /ne-running -->
+
+              <!-- ════════════════════════════════
+                   RESULTS: summary + download
+              ════════════════════════════════ -->
+              <div id="ne-results" class="hidden">
+                <div id="ne-results-summary"></div>
+
+                <div id="ne-results-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Log</span>
+                    <span id="ne-results-log-counts" class="live-log-counts"></span>
+                    <button class="btn btn-ghost btn-sm hidden" id="ne-results-download-log" style="margin-left:auto;">↓ Download log</button>
+                  </div>
+                  <div id="ne-results-log-entries" class="live-log-scroll"></div>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                  <button class="btn btn-secondary" id="ne-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm" id="ne-start-over">Start over</button>
+                </div>
+              </div><!-- /ne-results -->
+
+              <!-- ════════════════════════════════
+                   ERROR
+              ════════════════════════════════ -->
+              <div id="ne-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="ne-error-msg"></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                  <button class="btn btn-secondary hidden" id="ne-back-to-preview-error">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="ne-error-download-log">↓ Download log</button>
+                  <button class="btn btn-ghost btn-sm" id="ne-error-retry">Start over</button>
+                </div>
+              </div><!-- /ne-error -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-notes-merge-empty -->
+
+        <!-- ══════════════════════════════════════════
              NOTE COMPARISON MODAL
         ═══════════════════════════════════════════ -->
         <div id="nm-compare-overlay" class="ri-overlay hidden">

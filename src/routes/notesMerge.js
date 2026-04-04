@@ -17,16 +17,18 @@
  *   3. Merge product hierarchy links (POST relationships, 422 skip)
  *   4. Reconcile state (processed > unprocessed > archived)
  *   5. Add secondary owners as followers (v1 POST /notes/{id}/user-followers)
+ *   5a. [Optional — transferFollowers] Add existing followers fetched from secondary notes
+ *       (v1 GET /notes/{id}/user-followers fetched during scan, applied here during run)
  *   6. Preserve user relationship if target only has company and a secondary has user
  *   7. Delete secondary notes
  *
  * TODO (v1 sunset ~6 months from 2026-04-03):
- *   Replace step 5 with the v2 owner-cycling hack:
- *     For each secondary owner, PATCH the target note setting that person as owner,
- *     wait ~5s, then proceed to the next. After all are cycled, restore the original owner.
- *     Each person set as owner accumulates as a follower even after the owner changes.
+ *   Steps 5 and 5a both rely on v1 follower endpoints. When v1 is retired:
+ *   - Step 5: Replace with the v2 owner-cycling hack (PATCH target owner per secondary
+ *     owner, wait ~5s each, restore original — each person cycled accumulates as follower).
  *     Cost: 2× PATCH + ~5s sleep per secondary owner.
- *     Push PB API PM to add a native v2 followers endpoint.
+ *   - Step 5a: GET /notes/{id}/user-followers has no v2 equivalent yet.
+ *     Push PB API PM to add a native v2 followers endpoint before v1 is removed.
  */
 
 const express = require('express');
@@ -197,6 +199,7 @@ function buildNotePreview(note, userMap, companyMap, sourceMap) {
     source_record_id: sourceRecordId,
     state:            getNoteState(note),
     created_at:       note.createdAt   || '',
+    existing_followers: [], // populated during scan when transferFollowers=true (v1 GET /notes/{id}/user-followers)
   };
 }
 
@@ -207,7 +210,7 @@ function buildNotePreview(note, userMap, companyMap, sourceMap) {
 router.post('/scan', pbAuth, async (req, res) => {
   const sse = startSSE(res);
   const { pbFetch, withRetry } = res.locals.pbClient;
-  const { createdFrom, createdTo, looseMatch = false, targetMode = 'newest' } = req.body || {};
+  const { createdFrom, createdTo, looseMatch = false, targetMode = 'newest', transferFollowers = false } = req.body || {};
 
   try {
     // Phase 1: Fetch all v2 notes
@@ -294,6 +297,24 @@ router.post('/scan', pbAuth, async (req, res) => {
       });
     }
 
+    // Phase 6 (optional): Fetch existing followers for each secondary note
+    // TODO: Uses v1 GET /notes/{id}/user-followers — revisit when v1 is retired (~6 months from 2026-04-03)
+    if (transferFollowers && groups.length > 0) {
+      const allSecondaries = groups.flatMap(g => g.secondaries);
+      let fetched = 0;
+      for (const sec of allSecondaries) {
+        if (sse.isAborted()) break;
+        try {
+          const r = await withRetry(() => pbFetch('get', `/notes/${sec.id}/user-followers`), `fetch followers ${sec.id}`);
+          sec.existing_followers = (r.data || []).map(u => u.email).filter(Boolean);
+        } catch (err) {
+          console.warn(`[notesMerge/scan] Could not fetch followers for ${sec.id}:`, parseApiError(err));
+        }
+        fetched++;
+        sse.progress(`Fetching followers… (${fetched}/${allSecondaries.length})`, Math.round(80 + (fetched / allSecondaries.length) * 18));
+      }
+    }
+
     sse.progress(`Found ${groups.length} duplicate group(s).`, 100);
     sse.complete({
       groups,
@@ -322,7 +343,7 @@ router.post('/scan', pbAuth, async (req, res) => {
 router.post('/run', pbAuth, async (req, res) => {
   const sse = startSSE(res);
   const { pbFetch, withRetry } = res.locals.pbClient;
-  const { groups = [] } = req.body || {};
+  const { groups = [], transferFollowers = false } = req.body || {};
 
   const runId    = `${new Date().toISOString().slice(0, 10)}-${Math.random().toString(36).slice(2, 8)}`;
   const auditLog = [];
@@ -464,6 +485,125 @@ router.post('/run', pbAuth, async (req, res) => {
     sse.complete({ runId, merged, deleted, skipped, errors, stopped, auditLog });
   } catch (err) {
     console.error('[notesMerge/run]', err);
+    sse.error(parseApiError(err));
+  } finally {
+    sse.done();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /scan-empty
+// ---------------------------------------------------------------------------
+
+router.post('/scan-empty', pbAuth, async (req, res) => {
+  const sse = startSSE(res);
+  const { pbFetch, withRetry } = res.locals.pbClient;
+  const { createdFrom, createdTo } = req.body || {};
+
+  try {
+    sse.progress('Fetching notes…', 5);
+    const notes = [];
+    let cursor = null;
+    let page   = 0;
+
+    do {
+      const params = new URLSearchParams();
+      if (createdFrom) params.set('createdFrom', createdFrom);
+      if (createdTo)   params.set('createdTo',   createdTo);
+      if (cursor)      params.set('pageCursor',   cursor);
+      const qs  = params.toString();
+      const url = `/v2/notes${qs ? `?${qs}` : ''}`;
+      const r   = await withRetry(() => pbFetch('get', url), `fetch notes page ${page + 1}`);
+      if (r.data?.length) notes.push(...r.data);
+      cursor = extractCursor(r.links?.next);
+      page++;
+      sse.progress(`Fetching notes… (${notes.length} so far)`, Math.min(50, 5 + page * 2));
+    } while (cursor);
+
+    sse.progress(`Fetched ${notes.length} notes. Building caches…`, 55);
+
+    const [userMap, companyMap] = await Promise.all([
+      buildUserCache(pbFetch, withRetry),
+      buildCompanyCache(pbFetch, withRetry),
+    ]);
+
+    sse.progress('Detecting empty notes…', 85);
+
+    const emptyNotes = [];
+    for (const note of notes) {
+      const f   = note.fields || {};
+      const raw = typeof f.content === 'object' ? JSON.stringify(f.content) : (f.content || '');
+      if (raw.trim()) continue; // has content — skip
+
+      const rel = getNoteCustomerRel(note);
+      let customerEmail   = '';
+      let customerCompany = '';
+      if (rel?.target) {
+        const { id, type } = rel.target;
+        if (type === 'user')    customerEmail   = userMap.get(id)    || id;
+        if (type === 'company') customerCompany = companyMap.get(id) || id;
+      }
+
+      emptyNotes.push({
+        id:               note.id          || '',
+        title:            f.name           || '',
+        customer_email:   customerEmail,
+        customer_company: customerCompany,
+        owner_email:      f.owner?.email   || '',
+        state:            getNoteState(note),
+        created_at:       note.createdAt   || '',
+      });
+    }
+
+    sse.progress(`Found ${emptyNotes.length} empty note(s).`, 100);
+    sse.complete({
+      emptyNotes,
+      stats: { totalNotes: notes.length, emptyFound: emptyNotes.length },
+    });
+  } catch (err) {
+    console.error('[notesMerge/scan-empty]', err);
+    sse.error(parseApiError(err));
+  } finally {
+    sse.done();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /delete-empty
+// ---------------------------------------------------------------------------
+
+router.post('/delete-empty', pbAuth, async (req, res) => {
+  const sse = startSSE(res);
+  const { pbFetch, withRetry } = res.locals.pbClient;
+  const { notes = [] } = req.body || {};
+
+  let deleted = 0, errors = 0;
+
+  try {
+    sse.progress(`Deleting ${notes.length} empty note(s)…`, 0);
+
+    for (let i = 0; i < notes.length; i++) {
+      if (sse.isAborted()) break;
+
+      const note = notes[i];
+      const pct  = Math.round((i / notes.length) * 95);
+      sse.progress(`Deleting note ${i + 1} of ${notes.length}…`, pct);
+
+      try {
+        await withRetry(() => pbFetch('delete', `/v2/notes/${note.id}`), `delete note ${note.id}`);
+        sse.log('success', `Deleted: ${note.title ? `"${note.title}"` : `(untitled)`} — ${note.id}`);
+        deleted++;
+      } catch (err) {
+        sse.log('error', `Failed to delete ${note.id}: ${parseApiError(err)}`);
+        errors++;
+      }
+    }
+
+    const stopped = sse.isAborted();
+    sse.progress(stopped ? 'Stopped.' : 'Done.', 100);
+    sse.complete({ deleted, errors, stopped });
+  } catch (err) {
+    console.error('[notesMerge/delete-empty]', err);
     sse.error(parseApiError(err));
   } finally {
     sse.done();

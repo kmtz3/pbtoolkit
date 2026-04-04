@@ -315,7 +315,7 @@ const TOOL_VIEWS = {
     'team-membership-export', 'team-membership-import',
     'members-teams-mgmt-manage',
   ],
-  'notes-merge': ['notes-merge-view'],
+  'notes-merge': ['notes-merge-view', 'notes-merge-empty'],
 };
 
 let _currentTool = null;
@@ -671,7 +671,7 @@ function showView(view, { updateUrl = false } = {}) {
     'teams-crud-export', 'teams-crud-import', 'teams-crud-delete-csv', 'teams-crud-delete-all',
     'members-teams-mgmt-manage',
     'users-export', 'users-import', 'users-delete-csv', 'users-delete-all',
-    'notes-merge-view',
+    'notes-merge-view', 'notes-merge-empty',
   ].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', v !== view);
