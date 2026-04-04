@@ -604,10 +604,10 @@
       ownerHtml += ` <span style="font-size:10px;color:var(--c-muted);">(→ follower)</span>`;
     }
 
-    // Followers row (secondary only) — always shown; populated when "Transfer followers" was
-    // enabled at scan time. Shows "none" when not fetched or note genuinely has no followers.
+    // Followers row (secondary only) — only shown when "Transfer followers" was enabled,
+    // since followers are not transferred otherwise. Rendered at the bottom to match target card order.
     let followersRow = '';
-    if (isSecondary) {
+    if (isSecondary && _transferFollowers) {
       const fl = note.existing_followers || [];
       const followersVal = fl.length > 0
         ? fl.map(e => esc(e)).join(', ') + ` <span style="font-size:10px;color:var(--c-muted);">(→ target)</span>`
@@ -633,12 +633,12 @@
       <div style="${contentStyle}">${esc(note.content_preview || '—')}${note.content_preview?.length >= 100 ? '<span style="color:var(--c-muted)">…</span>' : ''}</div>
       ${nmRow('Customer', esc(customer))}
       ${nmRow('Owner',    ownerHtml)}
-      ${followersRow}
       ${nmRow('Tags',     tagsHtml)}
       ${nmRow('Links',    linksHtml)}
       ${nmRow('Source',   sourceHtml)}
       ${nmRow('State',    esc(note.state))}
       ${nmRow('Created',  esc(note.created_at ? note.created_at.slice(0, 10) : '—'))}
+      ${followersRow}
     `;
   }
 
