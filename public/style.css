@@ -695,6 +695,12 @@ input:focus, select:focus, textarea:focus {
 .home-section {
   margin-bottom: 32px;
 }
+
+.home-attribution-bar {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--c-border);
+}
 .home-section:last-child {
   margin-bottom: 0;
 }
