@@ -1314,6 +1314,15 @@ input:focus, select:focus, textarea:focus {
   .sidebar-collapse-toggle { display: none; }
   /* Ensure collapsed class doesn't apply the narrow grid on mobile */
   .main-content.sidebar-collapsed { grid-template-columns: 1fr; }
+  /* Desktop collapsed rules hide all sidebar children — restore mobile nav elements */
+  .main-content.sidebar-collapsed .mobile-nav-toggle { display: flex; }
+  .main-content.sidebar-collapsed .btn-back-home { display: block; }
+  .main-content.sidebar-collapsed .sidebar-nav.mobile-nav-open > div:not(.hidden) {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px;
+    margin-top: 4px;
+  }
 
   .nav-group-label {
     margin: 8px 0 2px;
@@ -1426,6 +1435,22 @@ input:focus, select:focus, textarea:focus {
     align-items: center;
     gap: 12px;
   }
+}
+
+/* When sidebar is collapsed, drop attribution below the content area (all widths) */
+body.sidebar-collapsed .bottom-left {
+  position: static;
+  z-index: auto;
+  display: block;
+  padding: 0 24px 24px;
+}
+body.sidebar-collapsed .bottom-left .attribution {
+  display: block;
+  margin-bottom: 8px;
+}
+body.sidebar-collapsed .bottom-left .feedback-widget {
+  display: flex;
+  gap: 8px;
 }
 
 /* ── Team Membership diff preview ── */

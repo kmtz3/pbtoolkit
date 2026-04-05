@@ -459,11 +459,13 @@ $('btn-back-home').addEventListener('click', () => navigateTo(null));
   // Restore saved state
   if (localStorage.getItem(STORAGE_KEY) === 'true') {
     mainContent.classList.add('sidebar-collapsed');
+    document.body.classList.add('sidebar-collapsed');
     btn.title = 'Expand sidebar';
   }
 
   btn.addEventListener('click', () => {
     const collapsed = mainContent.classList.toggle('sidebar-collapsed');
+    document.body.classList.toggle('sidebar-collapsed', collapsed);
     localStorage.setItem(STORAGE_KEY, String(collapsed));
     btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
   });
