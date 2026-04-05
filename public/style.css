@@ -1413,15 +1413,6 @@ input:focus, select:focus, textarea:focus {
   text-decoration: underline;
 }
 
-/* Collapsed sidebar: shrink feedback buttons to icon-only */
-body.sidebar-collapsed .feedback-btn .btn-label {
-  display: none;
-}
-body.sidebar-collapsed .feedback-btn {
-  padding: 5px;
-  min-width: 0;
-}
-
 /* footer override must come after the .bottom-left base rule to win source order */
 @media (max-width: 768px) {
   .bottom-left {
