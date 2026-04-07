@@ -1,0 +1,195 @@
+        <!-- ══════════════════════════════════════════
+             DUPLICATE COMPANY CLEANUP
+        ═══════════════════════════════════════════ -->
+        <div id="view-duplicate-cleanup" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Merge Duplicate Companies <span class="badge badge-beta">Beta</span></div>
+              <div class="panel-subtitle">Relink notes and user associations from duplicate companies to their Salesforce canonical record, then delete the duplicates.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Generate the CSV</strong> — run the following SQL query against your Productboard database to produce the input file. Replace <code>{space_id}</code> with your workspace ID.
+                    <pre style="margin:8px 0 4px;padding:10px 12px;background:var(--c-surface,#f8fafc);border:1px solid var(--c-border,#e2e8f0);border-radius:6px;font-size:11px;line-height:1.6;overflow-x:auto;white-space:pre;">SELECT
+  domain,
+  array_agg(uuid || &#39; (&#39; || source_origin || &#39;)&#39;) AS uuid_with_origin
+FROM organizations
+WHERE space_id = {space_id} AND domain != &#39;&#39;
+GROUP BY domain
+HAVING COUNT(*) &gt; 1
+  AND bool_or(source_origin = &#39;salesforce&#39;)</pre>
+                    The query returns one row per domain that has more than one company record and at least one Salesforce-sourced record. Export the result as a CSV before uploading here.
+                  </li>
+                  <li><strong>CSV format</strong> — the file must have two columns: <code>domain</code> and <code>uuid_with_origin</code>. Each row represents one domain; <code>uuid_with_origin</code> lists all company UUIDs for that domain, each tagged with its source in parentheses (e.g. <code>abc123… (salesforce)</code>, <code>def456… (manual_or_csv)</code>).</li>
+                  <li><strong>Exactly one Salesforce UUID per row</strong> — rows with zero or multiple <code>(salesforce)</code> UUIDs are skipped automatically and shown in the preview.</li>
+                  <li><strong>Dry run first</strong> — the default mode logs every action without making any changes. Review the log, then run live to execute.</li>
+                  <li><strong>What happens during a live run</strong>:
+                    <ol>
+                      <li>All notes linked to each duplicate company are found via <code>POST /v2/notes/search</code>.</li>
+                      <li>Each note is relinked to the Salesforce company — if the note's customer is a user, the user's parent company is updated; if the customer is a company, the note's customer relationship is repointed.</li>
+                      <li>The duplicate company is deleted — only after every relink for that company succeeds. If any relink fails the delete is skipped.</li>
+                    </ol>
+                  </li>
+                  <li><strong>No rollback</strong> — deleted companies cannot be restored via the API. Export your companies data first from Companies → Export.</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ════════════════════════════════
+                   IDLE: CSV upload + options
+              ════════════════════════════════ -->
+              <div id="dc-idle">
+
+                <div class="alert alert-warn" style="margin-bottom:16px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span>
+                    <strong>Export your companies data before running.</strong>
+                    Deleted companies cannot be recovered via the API.
+                    Use <a href="/companies" style="color:inherit;text-decoration:underline;">Companies → Export</a> to save a backup first.
+                  </span>
+                </div>
+
+                <!-- CSV input -->
+                <div class="field">
+                  <label for="dc-csv-file">Upload CSV file
+                    <span class="label-hint">— must have <code>domain</code> and <code>uuid_with_origin</code> columns</span>
+                  </label>
+                  <div class="input-row" style="gap:8px;flex-wrap:wrap;align-items:center;">
+                    <input type="file" id="dc-csv-file" accept=".csv,text/csv" class="form-input" style="max-width:320px;" />
+                    <span style="color:var(--c-muted);font-size:13px;">or</span>
+                    <button class="btn btn-ghost btn-sm" id="dc-paste-toggle">Paste CSV text</button>
+                  </div>
+                  <textarea id="dc-csv-paste" class="form-input hidden" rows="6"
+                    placeholder="Paste CSV text here (must include domain and uuid_with_origin headers)"
+                    style="margin-top:8px;font-family:monospace;font-size:12px;"></textarea>
+                </div>
+
+                <!-- Dry-run toggle -->
+                <div class="field" style="margin-top:16px;">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="dc-dry-run" checked>
+                    Dry run
+                    <span class="info-icon" data-tip="When checked, the tool logs every action it would take without making any API calls. Uncheck to execute for real.">i</span>
+                  </label>
+                  <div class="label-hint" style="margin-top:4px;margin-left:20px;">
+                    Dry run is on by default. Review the log, then uncheck and re-run to execute.
+                  </div>
+                </div>
+
+                <div id="dc-input-error" class="alert alert-danger hidden" style="margin-top:12px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="dc-input-error-msg"></span>
+                </div>
+
+                <button class="btn btn-primary" id="dc-preview-btn" style="margin-top:16px;">Preview CSV</button>
+              </div>
+
+              <!-- ════════════════════════════════
+                   PREVIEW: domain table + confirm
+              ════════════════════════════════ -->
+              <div id="dc-preview" class="hidden">
+
+                <div id="dc-preview-summary" class="alert alert-ok" style="margin-bottom:16px;"></div>
+
+                <!-- Domains to process -->
+                <div id="dc-domains-section">
+                  <div style="font-weight:600;font-size:13px;margin-bottom:6px;">Domains to process</div>
+                  <div style="overflow-x:auto;">
+                    <table class="data-table" id="dc-domains-table" style="font-size:12px;">
+                      <thead>
+                        <tr>
+                          <th>Domain</th>
+                          <th>Salesforce company UUID</th>
+                          <th style="text-align:center;">Duplicates</th>
+                        </tr>
+                      </thead>
+                      <tbody id="dc-domains-tbody"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- Skipped rows -->
+                <div id="dc-skipped-section" class="hidden" style="margin-top:20px;">
+                  <div style="font-weight:600;font-size:13px;margin-bottom:6px;">Skipped rows</div>
+                  <div style="overflow-x:auto;">
+                    <table class="data-table" style="font-size:12px;">
+                      <thead>
+                        <tr>
+                          <th>Domain</th>
+                          <th>Reason</th>
+                          <th>Salesforce UUIDs found</th>
+                        </tr>
+                      </thead>
+                      <tbody id="dc-skipped-tbody"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:20px;align-items:center;">
+                  <button class="btn btn-ghost btn-sm" id="dc-back-btn">← Back</button>
+                  <button class="btn btn-primary" id="dc-run-btn">Run</button>
+                  <span id="dc-run-mode-label" style="font-size:12px;color:var(--c-muted);"></span>
+                </div>
+              </div>
+
+              <!-- ════════════════════════════════
+                   RUNNING: progress + log
+              ════════════════════════════════ -->
+              <div id="dc-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar-track">
+                    <div class="progress-bar" id="dc-progress-bar" style="width:0%"></div>
+                  </div>
+                  <div class="progress-label">
+                    <span id="dc-progress-msg">Starting…</span>
+                    <span id="dc-progress-pct" class="progress-pct">0%</span>
+                  </div>
+                </div>
+
+                <div id="dc-run-log" class="log-panel hidden" style="margin-top:16px;">
+                  <div class="log-header">
+                    <span class="log-title">Action log</span>
+                    <span id="dc-log-counts" class="log-counts"></span>
+                  </div>
+                  <div id="dc-log-entries" class="log-entries"></div>
+                </div>
+
+                <button class="btn btn-ghost btn-sm" id="dc-stop-btn" style="margin-top:12px;">Stop</button>
+              </div>
+
+              <!-- ════════════════════════════════
+                   RESULTS: summary
+              ════════════════════════════════ -->
+              <div id="dc-results" class="hidden">
+                <div id="dc-results-summary"></div>
+
+                <div id="dc-results-log" class="log-panel hidden" style="margin-top:16px;">
+                  <div class="log-header">
+                    <span class="log-title">Action log</span>
+                    <span id="dc-results-log-counts" class="log-counts"></span>
+                  </div>
+                  <div id="dc-results-log-entries" class="log-entries"></div>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                  <button class="btn btn-ghost btn-sm" id="dc-download-log-btn">Download action log (JSON)</button>
+                  <button class="btn btn-ghost btn-sm" id="dc-reset-btn">Start over</button>
+                </div>
+              </div>
+
+              <!-- ════════════════════════════════
+                   ERROR
+              ════════════════════════════════ -->
+              <div id="dc-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="dc-error-msg"></span>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="dc-error-reset-btn" style="margin-top:12px;">← Back</button>
+              </div>
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-duplicate-cleanup -->

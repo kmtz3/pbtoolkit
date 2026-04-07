@@ -26,7 +26,8 @@ const membersTeamsMgmtRouter = require('./routes/membersTeamsMgmt');
 const usersRouter          = require('./routes/users');
 const authRouter           = require('./routes/auth');
 const feedbackRouter       = require('./routes/feedback');
-const notesMergeRouter     = require('./routes/notesMerge');
+const notesMergeRouter          = require('./routes/notesMerge');
+const duplicateCleanupRouter    = require('./routes/duplicateCleanup');
 
 const shouldCompress = (req, res) => {
   if (req.headers.accept && req.headers.accept.includes('text/event-stream')) {
@@ -140,6 +141,7 @@ app.use('/api/teams-crud', teamsCrudRouter);
 app.use('/api/members-teams-mgmt', membersTeamsMgmtRouter);
 app.use('/api/feedback', feedbackRouter);
 app.use('/api/notes-merge', notesMergeRouter);
+app.use('/api/duplicate-cleanup', duplicateCleanupRouter);
 
 // Static pages
 app.get('/privacy', (_req, res) => {
