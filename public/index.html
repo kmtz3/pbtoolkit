@@ -221,11 +221,11 @@
             <div class="tool-card-desc">Audit entity descriptions by type and status to flag empty or too-short fields — surface gaps in PM documentation before they reach stakeholders.</div>
             <div class="tool-card-footer"><span class="badge badge-muted">Coming soon</span></div>
           </div>
-          <div class="tool-card tool-card-soon">
+          <div class="tool-card" data-tool="duplicate-cleanup">
             <span class="tool-card-icon">🏢</span>
             <div class="tool-card-name">Merge Duplicate Companies</div>
-            <div class="tool-card-desc">Consolidate duplicate companies by merging attached notes, insights, and user associations into a single selected record.</div>
-            <div class="tool-card-footer"><span class="badge badge-muted">Coming soon</span></div>
+            <div class="tool-card-desc">Consolidate duplicate companies by relinking attached notes and user associations to the canonical Salesforce record, then deleting the duplicates.</div>
+            <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
           </div>
           <div class="tool-card tool-card-soon">
             <span class="tool-card-icon">📅</span>
@@ -340,6 +340,13 @@
           </button>
         </div>
 
+        <!-- Duplicate Company Cleanup nav items -->
+        <div id="sidebar-duplicate-cleanup" class="hidden">
+          <button class="nav-item active" data-view="duplicate-cleanup" id="nav-duplicate-cleanup">
+            <span class="icon">🏢</span> Merge duplicates
+          </button>
+        </div>
+
         <!-- Merge Duplicate Notes nav items -->
         <div id="sidebar-notes-merge" class="hidden">
           <button class="nav-item active" data-view="notes-merge-view" id="nav-notes-merge-view">
@@ -427,6 +434,7 @@
 <script src="teams-crud-app.js"></script>
 <script src="members-teams-mgmt-app.js"></script>
 <script src="notes-merge-app.js"></script>
+<script src="duplicate-cleanup-app.js"></script>
 
 <!-- ── REPORT ISSUE MODAL ── -->
 <div class="ri-overlay hidden" id="ri-overlay">
