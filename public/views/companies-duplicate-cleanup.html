@@ -1,0 +1,224 @@
+        <!-- ══════════════════════════════════════════
+             MERGE DUPLICATE COMPANIES
+        ═══════════════════════════════════════════ -->
+        <div id="view-companies-duplicate-cleanup" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Merge Duplicate Companies <span class="badge badge-beta">Beta</span></div>
+              <div class="panel-subtitle">Find and merge duplicate company records — consolidating notes and user associations into the canonical record before deleting duplicates.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Export first</strong> — download a full companies export before running. This is your only rollback option — use <a href="/companies" style="color:inherit;text-decoration:underline;">Companies → Export</a>.</li>
+                  <li><strong>Scan</strong> — click "Scan for duplicates" to detect duplicate company groups via the API. No changes are made during scan.</li>
+                  <li><strong>Preview</strong> — review the duplicate groups. Each group shows one domain with its canonical Salesforce company (Target) and the duplicates that will be deleted. Select which groups to process, or process all.</li>
+                  <li><strong>Merge</strong> — for each duplicate company:
+                    <ol>
+                      <li>All notes linked to the duplicate are found and relinked to the Salesforce company.</li>
+                      <li>If a note's customer is a user, the user's parent company is updated instead.</li>
+                      <li>The duplicate company is deleted — only after every relink for that company succeeds.</li>
+                    </ol>
+                  </li>
+                  <li><strong>No rollback</strong> — deleted companies cannot be restored via the API. Export first.</li>
+                  <li><strong>Source detection</strong> — the Salesforce canonical company is identified by its <code>sourceOrigin = salesforce</code>. Domains with zero or multiple Salesforce-sourced companies are skipped.</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ════════════════════════════════
+                   IDLE: safety gate + scan button
+              ════════════════════════════════ -->
+              <div id="dc-idle">
+
+                <div class="alert alert-warn" style="margin-bottom:16px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span>
+                    <strong>Before scanning, export your companies data from <a href="/companies" style="color:inherit;text-decoration:underline;">Companies → Export</a>.</strong>
+                    This is your only rollback option — deleted companies cannot be recovered via the API.
+                  </span>
+                </div>
+
+                <div class="field" style="margin-bottom:20px;">
+                  <label class="checkbox-label" id="dc-gate-label">
+                    <input type="checkbox" id="dc-gate-checkbox">
+                    I have exported my companies data and understand this action permanently deletes companies
+                  </label>
+                </div>
+
+                <div id="dc-scan-config" style="opacity:0.4;pointer-events:none;">
+
+                  <!-- Primary origin selector -->
+                  <div class="field" style="margin-bottom:16px;">
+                    <label>Primary record origin
+                      <span class="info-icon" data-tip="The source origin that identifies the canonical (target) company. All other companies sharing the same domain will be treated as duplicates and deleted.">i</span>
+                    </label>
+                    <div id="dc-origins-loading" style="font-size:12px;color:var(--c-muted);margin-top:6px;">Loading origins…</div>
+                    <div id="dc-origins-field" class="hidden" style="margin-top:6px;">
+                      <select id="dc-origin-select" class="form-input" style="width:auto;min-width:220px;"></select>
+                    </div>
+                    <div id="dc-origins-all-manual" class="hidden" style="font-size:12px;color:var(--c-muted);margin-top:6px;">
+                      All companies have no source origin — manual mode selected automatically.
+                    </div>
+                    <div id="dc-origins-error" class="hidden" style="font-size:12px;color:var(--c-danger,#ef4444);margin-top:6px;display:flex;align-items:center;gap:8px;">
+                      <span id="dc-origins-error-msg"></span>
+                      <button class="btn btn-ghost btn-sm" id="dc-origins-retry">Retry</button>
+                    </div>
+                  </div>
+
+                  <!-- Manual mode toggle -->
+                  <div class="field" style="margin-bottom:20px;">
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="dc-manual-checkbox">
+                      I will choose the target company manually
+                      <span class="info-icon" data-tip="Scan all duplicate domains regardless of origin. In the preview you can pick which company to keep as the target for each group.">i</span>
+                    </label>
+                    <div class="label-hint" style="margin-top:4px;margin-left:20px;">
+                      Use when there is no consistent source origin, or when you need full control over which record to keep.
+                    </div>
+                  </div>
+
+                  <button class="btn btn-primary" id="dc-scan-btn">Scan for duplicates</button>
+                </div>
+
+              </div><!-- /dc-idle -->
+
+              <!-- ════════════════════════════════
+                   SCANNING: progress bar
+              ════════════════════════════════ -->
+              <div id="dc-scanning" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="dc-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="dc-progress-msg">Starting scan…</span>
+                  <span id="dc-progress-pct" style="margin-left:auto;"></span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="dc-scan-stop">⏹ Cancel</button>
+              </div><!-- /dc-scanning -->
+
+              <!-- ════════════════════════════════
+                   PREVIEW: group cards
+              ════════════════════════════════ -->
+              <div id="dc-preview" class="hidden">
+
+                <div class="alert alert-info" id="dc-preview-summary" style="margin-bottom:16px;">
+                  <span class="alert-icon">🔍</span>
+                  <span id="dc-preview-summary-text"></span>
+                </div>
+
+                <!-- No duplicates found -->
+                <div id="dc-no-duplicates" class="hidden">
+                  <div class="alert alert-ok" style="margin-bottom:16px;">
+                    <span class="alert-icon">✅</span>
+                    <span>No duplicate groups found. Nothing to merge.</span>
+                  </div>
+                  <button class="btn btn-secondary" id="dc-no-dup-rescan">Re-scan</button>
+                </div>
+
+                <!-- Groups list -->
+                <div id="dc-groups-wrap">
+
+                  <!-- Toolbar -->
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                    <button class="btn btn-ghost btn-sm" id="dc-toggle-all-groups">Collapse all</button>
+                    <button class="btn btn-ghost btn-sm hidden" id="dc-unselect-all">Unselect all</button>
+                    <button class="btn btn-ghost btn-sm hidden" id="dc-invert-selection">Invert selection</button>
+                  </div>
+
+                  <!-- Domain group cards injected here by JS -->
+                  <div id="dc-groups-list" style="margin-bottom:8px;"></div>
+
+                  <!-- Skipped domains (collapsible) -->
+                  <div id="dc-skipped-wrap" class="hidden" style="margin-bottom:12px;">
+                    <details>
+                      <summary style="cursor:pointer;font-size:13px;color:var(--c-muted);user-select:none;">
+                        <span id="dc-skipped-count"></span> domain(s) skipped — <span id="dc-skipped-reason"></span>
+                      </summary>
+                      <div style="overflow-x:auto;margin-top:8px;">
+                        <table class="mapping-table" id="dc-skipped-table">
+                          <thead>
+                            <tr>
+                              <th>Domain</th>
+                              <th>Reason</th>
+                              <th>Salesforce UUIDs found</th>
+                            </tr>
+                          </thead>
+                          <tbody id="dc-skipped-tbody"></tbody>
+                        </table>
+                      </div>
+                    </details>
+                  </div>
+
+                  <!-- Merge action -->
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+                    <button class="btn btn-danger" id="dc-merge-btn">Merge &amp; delete duplicates</button>
+                    <button class="btn btn-secondary" id="dc-rescan-btn">Adjust options</button>
+                  </div>
+
+                </div><!-- /dc-groups-wrap -->
+              </div><!-- /dc-preview -->
+
+              <!-- ════════════════════════════════
+                   RUNNING: live log
+              ════════════════════════════════ -->
+              <div id="dc-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="dc-run-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="dc-run-progress-msg">Starting…</span>
+                  <span id="dc-run-progress-pct" style="margin-left:auto;"></span>
+                </div>
+
+                <div id="dc-run-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Live log</span>
+                    <span id="dc-run-log-counts" class="live-log-counts"></span>
+                  </div>
+                  <div id="dc-run-log-entries" class="live-log-scroll"></div>
+                </div>
+
+                <button class="btn btn-danger btn-sm mt-8" id="dc-run-stop">⏹ Stop</button>
+              </div><!-- /dc-running -->
+
+              <!-- ════════════════════════════════
+                   RESULTS: summary + log
+              ════════════════════════════════ -->
+              <div id="dc-results" class="hidden">
+                <div id="dc-results-summary"></div>
+
+                <div id="dc-results-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Log</span>
+                    <span id="dc-results-log-counts" class="live-log-counts"></span>
+                    <button class="btn btn-ghost btn-sm hidden" id="dc-results-download-log" style="margin-left:auto;">↓ Download log</button>
+                  </div>
+                  <div id="dc-results-log-entries" class="live-log-scroll"></div>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                  <button class="btn btn-secondary" id="dc-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm" id="dc-download-audit">↓ Download audit log (JSON)</button>
+                  <button class="btn btn-ghost btn-sm" id="dc-start-over">Start over</button>
+                </div>
+              </div><!-- /dc-results -->
+
+              <!-- ════════════════════════════════
+                   ERROR
+              ════════════════════════════════ -->
+              <div id="dc-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="dc-error-msg"></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                  <button class="btn btn-secondary hidden" id="dc-error-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm" id="dc-error-retry">Start over</button>
+                </div>
+              </div><!-- /dc-error -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-companies-duplicate-cleanup -->

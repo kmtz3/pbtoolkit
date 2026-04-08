@@ -275,7 +275,7 @@ function createViewState(prefix, states) {
 // ── Routing ─────────────────────────────────────────────────
 const VALID_TOOLS = new Set([
   'entities', 'notes', 'companies',
-  'member-activity', 'teams', 'notes-merge', 'duplicate-cleanup',
+  'member-activity', 'teams', 'notes-merge', 'companies-duplicate-cleanup',
 ]);
 
 const PAGE_META = {
@@ -284,7 +284,7 @@ const PAGE_META = {
   companies:         { title: 'Companies & Users', desc: 'Export and import Productboard companies and users, including custom fields, relationships, and UUID-based patching.' },
   'member-activity': { title: 'Member Activity', desc: 'Export Productboard member activity data for license auditing and enablement planning.' },
   teams:                { title: 'Teams & Members', desc: 'Manage Productboard teams — edit names, handles, descriptions, and members. Import and export via CSV.' },
-  'duplicate-cleanup':  { title: 'Merge Duplicate Companies', desc: 'Relink notes and user associations from duplicate Productboard companies to their Salesforce canonical record, then delete the duplicates.' },
+  'companies-duplicate-cleanup':  { title: 'Merge Duplicate Companies', desc: 'Relink notes and user associations from duplicate Productboard companies to their Salesforce canonical record, then delete the duplicates.' },
 };
 
 const DEFAULT_TITLE = 'PBToolkit \u2014 Productboard Importer, Exporter & Migration Tool';
@@ -304,7 +304,7 @@ const DEFAULT_VIEWS = {
   'member-activity': 'member-activity-export',
   teams:             'members-teams-mgmt-manage',
   'notes-merge':        'notes-merge-view',
-  'duplicate-cleanup':  'duplicate-cleanup',
+  'companies-duplicate-cleanup':  'companies-duplicate-cleanup',
 };
 
 const TOOL_VIEWS = {
@@ -318,7 +318,7 @@ const TOOL_VIEWS = {
     'members-teams-mgmt-manage',
   ],
   'notes-merge':       ['notes-merge-view', 'notes-merge-empty'],
-  'duplicate-cleanup': ['duplicate-cleanup'],
+  'companies-duplicate-cleanup': ['companies-duplicate-cleanup'],
 };
 
 let _currentTool = null;
@@ -515,7 +515,7 @@ document.querySelectorAll('.tool-card:not(.tool-card-soon)').forEach((card) => {
 });
 
 async function loadTool(toolName) {
-  const names = { companies: 'Companies & Users', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', teams: 'Teams', 'notes-merge': 'Merge Duplicate Notes', 'duplicate-cleanup': 'Merge Duplicate Companies' };
+  const names = { companies: 'Companies & Users', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', teams: 'Teams', 'notes-merge': 'Merge Duplicate Notes', 'companies-duplicate-cleanup': 'Merge Duplicate Companies' };
   setText('topbar-tool-name', names[toolName] || toolName);
   showScreen('tool');
   _currentTool = toolName;
@@ -527,7 +527,7 @@ async function loadTool(toolName) {
   $('sidebar-member-activity').classList.toggle('hidden', toolName !== 'member-activity');
   $('sidebar-teams').classList.toggle('hidden', toolName !== 'teams');
   $('sidebar-notes-merge').classList.toggle('hidden', toolName !== 'notes-merge');
-  $('sidebar-duplicate-cleanup').classList.toggle('hidden', toolName !== 'duplicate-cleanup');
+  $('sidebar-companies-duplicate-cleanup').classList.toggle('hidden', toolName !== 'companies-duplicate-cleanup');
 
   try {
     if (toolName === 'companies') {
@@ -557,7 +557,7 @@ async function loadTool(toolName) {
   if (toolName === 'entities')         window.initEntitiesModule?.();
   if (toolName === 'member-activity')  { if (typeof initMemberActivityModule === 'function') initMemberActivityModule(); }
   if (toolName === 'notes-merge')        window.initNotesMergeModule?.();
-  if (toolName === 'duplicate-cleanup')  window.initDuplicateCleanupModule?.();
+  if (toolName === 'companies-duplicate-cleanup')  window.initCompaniesDuplicateCleanupModule?.();
   if (toolName === 'teams') {
     window.initTeamsCrudModule?.();
     window.initTeamMembershipModule?.();
@@ -697,7 +697,7 @@ function showView(view, { updateUrl = false } = {}) {
     'members-teams-mgmt-manage',
     'users-export', 'users-import', 'users-delete-csv', 'users-delete-all',
     'notes-merge-view', 'notes-merge-empty',
-    'duplicate-cleanup',
+    'companies-duplicate-cleanup',
   ].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', v !== view);
