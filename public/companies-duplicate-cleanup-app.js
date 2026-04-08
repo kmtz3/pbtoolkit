@@ -142,6 +142,8 @@
     const checkedOrigin = document.querySelector('input[name="dc-origin"]:checked')?.value;
     const manualMode    = checkedOrigin === '__manual__';
     const primaryOrigin = manualMode ? null : (checkedOrigin || 'salesforce');
+    const matchCriteria = document.querySelector('input[name="dc-match"]:checked')?.value ?? 'domain';
+    const fuzzyMatch    = dc$('dc-fuzzy-checkbox')?.checked ?? false;
 
     _fromRun = false;
     _selectedDomains = new Set();
@@ -151,7 +153,7 @@
 
     _scanCtrl = subscribeSSE(
       '/api/companies-duplicate-cleanup/scan',
-      { primaryOrigin, manualMode },
+      { primaryOrigin, manualMode, matchCriteria, fuzzyMatch },
       {
         onProgress({ message, percent }) { setProgress('dc', message, percent ?? 0); },
         onLog() {},
@@ -225,7 +227,7 @@
             : `${(s.sfUuids || []).length} "${o}" companies found (expected 1)`;
           const tr = document.createElement('tr');
           tr.innerHTML = `
-            <td>${esc(s.domain)}</td>
+            <td>${esc(s.matchName ? `${s.domain} · ${s.matchName}` : s.domain)}</td>
             <td>${esc(reasonLabel)}</td>
             <td style="font-family:monospace;font-size:11px;">${esc((s.sfUuids || []).join(', ') || '—')}</td>
           `;
@@ -300,7 +302,7 @@
 
     const domainLabel = document.createElement('span');
     domainLabel.className = 'nm-group-title';
-    domainLabel.textContent = dr.domain;
+    domainLabel.textContent = dr.matchName ? `${dr.domain} · ${dr.matchName}` : dr.domain;
 
     const spacer = document.createElement('span');
     spacer.className = 'nm-group-spacer';
@@ -680,6 +682,19 @@
       _originsLoaded  = false;
       _originsLoading = false;
       requireToken(() => loadOrigins(true));
+    });
+
+    // Match criteria — enable fuzzy only when Domain + Name is selected
+    document.querySelectorAll('input[name="dc-match"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        const enabled = document.querySelector('input[name="dc-match"]:checked')?.value === 'domain+name';
+        const label   = dc$('dc-fuzzy-label');
+        if (label) {
+          label.style.opacity       = enabled ? '1'    : '0.4';
+          label.style.pointerEvents = enabled ? 'auto' : 'none';
+        }
+        if (!enabled) { const cb = dc$('dc-fuzzy-checkbox'); if (cb) cb.checked = false; }
+      });
     });
 
     // Scan button

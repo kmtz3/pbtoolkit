@@ -10,17 +10,19 @@
                 <summary>How to use</summary>
                 <ul>
                   <li><strong>Export first</strong> — download a full companies export before running. This is your only rollback option — use <a href="/companies" style="color:inherit;text-decoration:underline;">Companies → Export</a>.</li>
+                  <li><strong>Select source</strong> — choose which source origin identifies the canonical (target) company, or pick <em>Let me choose per group</em> to manually select the target for each duplicate group.</li>
                   <li><strong>Scan</strong> — click "Scan for duplicates" to detect duplicate company groups via the API. No changes are made during scan.</li>
-                  <li><strong>Preview</strong> — review the duplicate groups. Each group shows one domain with its canonical Salesforce company (Target) and the duplicates that will be deleted. Select which groups to process, or process all.</li>
+                  <li><strong>Preview</strong> — review the duplicate groups. Each group shows the target company and the duplicates that will be deleted. In manual mode, click any row to compare companies side-by-side and change the target. Select individual groups or process all.</li>
                   <li><strong>Merge</strong> — for each duplicate company:
-                    <ol>
-                      <li>All notes linked to the duplicate are found and relinked to the Salesforce company.</li>
-                      <li>If a note's customer is a user, the user's parent company is updated instead.</li>
+                    <ol style="margin-top:6px;padding-left:20px;">
+                      <li>All notes linked to the duplicate are found and relinked to the target company.</li>
+                      <li>If a note's customer is a user, the user's parent company is updated to the target instead.</li>
+                      <li>Any remaining users directly parented to the duplicate (with no notes) are also relinked to the target.</li>
                       <li>The duplicate company is deleted — only after every relink for that company succeeds.</li>
                     </ol>
                   </li>
                   <li><strong>No rollback</strong> — deleted companies cannot be restored via the API. Export first.</li>
-                  <li><strong>Source detection</strong> — the Salesforce canonical company is identified by its <code>sourceOrigin = salesforce</code>. Domains with zero or multiple Salesforce-sourced companies are skipped.</li>
+                  <li><strong>Source detection</strong> — in automatic mode, the target company is identified by its source origin. Domains with zero or multiple matches for the selected origin are skipped. In manual mode, all domains with 2+ companies are included.</li>
                 </ul>
               </details>
             </div>
@@ -66,6 +68,30 @@
                     <div id="dc-origins-error" class="hidden" style="font-size:12px;color:var(--c-danger,#ef4444);margin-top:6px;display:flex;align-items:center;gap:8px;">
                       <span id="dc-origins-error-msg"></span>
                       <button class="btn btn-ghost btn-sm" id="dc-origins-retry">Retry</button>
+                    </div>
+                  </div>
+
+                  <!-- Match criteria -->
+                  <div class="field" style="margin-bottom:20px;">
+                    <label>Match criteria</label>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+                      <label class="checkbox-label">
+                        <input type="radio" name="dc-match" value="domain" checked>
+                        Domain only
+                        <span class="info-icon" data-tip="Companies are duplicates if they share the same domain, regardless of their name.">i</span>
+                      </label>
+                      <div style="display:flex;flex-direction:column;gap:6px;">
+                        <label class="checkbox-label">
+                          <input type="radio" name="dc-match" value="domain+name">
+                          Domain + Name
+                          <span class="info-icon" data-tip="Stricter — companies are duplicates only if they share both the same domain and the same name. Useful when different brands or products share a domain.">i</span>
+                        </label>
+                        <label class="checkbox-label" id="dc-fuzzy-label" style="margin-left:20px;opacity:0.4;pointer-events:none;">
+                          <input type="checkbox" id="dc-fuzzy-checkbox">
+                          Fuzzy matching
+                          <span class="info-icon" data-tip="Case-insensitive, punctuation-ignored comparison. 'Acme Inc' and 'ACME, INC.' are treated as the same name. 'Acme Inc' and 'Acme' are not.">i</span>
+                        </label>
+                      </div>
                     </div>
                   </div>
 

@@ -109,15 +109,24 @@ router.get('/origins', pbAuth, async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /scan  (SSE) — discover duplicates via API, no CSV upload required
 //
-// Body: { primaryOrigin?: string, manualMode?: boolean }
+// Body: { primaryOrigin?, manualMode?, matchCriteria?, fuzzyMatch? }
+//
+// matchCriteria:
+//   'domain'      (default) — companies are duplicates if they share the same domain
+//   'domain+name' — companies are duplicates only if they share both domain AND name
+//
+// fuzzyMatch (only meaningful with 'domain+name'):
+//   false (default) — exact, case-sensitive name comparison after trim
+//   true  — lowercase + strip non-alphanumeric (except spaces) + collapse spaces
+//           e.g. 'Acme Inc' = 'ACME, INC.' but 'Acme Inc' ≠ 'Acme'
 //
 // Origin mode (default):
-//   Group companies by domain. For each group with 2+ companies, exactly one
-//   company matching primaryOrigin (default 'salesforce') becomes the target;
-//   all others become duplicates. Groups with 0 or 2+ matching the origin are skipped.
+//   For each group with 2+ companies, exactly one must match primaryOrigin
+//   (default 'salesforce') to become the target; all others become duplicates.
+//   Groups with 0 or 2+ matching the origin are skipped.
 //
 // Manual mode:
-//   All domains with 2+ companies are returned. Default target = first non-null
+//   All groups with 2+ companies are returned. Default target = first non-null
 //   origin company (preferring 'salesforce'); if all are null, first in list.
 //   The frontend allows the user to swap the target.
 //
@@ -127,10 +136,25 @@ router.get('/origins', pbAuth, async (req, res) => {
 //      ids only and back-fill sourceOrigin from v1 (covers the legacy metadata migration gap)
 // ---------------------------------------------------------------------------
 
+// Normalize a company name for duplicate matching.
+// Non-fuzzy: exact trimmed string (case-sensitive).
+// Fuzzy: lowercase, strip punctuation/special chars, collapse whitespace.
+function normalizeNameForMatch(str, fuzzy) {
+  if (!str) return '';
+  const s = str.trim();
+  if (!fuzzy) return s;
+  return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 router.post('/scan', pbAuth, async (req, res) => {
   const sse = startSSE(res);
   const { pbFetch, withRetry } = res.locals.pbClient;
-  const { primaryOrigin = 'salesforce', manualMode = false } = req.body || {};
+  const {
+    primaryOrigin = 'salesforce',
+    manualMode    = false,
+    matchCriteria = 'domain',
+    fuzzyMatch    = false,
+  } = req.body || {};
 
   try {
     // ── Step 1: Fetch all v2 companies (domain + id + source) ────────────
@@ -213,50 +237,77 @@ router.post('/scan', pbAuth, async (req, res) => {
     const domainRecords = [];
     const skippedRows   = [];
 
-    for (const [domain, companies] of Object.entries(byDomain)) {
-      if (companies.length < 2) continue;
-
-      if (manualMode) {
-        // Manual mode: all duplicate domains included; default target = best available
-        const sorted = [...companies].sort((a, b) => {
-          // Non-null origin before null
-          if (a.sourceOrigin && !b.sourceOrigin) return -1;
-          if (!a.sourceOrigin && b.sourceOrigin) return 1;
-          // Prefer salesforce among non-null
-          if (a.sourceOrigin === 'salesforce') return -1;
-          if (b.sourceOrigin === 'salesforce') return 1;
-          return 0;
-        });
-        const target = sorted[0];
-        domainRecords.push({
-          domain,
-          sfCompanyId:     target.id,
-          sfCompanyName:   target.name || target.id,
-          sfCompanyOrigin: target.sourceOrigin,
-          duplicates:      sorted.slice(1).map(c => ({ id: c.id, name: c.name || c.id, sourceOrigin: c.sourceOrigin })),
-          isManualMode:    true,
-        });
+    for (const [domain, domainCompanies] of Object.entries(byDomain)) {
+      // Determine groups to process:
+      //   domain-only  → one group containing all companies for this domain
+      //   domain+name  → sub-groups by normalized name; only groups with 2+ companies
+      let groups; // [{ companies: [...], matchName: string|null }]
+      if (matchCriteria === 'domain+name') {
+        const byName = {};
+        for (const c of domainCompanies) {
+          const key = normalizeNameForMatch(c.name || '', fuzzyMatch);
+          if (!byName[key]) byName[key] = [];
+          byName[key].push(c);
+        }
+        groups = Object.values(byName)
+          .filter(grp => grp.length >= 2)
+          .map(grp => ({ companies: grp, matchName: grp[0].name || null }));
       } else {
-        // Origin mode: exactly 1 company must match primaryOrigin
-        const primary = companies.filter(c => c.sourceOrigin === primaryOrigin);
-        const others  = companies.filter(c => c.sourceOrigin !== primaryOrigin);
+        if (domainCompanies.length < 2) continue;
+        groups = [{ companies: domainCompanies, matchName: null }];
+      }
 
-        if (primary.length === 1) {
-          domainRecords.push({
-            domain,
-            sfCompanyId:     primary[0].id,
-            sfCompanyName:   primary[0].name || primary[0].id,
-            sfCompanyOrigin: primary[0].sourceOrigin,
-            duplicates:      others.map(c => ({ id: c.id, name: c.name || c.id, sourceOrigin: c.sourceOrigin })),
-            isManualMode:    false,
+      for (const { companies, matchName } of groups) {
+        if (companies.length < 2) continue;
+
+        if (manualMode) {
+          // Manual mode: all duplicate groups included; default target = best available
+          const sorted = [...companies].sort((a, b) => {
+            if (a.sourceOrigin && !b.sourceOrigin) return -1;
+            if (!a.sourceOrigin && b.sourceOrigin) return 1;
+            if (a.sourceOrigin === 'salesforce') return -1;
+            if (b.sourceOrigin === 'salesforce') return 1;
+            return 0;
           });
-        } else if (primary.length === 0) {
-          const raw = companies.map(c => `${c.id} (${c.sourceOrigin || 'unknown'})`).join(', ');
-          skippedRows.push({ domain, uuidWithOrigin: raw, reason: 'no_primary_origin', primaryOrigin });
+          const target = sorted[0];
+          const rec = {
+            domain,
+            sfCompanyId:     target.id,
+            sfCompanyName:   target.name || target.id,
+            sfCompanyOrigin: target.sourceOrigin,
+            duplicates:      sorted.slice(1).map(c => ({ id: c.id, name: c.name || c.id, sourceOrigin: c.sourceOrigin })),
+            isManualMode:    true,
+          };
+          if (matchName) rec.matchName = matchName;
+          domainRecords.push(rec);
         } else {
-          const primaryIds = primary.map(c => c.id);
-          const raw        = companies.map(c => `${c.id} (${c.sourceOrigin || 'unknown'})`).join(', ');
-          skippedRows.push({ domain, uuidWithOrigin: raw, reason: 'multiple_primary_origin', primaryOrigin, sfUuids: primaryIds });
+          // Origin mode: exactly 1 company must match primaryOrigin
+          const primary = companies.filter(c => c.sourceOrigin === primaryOrigin);
+          const others  = companies.filter(c => c.sourceOrigin !== primaryOrigin);
+
+          if (primary.length === 1) {
+            const rec = {
+              domain,
+              sfCompanyId:     primary[0].id,
+              sfCompanyName:   primary[0].name || primary[0].id,
+              sfCompanyOrigin: primary[0].sourceOrigin,
+              duplicates:      others.map(c => ({ id: c.id, name: c.name || c.id, sourceOrigin: c.sourceOrigin })),
+              isManualMode:    false,
+            };
+            if (matchName) rec.matchName = matchName;
+            domainRecords.push(rec);
+          } else if (primary.length === 0) {
+            const raw = companies.map(c => `${c.id} (${c.sourceOrigin || 'unknown'})`).join(', ');
+            const row = { domain, uuidWithOrigin: raw, reason: 'no_primary_origin', primaryOrigin };
+            if (matchName) row.matchName = matchName;
+            skippedRows.push(row);
+          } else {
+            const primaryIds = primary.map(c => c.id);
+            const raw        = companies.map(c => `${c.id} (${c.sourceOrigin || 'unknown'})`).join(', ');
+            const row        = { domain, uuidWithOrigin: raw, reason: 'multiple_primary_origin', primaryOrigin, sfUuids: primaryIds };
+            if (matchName) row.matchName = matchName;
+            skippedRows.push(row);
+          }
         }
       }
     }
