@@ -18,6 +18,9 @@
   let _originsLoaded   = false;
   let _originsLoading  = false;
   let _inited          = false;
+  let _compareDr       = null;  // domain record open in compare modal
+  let _compareDrIdx    = 0;     // index in _previewData.domainRecords
+  let _compareDupIdx   = 0;     // index into current dr's duplicates (non-target companies)
 
   // ── DOM helpers ───────────────────────────────────────────
   function dc$(id) { return document.getElementById(id); }
@@ -41,6 +44,9 @@
     _auditLog        = null;
     _fromRun         = false;
     if (_logAppender) _logAppender.reset();
+    dcHide('dc-results-download-log');
+    dcHide('dc-error-download-log');
+    closeCompareModal();
     dcGo('idle');
     const gate = dc$('dc-gate-checkbox');
     if (gate) gate.checked = false;
@@ -57,17 +63,21 @@
   }
 
   // ── Origins: fetch distinct source origins on load ────────
-  function loadOrigins() {
+  function loadOrigins(refresh = false) {
     if (_originsLoading) return;
-    if (!token) return;  // not authenticated yet — pb:connected will retry
+    if (!token) {
+      dcHide('dc-origins-loading');
+      showOriginsError('Connect to Productboard first to load sources.');
+      return;
+    }
 
     _originsLoading = true;
     dcShow('dc-origins-loading');
     dcHide('dc-origins-field');
-    dcHide('dc-origins-all-manual');
     dcHide('dc-origins-error');
 
-    fetch('/api/companies-duplicate-cleanup/origins', { headers: buildHeaders() })
+    const url = '/api/companies-duplicate-cleanup/origins' + (refresh ? '?refresh=true' : '');
+    fetch(url, { headers: buildHeaders() })
       .then(res => res.json().then(data => ({ ok: res.ok, status: res.status, data })))
       .then(({ ok, status, data }) => {
         _originsLoading = false;
@@ -81,28 +91,35 @@
         const origins = data.origins || [];
         _originsLoaded = true;
 
-        if (origins.length === 0) {
-          // All companies have null origin — force manual mode
-          dcShow('dc-origins-all-manual');
-          const manualCb = dc$('dc-manual-checkbox');
-          if (manualCb) { manualCb.checked = true; applyManualMode(true); }
-          return;
-        }
+        const list = dc$('dc-origin-list');
+        if (list) {
+          list.innerHTML = '';
 
-        // Populate dropdown
-        const select = dc$('dc-origin-select');
-        if (select) {
-          select.innerHTML = '';
-          for (const o of origins) {
-            const opt = document.createElement('option');
-            opt.value = o;
-            opt.textContent = o;
-            if (o === 'salesforce') opt.selected = true;
-            select.appendChild(opt);
+          const displayOrigins = origins.filter(o => o !== 'manual');
+          for (const o of displayOrigins) {
+            const lbl = document.createElement('label');
+            lbl.className = 'checkbox-label';
+            const radio = document.createElement('input');
+            radio.type  = 'radio';
+            radio.name  = 'dc-origin';
+            radio.value = o;
+            if (o === 'salesforce' || (displayOrigins[0] === o && !displayOrigins.includes('salesforce'))) radio.checked = true;
+            lbl.appendChild(radio);
+            lbl.appendChild(document.createTextNode('\u00a0' + o.charAt(0).toUpperCase() + o.slice(1)));
+            list.appendChild(lbl);
           }
-          if (!origins.includes('salesforce')) select.selectedIndex = 0;
-          // Ensure manual checkbox is disabled since a value is pre-selected
-          applyOriginSelected(true);
+
+          // Manual option (always last)
+          const manualLbl = document.createElement('label');
+          manualLbl.className = 'checkbox-label';
+          const manualRadio = document.createElement('input');
+          manualRadio.type  = 'radio';
+          manualRadio.name  = 'dc-origin';
+          manualRadio.value = '__manual__';
+          if (displayOrigins.length === 0) manualRadio.checked = true;
+          manualLbl.appendChild(manualRadio);
+          manualLbl.appendChild(document.createTextNode('\u00a0Let me choose per group'));
+          list.appendChild(manualLbl);
         }
         dcShow('dc-origins-field');
       })
@@ -118,34 +135,13 @@
     dcShow('dc-origins-error');
   }
 
-  // ── Mutual exclusion: dropdown ↔ manual checkbox ──────────
-  function applyManualMode(isManual) {
-    const select   = dc$('dc-origin-select');
-    const manualCb = dc$('dc-manual-checkbox');
-    if (isManual) {
-      if (select)   select.disabled = true;
-      if (manualCb) manualCb.disabled = false;
-    } else {
-      if (select)   select.disabled = false;
-      if (manualCb) { manualCb.checked = false; manualCb.disabled = true; }
-    }
-  }
-
-  function applyOriginSelected(hasValue) {
-    const manualCb = dc$('dc-manual-checkbox');
-    if (hasValue) {
-      if (manualCb) { manualCb.checked = false; manualCb.disabled = true; }
-    } else {
-      if (manualCb) manualCb.disabled = false;
-    }
-  }
-
   // ── Scan: discover duplicates via API ─────────────────────
   function runScan() {
     if (!token) { requireToken(runScan); return; }
 
-    const manualMode    = dc$('dc-manual-checkbox')?.checked === true;
-    const primaryOrigin = manualMode ? null : (dc$('dc-origin-select')?.value || 'salesforce');
+    const checkedOrigin = document.querySelector('input[name="dc-origin"]:checked')?.value;
+    const manualMode    = checkedOrigin === '__manual__';
+    const primaryOrigin = manualMode ? null : (checkedOrigin || 'salesforce');
 
     _fromRun = false;
     _selectedDomains = new Set();
@@ -245,8 +241,21 @@
 
   // ── Build a collapsible domain group card ─────────────────
   function buildDomainBlock(dr, di) {
-    const duplicates = dr.duplicates || [];
-    const total      = 1 + duplicates.length;
+    // Seed stable order once — preserved across target swaps (mirrors notes-merge pattern)
+    if (!dr.allCompanies) {
+      dr.allCompanies = [
+        {
+          id:          dr.sfCompanyId,
+          name:        dr.sfCompanyName,
+          sourceOrigin: dr.sfCompanyOrigin || null,
+          notesCount:  dr.sfNotesCount ?? null,
+          usersCount:  dr.sfUsersCount ?? null,
+        },
+        ...(dr.duplicates || []),
+      ];
+    }
+    const duplicates = dr.allCompanies.filter(c => c.id !== dr.sfCompanyId);
+    const total      = dr.allCompanies.length;
     const isManual   = dr.isManualMode === true;
 
     const details = document.createElement('details');
@@ -281,12 +290,12 @@
 
     const totalNotes = duplicates.reduce((n, d) => n + (d.notesCount ?? 0), 0);
     const totalUsers = duplicates.reduce((n, d) => n + (d.usersCount ?? 0), 0);
-    const hasCounts  = duplicates.some(d => d.notesCount != null);
+    const hasCounts  = dr.allCompanies.some(c => c.notesCount != null);
 
     const countLabel = document.createElement('span');
     countLabel.className = 'nm-group-count';
     let countText = `${total} compan${total !== 1 ? 'ies' : 'y'} · ${duplicates.length} to delete`;
-    if (hasCounts) countText += ` · ${totalNotes} note${totalNotes !== 1 ? 's' : ''} · ${totalUsers} user${totalUsers !== 1 ? 's' : ''} to move`;
+    if (hasCounts) countText += ` (${totalNotes} note${totalNotes !== 1 ? 's' : ''} + ${totalUsers} user${totalUsers !== 1 ? 's' : ''} to move)`;
     countLabel.textContent = countText;
 
     const domainLabel = document.createElement('span');
@@ -325,34 +334,25 @@
     `;
     const tbody = document.createElement('tbody');
 
-    // Target row
-    const targetTr = document.createElement('tr');
-    targetTr.style.height = '38px';
-    targetTr.innerHTML = `
-      <td><span class="badge badge-ok" style="font-size:10px;">Target</span></td>
-      <td style="font-weight:600;">${esc(dr.sfCompanyName || dr.sfCompanyId)}</td>
-      <td style="font-family:monospace;font-size:11px;color:var(--c-muted);">${esc(dr.sfCompanyId.slice(0, 18))}…</td>
-      <td style="font-size:12px;">${esc(dr.sfCompanyOrigin || '—')}</td>
-      ${hasCounts ? '<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td><td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>' : ''}
-      ${isManual  ? '<td></td>' : ''}
-    `;
-    tbody.appendChild(targetTr);
-
-    // Duplicate rows
-    for (const dup of duplicates) {
+    // All companies in stable original order — badge reflects current target
+    for (const c of dr.allCompanies) {
+      const isTarget = c.id === dr.sfCompanyId;
       const tr = document.createElement('tr');
       tr.style.height = '38px';
-      const noteCell = dup.notesCount != null
-        ? `<td style="text-align:right;font-size:12px;">${dup.notesCount}</td>`
+      const badge    = isTarget
+        ? `<span class="badge badge-ok" style="font-size:10px;">Target</span>`
+        : `<span class="badge badge-danger" style="font-size:10px;">Delete</span>`;
+      const noteCell = c.notesCount != null
+        ? `<td style="text-align:right;font-size:12px;">${c.notesCount}</td>`
         : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
-      const userCell = dup.usersCount != null
-        ? `<td style="text-align:right;font-size:12px;">${dup.usersCount}</td>`
+      const userCell = c.usersCount != null
+        ? `<td style="text-align:right;font-size:12px;">${c.usersCount}</td>`
         : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
       tr.innerHTML = `
-        <td><span class="badge badge-danger" style="font-size:10px;">Delete</span></td>
-        <td>${esc(dup.name || dup.id)}</td>
-        <td style="font-family:monospace;font-size:11px;color:var(--c-muted);">${esc(dup.id.slice(0, 18))}…</td>
-        <td style="font-size:12px;">${esc(dup.sourceOrigin || '—')}</td>
+        <td>${badge}</td>
+        <td>${esc(c.name || c.id)}</td>
+        <td style="font-family:monospace;font-size:11px;color:var(--c-muted);">${esc(c.id.slice(0, 18))}…</td>
+        <td style="font-size:12px;">${esc(c.sourceOrigin || '—')}</td>
         ${hasCounts ? noteCell + userCell : ''}
         ${isManual  ? '<td></td>' : ''}
       `;
@@ -361,10 +361,28 @@
         const setTargetBtn = document.createElement('button');
         setTargetBtn.className = 'btn btn-ghost btn-sm';
         setTargetBtn.textContent = 'Set as target';
-        setTargetBtn.title = 'Set this company as the merge target — the others will be deleted';
         setTargetBtn.style.cssText = 'font-size:11px;white-space:nowrap;';
-        setTargetBtn.addEventListener('click', (e) => { e.stopPropagation(); swapTarget(dr, dup); });
+        if (isTarget) {
+          setTargetBtn.style.visibility = 'hidden';
+        } else {
+          setTargetBtn.title = 'Set this company as the merge target — the others will be deleted';
+          setTargetBtn.addEventListener('click', (e) => { e.stopPropagation(); swapTarget(dr, c); });
+        }
         actionCell.appendChild(setTargetBtn);
+      }
+      if (isManual) {
+        tr.style.cursor = 'pointer';
+        tr.title = 'Click to compare';
+        tr.addEventListener('click', (e) => {
+          if (e.target.closest('button')) return;
+          if (isTarget) {
+            openCompareModal(dr, _compareDr === dr ? _compareDupIdx : 0);
+          } else {
+            const dups = dcDuplicates(dr);
+            const idx  = dups.findIndex(d => d.id === c.id);
+            if (idx !== -1) openCompareModal(dr, idx);
+          }
+        });
       }
       tbody.appendChild(tr);
     }
@@ -379,13 +397,19 @@
 
   // ── Target swap (manual mode only) ────────────────────────
   function swapTarget(dr, newTarget) {
-    const oldTarget = { id: dr.sfCompanyId, name: dr.sfCompanyName, sourceOrigin: dr.sfCompanyOrigin || null };
-    dr.duplicates = dr.duplicates.filter(d => d.id !== newTarget.id);
-    dr.duplicates.unshift(oldTarget);
+    const oldTargetId  = dr.sfCompanyId;
     dr.sfCompanyId     = newTarget.id;
     dr.sfCompanyName   = newTarget.name;
     dr.sfCompanyOrigin = newTarget.sourceOrigin;
+    dr.duplicates      = dr.allCompanies.filter(c => c.id !== newTarget.id);
     rerenderDomainBlock(dr);
+    // Keep compare modal open and pointing at the old target (now a duplicate)
+    if (_compareDr === dr) {
+      const newDups = dcDuplicates(dr);
+      const oldIdx  = newDups.findIndex(c => c.id === oldTargetId);
+      _compareDupIdx = oldIdx !== -1 ? oldIdx : 0;
+      renderComparePanel();
+    }
   }
 
   function rerenderDomainBlock(dr) {
@@ -395,6 +419,130 @@
     const newEl   = buildDomainBlock(dr, entry.di);
     newEl.open = wasOpen;
     entry.el.replaceWith(newEl);
+  }
+
+  // ── Compare modal (manual mode) ───────────────────────────
+
+  function dcDuplicates(dr) {
+    return dr.allCompanies
+      ? dr.allCompanies.filter(c => c.id !== dr.sfCompanyId)
+      : (dr.duplicates || []);
+  }
+
+  function openCompareModal(dr, dupIdx) {
+    const records  = _previewData?.domainRecords || [];
+    _compareDr     = dr;
+    _compareDrIdx  = records.indexOf(dr);
+    if (_compareDrIdx === -1) _compareDrIdx = 0;
+    _compareDupIdx = dupIdx;
+    renderComparePanel();
+    dcShow('dc-compare-overlay');
+  }
+
+  function closeCompareModal() {
+    dcHide('dc-compare-overlay');
+    _compareDr = null;
+  }
+
+  function renderComparePanel() {
+    if (!_compareDr) return;
+    const dr      = _compareDr;
+    const dups    = dcDuplicates(dr);
+    const records = _previewData?.domainRecords || [];
+    const target  = { id: dr.sfCompanyId, name: dr.sfCompanyName, sourceOrigin: dr.sfCompanyOrigin };
+    const dup     = dups[_compareDupIdx];
+    if (!dup) return;
+
+    dcText('dc-cmp-group-nav',   `${_compareDrIdx + 1} / ${records.length}`);
+    dcText('dc-cmp-group-label', dr.domain);
+    dcText('dc-cmp-dup-nav',     `${_compareDupIdx + 1} / ${dups.length}`);
+
+    const modalCb = dc$('dc-cmp-group-select');
+    if (modalCb) modalCb.checked = _selectedDomains.has(dr);
+
+    const prevGroupBtn = dc$('dc-cmp-prev-group');
+    const nextGroupBtn = dc$('dc-cmp-next-group');
+    const prevDupBtn   = dc$('dc-cmp-prev-dup');
+    const nextDupBtn   = dc$('dc-cmp-next-dup');
+    if (prevGroupBtn) prevGroupBtn.disabled = _compareDrIdx === 0;
+    if (nextGroupBtn) nextGroupBtn.disabled = _compareDrIdx === records.length - 1;
+    if (prevDupBtn)   prevDupBtn.disabled   = _compareDupIdx === 0;
+    if (nextDupBtn)   nextDupBtn.disabled   = _compareDupIdx === dups.length - 1;
+
+    // hasCounts: true if counts were ever fetched for this group (check allCompanies, not just current dups)
+    const hasCounts   = dr.allCompanies.some(c => c.notesCount != null);
+    const knownDups   = dups.filter(d => d.notesCount != null);
+    const totalNotes  = knownDups.reduce((n, d) => n + d.notesCount, 0);
+    const totalUsers  = knownDups.reduce((n, d) => n + (d.usersCount ?? 0), 0);
+    // If no current dups have known counts (e.g. all were swapped to target), show null (→ "—") not 0
+    const targetWithCounts = hasCounts
+      ? { ...target, notesCount: knownDups.length > 0 ? totalNotes : null, usersCount: knownDups.length > 0 ? totalUsers : null }
+      : target;
+
+    const leftEl = dc$('dc-split-left');
+    if (leftEl) leftEl.innerHTML = renderCompanyCard(targetWithCounts, dr.domain, 'TARGET — kept', true, hasCounts);
+
+    const rightEl = dc$('dc-split-right');
+    if (rightEl) {
+      rightEl.innerHTML = renderCompanyCard(dup, dr.domain, `DUPLICATE ${_compareDupIdx + 1} — will be deleted`, false, hasCounts);
+      const setBtn = document.createElement('button');
+      setBtn.className = 'btn btn-secondary';
+      setBtn.textContent = 'Set as target';
+      setBtn.style.cssText = 'position:absolute;top:14px;right:18px;font-size:10px;padding:2px 7px;line-height:1.4;';
+      setBtn.addEventListener('click', () => swapTarget(dr, dup));
+      rightEl.appendChild(setBtn);
+    }
+  }
+
+  function renderCompanyCard(c, domain, roleLabel, isTarget = false, hasCounts = false) {
+    const noteLabel = isTarget ? 'Notes incoming (total)' : 'Notes to move';
+    const userLabel = isTarget ? 'Users incoming (total)' : 'Users to move';
+    const showSection = hasCounts || c.notesCount != null || c.usersCount != null;
+    const noteVal = c.notesCount != null ? c.notesCount : '—';
+    const userVal = c.usersCount != null ? c.usersCount : '—';
+    const countRows = showSection ? `
+      <div style="display:flex;gap:24px;margin-top:16px;padding-top:14px;border-top:1px solid var(--c-border);">
+        <div><div style="font-size:11px;color:var(--c-muted);margin-bottom:2px;">${noteLabel}</div><div style="font-size:22px;font-weight:600;line-height:1;">${noteVal}</div></div>
+        <div><div style="font-size:11px;color:var(--c-muted);margin-bottom:2px;">${userLabel}</div><div style="font-size:22px;font-weight:600;line-height:1;">${userVal}</div></div>
+      </div>` : '';
+    return `
+      <div style="font-size:10px;font-weight:700;color:${isTarget ? 'var(--c-ok,#22c55e)' : 'var(--c-danger,#ef4444)'};letter-spacing:.06em;margin-bottom:10px;">${esc(roleLabel)}</div>
+      <div style="font-size:18px;font-weight:600;margin-bottom:16px;word-break:break-word;">${esc(c.name || c.id)}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <tr>
+          <td style="color:var(--c-muted);padding:4px 0;white-space:nowrap;width:70px;vertical-align:top;">Domain</td>
+          <td style="padding:4px 10px;">${esc(domain)}</td>
+        </tr>
+        <tr>
+          <td style="color:var(--c-muted);padding:4px 0;vertical-align:top;">Source</td>
+          <td style="padding:4px 10px;">${esc(c.sourceOrigin || '—')}</td>
+        </tr>
+        <tr>
+          <td style="color:var(--c-muted);padding:4px 0;vertical-align:top;">UUID</td>
+          <td style="padding:4px 10px;font-family:monospace;font-size:11px;word-break:break-all;">${esc(c.id)}</td>
+        </tr>
+      </table>
+      ${countRows}
+    `;
+  }
+
+  function navigateDomain(delta) {
+    const records = _previewData?.domainRecords || [];
+    const next    = _compareDrIdx + delta;
+    if (next < 0 || next >= records.length) return;
+    _compareDrIdx  = next;
+    _compareDr     = records[next];
+    _compareDupIdx = 0;
+    renderComparePanel();
+  }
+
+  function navigateDup(delta) {
+    if (!_compareDr) return;
+    const dups = dcDuplicates(_compareDr);
+    const next = _compareDupIdx + delta;
+    if (next < 0 || next >= dups.length) return;
+    _compareDupIdx = next;
+    renderComparePanel();
   }
 
   // ── Selection toolbar UI ───────────────────────────────────
@@ -415,11 +563,11 @@
     if (!_previewData?.domainRecords?.length) return;
     const records  = _selectedDomains.size > 0 ? [..._selectedDomains] : _previewData.domainRecords;
     const dupCount = records.reduce((n, dr) => n + (dr.duplicates?.length ?? 0), 0);
-    const label    = _selectedDomains.size > 0
-      ? `Merge ${records.length} selected group(s) and permanently delete ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'}?`
-      : `This will merge ${records.length} group(s) and permanently delete ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'}.`;
+    const intro    = _selectedDomains.size > 0
+      ? `Merge ${records.length} selected group(s)?`
+      : `Merge all ${records.length} group(s)?`;
     showConfirm(
-      `${label}\n\nThis cannot be undone. Export your companies data from Companies → Export first if you need a backup.`,
+      `${intro}\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to their target company, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone. Export your companies data from Companies → Export first if you need a backup.`,
       { confirmText: 'Merge & delete', danger: true }
     ).then((confirmed) => { if (confirmed) runMerge(records); });
   }
@@ -427,7 +575,7 @@
   function startSingleGroupMerge(dr, groupNum) {
     const dupCount = dr.duplicates?.length ?? 0;
     showConfirm(
-      `Merge group ${groupNum} (${dr.domain})?\n\nThis will relink all notes from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} and permanently delete them.\n\nThis cannot be undone.`,
+      `Merge group ${groupNum} (${dr.domain})?\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${esc(dr.sfCompanyName || dr.sfCompanyId)}, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone.`,
       { confirmText: 'Merge this group', danger: true }
     ).then((confirmed) => { if (confirmed) runMerge([dr]); });
   }
@@ -459,6 +607,7 @@
           _runCtrl = null;
           dcText('dc-error-msg', msg);
           if (_fromRun) dcShow('dc-error-back-to-preview');
+          if (_logAppender?.getRows().length > 0) dcShow('dc-error-download-log');
           dcGo('error');
         },
         onAbort() {},
@@ -499,6 +648,7 @@
     const runLogEl = dc$('dc-run-log');
     const resLogEl = dc$('dc-results-log');
     if (resLogEl && runLogEl && !runLogEl.classList.contains('hidden')) resLogEl.classList.remove('hidden');
+    if (_logAppender?.getRows().length > 0) dcShow('dc-results-download-log');
   }
 
   // ── Download audit log ─────────────────────────────────────
@@ -525,21 +675,11 @@
       unlockScanConfig(e.target.checked);
     });
 
-    // Origin dropdown — disable manual checkbox when a value is selected
-    dc$('dc-origin-select')?.addEventListener('change', (e) => {
-      applyOriginSelected(!!e.target.value);
-    });
-
-    // Manual checkbox — disable dropdown when checked
-    dc$('dc-manual-checkbox')?.addEventListener('change', (e) => {
-      applyManualMode(e.target.checked);
-    });
-
-    // Origins retry
+    // Origins retry — opens connect modal if not yet authenticated
     dc$('dc-origins-retry')?.addEventListener('click', () => {
       _originsLoaded  = false;
       _originsLoading = false;
-      loadOrigins();
+      requireToken(() => loadOrigins(true));
     });
 
     // Scan button
@@ -578,8 +718,9 @@
       updateSelectionUI();
     });
 
-    // Adjust options / re-scan from preview
-    dc$('dc-rescan-btn')?.addEventListener('click', runScan);
+    // Adjust options → back to idle so user can change source selection before re-scanning
+    dc$('dc-rescan-btn')?.addEventListener('click', () => dcGo('idle'));
+    // No duplicates found → re-scan directly (options don't need changing)
     dc$('dc-no-dup-rescan')?.addEventListener('click', runScan);
 
     // Merge button
@@ -592,12 +733,48 @@
 
     // Results actions
     dc$('dc-back-to-preview')?.addEventListener('click', () => dcGo('preview'));
+    dc$('dc-results-download-log')?.addEventListener('click', () => {
+      if (_logAppender) downloadLogCsv(_logAppender, 'companies-merge');
+    });
     dc$('dc-download-audit')?.addEventListener('click', downloadAuditLog);
     dc$('dc-start-over')?.addEventListener('click', resetModule);
 
     // Error actions
     dc$('dc-error-back-to-preview')?.addEventListener('click', () => dcGo('preview'));
+    dc$('dc-error-download-log')?.addEventListener('click', () => {
+      if (_logAppender) downloadLogCsv(_logAppender, 'companies-merge');
+    });
     dc$('dc-error-retry')?.addEventListener('click', resetModule);
+
+    // Compare modal
+    dc$('dc-cmp-group-select')?.addEventListener('change', (e) => {
+      if (!_compareDr) return;
+      if (e.target.checked) _selectedDomains.add(_compareDr);
+      else _selectedDomains.delete(_compareDr);
+      // Sync the corresponding group card checkbox
+      const entry = _groupCardEls.get(_compareDr);
+      if (entry) {
+        const cb = entry.el.querySelector('input[type=checkbox]');
+        if (cb) cb.checked = e.target.checked;
+      }
+      updateSelectionUI();
+    });
+    dc$('dc-cmp-prev-group')?.addEventListener('click', () => navigateDomain(-1));
+    dc$('dc-cmp-next-group')?.addEventListener('click', () => navigateDomain(1));
+    dc$('dc-cmp-prev-dup')?.addEventListener('click',   () => navigateDup(-1));
+    dc$('dc-cmp-next-dup')?.addEventListener('click',   () => navigateDup(1));
+    dc$('dc-cmp-close')?.addEventListener('click', closeCompareModal);
+    dc$('dc-compare-overlay')?.addEventListener('click', (e) => {
+      if (e.target === dc$('dc-compare-overlay')) closeCompareModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (!_compareDr) return;
+      if      (e.key === 'Escape')                      closeCompareModal();
+      else if (e.key === 'ArrowLeft'  && !e.shiftKey)   navigateDup(-1);
+      else if (e.key === 'ArrowRight' && !e.shiftKey)   navigateDup(1);
+      else if (e.key === 'ArrowLeft'  &&  e.shiftKey)   navigateDomain(-1);
+      else if (e.key === 'ArrowRight' &&  e.shiftKey)   navigateDomain(1);
+    });
 
     // Disconnect: clear origins state + reset
     window.addEventListener('pb:disconnect', () => {

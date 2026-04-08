@@ -52,7 +52,7 @@
                   </div>
                   <input type="text" id="tm-export-team-search" class="form-input" placeholder="Search teams…" style="margin-bottom:6px;" />
                   <div id="tm-export-team-filter" class="checkbox-scroll-list">
-                    <span class="text-muted" style="padding:8px 12px;display:block;font-size:12px;">Loading teams…</span>
+                    <div style="padding:8px 12px;"><div class="progress-wrap" style="margin-top:0;"><div class="progress-bar progress-bar-loading" style="width:40%;"></div></div><div class="progress-label" style="margin-top:4px;">Loading teams…</div></div>
                   </div>
                   <div id="tm-export-team-error" class="hidden" style="margin-top:6px;">
                     <span class="text-danger" id="tm-export-team-error-msg"></span>
@@ -159,7 +159,10 @@
 
               <!-- ── UPLOADING / PREVIEWING STATE ── -->
               <div id="tm-import-uploading" class="hidden">
-                <div class="text-muted" style="font-size:13px;">Computing diff preview…</div>
+                <div class="progress-wrap" style="margin-top:0;">
+                  <div class="progress-bar progress-bar-loading" style="width:40%;"></div>
+                </div>
+                <div class="progress-label" style="margin-top:4px;">Computing diff preview…</div>
               </div><!-- /tm-import-uploading -->
 
               <!-- ── DIFF PREVIEW ── -->

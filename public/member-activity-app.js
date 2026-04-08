@@ -118,7 +118,7 @@ let _maInitDone = false;
     maCacheReady   = false;
 
     // Show loading state in team section
-    ma$('ma-team-list').innerHTML = '<span class="text-muted" style="padding:8px 12px;display:block;font-size:12px;">Loading teams…</span>';
+    ma$('ma-team-list').innerHTML = '<div style="padding:8px 12px;"><div class="progress-wrap" style="margin-top:0;"><div class="progress-bar progress-bar-loading" style="width:40%;"></div></div><div class="progress-label" style="margin-top:4px;">Loading teams…</div></div>';
     hide('ma-team-error');
     hide('ma-obfuscated-warn');
     ma$('btn-ma-export').disabled = true;

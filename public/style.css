@@ -527,6 +527,16 @@ input:focus, select:focus, textarea:focus {
   transition: width .3s ease;
 }
 
+@keyframes progress-bar-loading {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.progress-bar-loading {
+  width: 40% !important;
+  transition: none;
+  animation: progress-bar-loading 1.4s ease-in-out infinite;
+}
+
 /* ── Filter block ── */
 .filter-block {
   border: 1px solid var(--c-border);
@@ -2110,7 +2120,8 @@ select.ri-input {
   overflow: hidden;
 }
 
-#nm-split-left {
+#nm-split-left,
+#dc-split-left {
   padding: 18px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -2118,11 +2129,13 @@ select.ri-input {
   min-width: 0;
 }
 
-#nm-split-right {
+#nm-split-right,
+#dc-split-right {
   padding: 18px;
   overflow-y: auto;
   overflow-x: hidden;
   min-width: 0;
+  position: relative;
 }
 
 /* Stack panels at 768px — at narrower widths each 50% column is too cramped
@@ -2134,13 +2147,15 @@ select.ri-input {
     overflow-y: auto;
     overflow-x: hidden;
   }
-  #nm-split-left {
+  #nm-split-left,
+  #dc-split-left {
     border-right: none;
     border-bottom: 1px solid var(--c-border);
     overflow-y: visible;        /* stacked: whole body scrolls, not each panel */
     overflow-x: hidden;
   }
-  #nm-split-right {
+  #nm-split-right,
+  #dc-split-right {
     overflow-y: visible;
     overflow-x: hidden;
   }

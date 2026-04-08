@@ -129,7 +129,7 @@
     tmCacheReady   = false;
 
     tm$('tm-export-team-filter').innerHTML =
-      '<span class="text-muted" style="padding:8px 12px;display:block;font-size:12px;">Loading teams…</span>';
+      '<div style="padding:8px 12px;"><div class="progress-wrap" style="margin-top:0;"><div class="progress-bar progress-bar-loading" style="width:40%;"></div></div><div class="progress-label" style="margin-top:4px;">Loading teams…</div></div>';
     tmHide('tm-export-team-error');
     tm$('tm-export-btn').disabled = true;
 

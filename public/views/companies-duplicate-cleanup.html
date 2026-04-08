@@ -49,33 +49,23 @@
 
                 <div id="dc-scan-config" style="opacity:0.4;pointer-events:none;">
 
-                  <!-- Primary origin selector -->
-                  <div class="field" style="margin-bottom:16px;">
+                  <!-- Primary record origin / manual mode (unified select) -->
+                  <div class="field" style="margin-bottom:20px;">
                     <label>Primary record origin
-                      <span class="info-icon" data-tip="The source origin that identifies the canonical (target) company. All other companies sharing the same domain will be treated as duplicates and deleted.">i</span>
+                      <span class="info-icon" data-tip="The source origin that identifies the canonical (target) company. All other companies sharing the same domain will be treated as duplicates and deleted. Choose 'Let me choose per group' to manually pick the target for each duplicate group.">i</span>
                     </label>
-                    <div id="dc-origins-loading" style="font-size:12px;color:var(--c-muted);margin-top:6px;">Loading origins…</div>
-                    <div id="dc-origins-field" class="hidden" style="margin-top:6px;">
-                      <select id="dc-origin-select" class="form-input" style="width:auto;min-width:220px;"></select>
+                    <div id="dc-origins-loading" style="margin-top:8px;">
+                      <div class="progress-wrap" style="margin-top:0;">
+                        <div class="progress-bar progress-bar-loading" style="width:40%;"></div>
+                      </div>
+                      <div class="progress-label" style="margin-top:4px;">Loading sources…</div>
                     </div>
-                    <div id="dc-origins-all-manual" class="hidden" style="font-size:12px;color:var(--c-muted);margin-top:6px;">
-                      All companies have no source origin — manual mode selected automatically.
+                    <div id="dc-origins-field" class="hidden" style="margin-top:6px;">
+                      <div id="dc-origin-list" style="display:flex;flex-direction:column;gap:8px;margin-top:4px;"></div>
                     </div>
                     <div id="dc-origins-error" class="hidden" style="font-size:12px;color:var(--c-danger,#ef4444);margin-top:6px;display:flex;align-items:center;gap:8px;">
                       <span id="dc-origins-error-msg"></span>
                       <button class="btn btn-ghost btn-sm" id="dc-origins-retry">Retry</button>
-                    </div>
-                  </div>
-
-                  <!-- Manual mode toggle -->
-                  <div class="field" style="margin-bottom:20px;">
-                    <label class="checkbox-label">
-                      <input type="checkbox" id="dc-manual-checkbox">
-                      I will choose the target company manually
-                      <span class="info-icon" data-tip="Scan all duplicate domains regardless of origin. In the preview you can pick which company to keep as the target for each group.">i</span>
-                    </label>
-                    <div class="label-hint" style="margin-top:4px;margin-left:20px;">
-                      Use when there is no consistent source origin, or when you need full control over which record to keep.
                     </div>
                   </div>
 
@@ -215,10 +205,54 @@
                 </div>
                 <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
                   <button class="btn btn-secondary hidden" id="dc-error-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="dc-error-download-log">↓ Download log</button>
                   <button class="btn btn-ghost btn-sm" id="dc-error-retry">Start over</button>
                 </div>
               </div><!-- /dc-error -->
 
             </div><!-- /panel-body -->
           </div><!-- /panel -->
+
+          <!-- ════════════════════════════════
+               COMPARE OVERLAY (manual mode)
+          ════════════════════════════════ -->
+          <div id="dc-compare-overlay" class="ri-overlay hidden">
+            <div class="ri-modal" style="width:94vw;max-width:860px;max-height:92vh;display:flex;flex-direction:column;">
+
+              <!-- Header -->
+              <div class="ri-header" style="flex-shrink:0;align-items:flex-start;">
+                <div style="display:flex;flex-direction:column;gap:6px;min-width:0;flex:1;">
+                  <!-- Group row -->
+                  <div class="nm-cmp-group-row" style="border-left:3px solid var(--c-ok,#22c55e);padding-left:8px;">
+                    <span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--c-ok,#22c55e);white-space:nowrap;">Group</span>
+                    <button class="btn btn-ghost btn-sm" id="dc-cmp-prev-group" title="Previous group (Shift ←)">←</button>
+                    <span id="dc-cmp-group-nav" style="font-size:12px;color:var(--c-muted);"></span>
+                    <button class="btn btn-ghost btn-sm" id="dc-cmp-next-group" title="Next group (Shift →)">→</button>
+                    <span id="dc-cmp-group-label" class="nm-cmp-group-label"></span>
+                  </div>
+                  <!-- Duplicates row -->
+                  <div class="nm-cmp-controls-row">
+                    <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;color:var(--c-muted);">
+                      <input type="checkbox" id="dc-cmp-group-select"> Select group for merge
+                    </label>
+                    <span class="nm-cmp-nav-controls">
+                      <span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--c-muted);white-space:nowrap;">Duplicates</span>
+                      <button class="btn btn-ghost btn-sm" id="dc-cmp-prev-dup" title="Previous duplicate (←)">←</button>
+                      <span id="dc-cmp-dup-nav" style="font-size:12px;color:var(--c-muted);"></span>
+                      <button class="btn btn-ghost btn-sm" id="dc-cmp-next-dup" title="Next duplicate (→)">→</button>
+                    </span>
+                  </div>
+                </div>
+                <button class="ri-close" id="dc-cmp-close" style="align-self:flex-start;">&times;</button>
+              </div>
+
+              <!-- Split body -->
+              <div class="nm-split-body">
+                <div id="dc-split-left"></div>
+                <div id="dc-split-right"></div>
+              </div>
+
+            </div>
+          </div><!-- /dc-compare-overlay -->
+
         </div><!-- /view-companies-duplicate-cleanup -->

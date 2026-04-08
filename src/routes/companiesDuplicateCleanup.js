@@ -1,28 +1,23 @@
 /**
  * Duplicate Company Cleanup routes
  *
- * POST /api/companies-duplicate-cleanup/preview  — parse uploaded CSV, return domain records + skipped rows (no API calls)
- * POST /api/companies-duplicate-cleanup/run      — relink notes from duplicate companies to their Salesforce
- *                                        equivalent, then delete the duplicates (SSE)
+ * GET  /api/companies-duplicate-cleanup/origins  — return distinct source origin values
+ * POST /api/companies-duplicate-cleanup/scan     — discover duplicate groups via API (SSE)
+ * POST /api/companies-duplicate-cleanup/run      — merge duplicates into their target company (SSE)
  *
- * Input CSV columns:
- *   domain           — company domain (e.g. "acme.com")
- *   uuid_with_origin — all UUIDs for that domain, each tagged with source in parens:
- *                      e.g. "66c80e99-... (manual_or_csv), df3a7053-... (salesforce)"
- *
- * Processing rules (mirrors pb_duplicate_cleanup.py):
- *   Exactly 1 (salesforce) UUID → processed
- *   0 (salesforce) UUIDs        → row skipped
- *   2+ (salesforce) UUIDs       → row skipped
- *
- * For each non-Salesforce company UUID in a processed row:
- *   1. POST /v2/notes/search  — find all notes linked to the duplicate company
- *   2. For each note, relink its customer relationship to the SF company:
+ * /run processing — for each duplicate company:
+ *   1. POST /v2/notes/search  — find all notes linked to the duplicate
+ *   2. For each note, relink its customer to the target company:
  *        user customer   → PUT /v2/entities/{user_id}/relationships/parent
  *        company/missing → PUT /v2/notes/{note_id}/relationships/customer
- *   3. DELETE /companies/{dup_id}  — only if every relink for that company succeeded
+ *   3. POST /v2/entities/search (type=user, parent=dupId) — find users parented to the
+ *        duplicate not caught via notes; relink each → PUT /v2/entities/{user_id}/relationships/parent
+ *   4. DELETE /v2/entities/{dup_id}  — only if every relink for that company succeeded
  *
- * dry-run mode (default): steps 1–3 are logged but no mutating calls are made.
+ * Rate limiting: pbFetch throttles via token-bucket (minDelay + remaining-based backoff).
+ * Retries: withRetry wraps every mutating call — up to 6 attempts, exponential backoff,
+ *          honours Retry-After on 429s.
+ * dry-run mode: steps 1–4 are logged but no mutating calls are made.
  */
 
 const express = require('express');
@@ -38,10 +33,35 @@ const SF_UUID_RE  = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const ANY_UUID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
 
 // ---------------------------------------------------------------------------
+// Origins cache (per-token, 30-minute TTL — mirrors teamCache pattern)
+// ---------------------------------------------------------------------------
+
+const ORIGINS_CACHE_TTL_MS = 30 * 60 * 1000;
+const originsCache = new Map();
+
+function getCachedOrigins(token) {
+  const entry = originsCache.get(token);
+  if (!entry || Date.now() - entry.fetchedAt > ORIGINS_CACHE_TTL_MS) return null;
+  return entry.origins;
+}
+
+function setCachedOrigins(token, origins) {
+  originsCache.set(token, { origins, fetchedAt: Date.now() });
+}
+
+// ---------------------------------------------------------------------------
 // GET /origins — return distinct non-null sourceOrigin values across v2 + v1
 // ---------------------------------------------------------------------------
 
 router.get('/origins', pbAuth, async (req, res) => {
+  const token = req.session?.pbToken || req.headers['x-pb-token'];
+  const forceRefresh = req.query.refresh === 'true';
+
+  if (!forceRefresh) {
+    const cached = getCachedOrigins(token);
+    if (cached) return res.json({ origins: cached });
+  }
+
   const { pbFetch, withRetry } = res.locals.pbClient;
   try {
     const originsSet = new Set();
@@ -77,7 +97,9 @@ router.get('/origins', pbAuth, async (req, res) => {
       offset += PAGE;
     }
 
-    res.json({ origins: [...originsSet].sort() });
+    const origins = [...originsSet].sort();
+    setCachedOrigins(token, origins);
+    res.json({ origins });
   } catch (err) {
     console.error('[companiesDuplicateCleanup/origins]', err);
     res.status(500).json({ error: parseApiError(err) });
@@ -243,29 +265,36 @@ router.post('/scan', pbAuth, async (req, res) => {
 
     sse.log('info', `Found ${domainRecords.length} domain(s) with duplicates · ${skippedRows.length} skipped`);
 
-    // ── Step 5: Fetch note + user counts for each duplicate ───────────────
+    // ── Step 5: Fetch note + user counts ─────────────────────────────────
+    // Origin mode: counts for duplicates only (target is the keeper — its counts don't change).
+    // Manual mode: counts for ALL companies in each group (any company may become the target).
     if (domainRecords.length > 0 && !sse.isAborted()) {
-      sse.progress(`Fetching note and user counts for ${totalDuplicates} duplicate compan${totalDuplicates !== 1 ? 'ies' : 'y'}…`, 80);
-      let countsDone = 0;
-
+      const companiesToCount = [];
       for (const dr of domainRecords) {
+        for (const dup of dr.duplicates) companiesToCount.push({ dr, obj: dup });
+        if (manualMode) companiesToCount.push({ dr, obj: dr, isTarget: true });
+      }
+
+      sse.progress(`Fetching note and user counts for ${companiesToCount.length} compan${companiesToCount.length !== 1 ? 'ies' : 'y'}…`, 80);
+
+      for (let i = 0; i < companiesToCount.length; i++) {
         if (sse.isAborted()) break;
-
-        for (const dup of dr.duplicates) {
-          if (sse.isAborted()) break;
-
-          const pct = 80 + Math.round((countsDone / totalDuplicates) * 18);
-          sse.progress(`Counting notes for ${dr.domain} (${countsDone + 1}/${totalDuplicates})…`, pct);
-
-          try {
-            const counts = await fetchNoteCounts(pbFetch, withRetry, dup.id);
-            dup.notesCount = counts.notesCount;
-            dup.usersCount = counts.usersCount;
-          } catch {
-            dup.notesCount = null;
-            dup.usersCount = null;
+        const { dr, obj, isTarget } = companiesToCount[i];
+        const id = isTarget ? dr.sfCompanyId : obj.id;
+        const pct = 80 + Math.round((i / companiesToCount.length) * 18);
+        sse.progress(`Counting notes for ${dr.domain} (${i + 1}/${companiesToCount.length})…`, pct);
+        try {
+          const counts = await fetchNoteCounts(pbFetch, withRetry, id);
+          if (isTarget) {
+            dr.sfNotesCount = counts.notesCount;
+            dr.sfUsersCount = counts.usersCount;
+          } else {
+            obj.notesCount = counts.notesCount;
+            obj.usersCount = counts.usersCount;
           }
-          countsDone++;
+        } catch {
+          if (isTarget) { dr.sfNotesCount = null; dr.sfUsersCount = null; }
+          else          { obj.notesCount  = null; obj.usersCount  = null; }
         }
       }
     }
@@ -286,14 +315,18 @@ router.post('/scan', pbAuth, async (req, res) => {
 // ---------------------------------------------------------------------------
 
 /**
- * For a single duplicate company, search all linked notes and return:
+ * For a single company, fetch and return:
  *   notesCount — notes whose customer is the company directly (will be relinked)
- *   usersCount — unique user IDs that are note customers (parent company will be updated)
+ *   usersCount — ALL users that will have their parent company updated:
+ *                users found via the notes search (customer = user) UNION
+ *                users parented to this company via /v2/entities/search
+ *                (covers users with no notes attributed through this company)
  */
 async function fetchNoteCounts(pbFetch, withRetry, companyId) {
-  const payload = { data: { relationships: { customer: { ids: [companyId] } } } };
+  // ── Query 1: notes linked to this company ───────────────────────────────
+  const notesPayload = { data: { relationships: { customer: { ids: [companyId] } } } };
   let r = await withRetry(
-    () => pbFetch('post', '/v2/notes/search', payload),
+    () => pbFetch('post', '/v2/notes/search', notesPayload),
     `count notes for ${companyId}`
   );
 
@@ -305,19 +338,48 @@ async function fetchNoteCounts(pbFetch, withRetry, companyId) {
     nextUrl = r.links?.next || null;
   }
 
-  const userIds = new Set();
+  const noteAttributedUserIds = new Set();
   let notesCount = 0;
   for (const note of notes) {
     const rels = Array.isArray(note.relationships?.data) ? note.relationships.data : [];
     const customerRel = rels.find(rel => rel.type === 'customer');
     if (customerRel?.target?.type === 'user') {
-      userIds.add(customerRel.target.id);
+      noteAttributedUserIds.add(customerRel.target.id);
     } else {
       notesCount++;
     }
   }
 
-  return { notesCount, usersCount: userIds.size };
+  // ── Query 2: users directly parented to this company ────────────────────
+  // Covers users who have no notes attributed through this company (would be
+  // missed by the notes-only approach above).
+  const usersPayload = {
+    data: {
+      filter: {
+        type: ['user'],
+        relationships: { parent: [{ id: companyId }] },
+      },
+    },
+  };
+  const allUserIds = new Set(noteAttributedUserIds);
+  let cursor = null;
+  do {
+    const url = cursor
+      ? `/v2/entities/search?pageCursor=${encodeURIComponent(cursor)}`
+      : '/v2/entities/search';
+    const ur = await withRetry(
+      () => pbFetch('post', url, usersPayload),
+      `count users for ${companyId}`
+    );
+    for (const user of (ur.data || [])) {
+      allUserIds.add(user.id);
+    }
+    cursor = ur.links?.next
+      ? (ur.links.next.match(/pageCursor=([^&]+)/)?.[1] ?? null)
+      : null;
+  } while (cursor);
+
+  return { notesCount, usersCount: allUserIds.size };
 }
 
 // ---------------------------------------------------------------------------
@@ -465,11 +527,13 @@ router.post('/run', pbAuth, async (req, res) => {
         };
 
         try {
-          // ── Step 1: Find all notes linked to this duplicate company ──────
+          let relinkFailed = false;
+
+          // ── Step 1: Find and relink all notes linked to this duplicate ───
           const notes = [];
 
           if (dryRun) {
-            sse.log('info', `[DRY RUN] Would search notes for duplicate company ${dupId.slice(0, 8)}…`);
+            sse.log('info', `[DRY RUN] Would search notes for duplicate company ${dupId}…`, { uuid: dupId });
           } else {
             const payload = { data: { relationships: { customer: { ids: [dupId] } } } };
             let r = await withRetry(
@@ -487,8 +551,9 @@ router.post('/run', pbAuth, async (req, res) => {
 
           entry.notesFound = notes.length;
 
-          // ── Step 2: Relink each note's customer to the SF company ────────
-          let relinkFailed = false;
+          // ── Step 2: Relink each note's customer to the target company ────
+          // Users touched here are tracked so Step 3 can skip them.
+          const relinkUserIds = new Set();
 
           for (const note of notes) {
             if (sse.isAborted()) break;
@@ -498,57 +563,113 @@ router.post('/run', pbAuth, async (req, res) => {
 
             try {
               if (targetType === 'user') {
-                // Note's customer is a user — set the SF company as that user's parent company
-                await withRetry(
-                  () => pbFetch('put', `/v2/entities/${targetId}/relationships/parent`, {
-                    data: { target: { id: dr.sfCompanyId }, type: 'company' },
-                  }),
-                  `relink user ${targetId} to SF company`
-                );
-                sse.log('success', `Relinked user ${targetId} → SF company (via note ${noteId.slice(0, 8)})`);
+                if (!dryRun) {
+                  await withRetry(
+                    () => pbFetch('put', `/v2/entities/${targetId}/relationships/parent`, {
+                      data: { target: { id: dr.sfCompanyId }, type: 'company' },
+                    }),
+                    `relink user ${targetId} to target company`
+                  );
+                }
+                sse.log('success', `Relinked user ${targetId} → target company (via note ${noteId})${dryRun ? ' [DRY RUN]' : ''}`, { uuid: targetId });
+                relinkUserIds.add(targetId);
                 entry.usersRelinked++;
                 entry.userIds.push(targetId);
                 usersRelinked++;
               } else {
-                // Note's customer is a company (or absent) — relink the note directly
-                await withRetry(
-                  () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
-                    data: { target: { type: 'company', id: dr.sfCompanyId } },
-                  }),
-                  `relink note ${noteId} to SF company`
-                );
-                sse.log('success', `Relinked note ${noteId.slice(0, 8)} → SF company`);
+                if (!dryRun) {
+                  await withRetry(
+                    () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
+                      data: { target: { type: 'company', id: dr.sfCompanyId } },
+                    }),
+                    `relink note ${noteId} to target company`
+                  );
+                }
+                sse.log('success', `Relinked note ${noteId} → target company${dryRun ? ' [DRY RUN]' : ''}`, { uuid: noteId });
                 entry.notesRelinked++;
                 entry.noteIds.push(noteId);
                 notesRelinked++;
               }
             } catch (relinkErr) {
               const msg = parseApiError(relinkErr);
-              sse.log('error', `Relink failed — note ${noteId.slice(0, 8)}: ${msg}`);
+              sse.log('error', `Relink failed — note ${noteId}: ${msg}`, { uuid: noteId });
               relinkFailed = true;
               errors++;
               entry.error = `relink failed: ${msg}`;
             }
           }
 
-          // ── Step 3: Delete duplicate only if every relink succeeded ──────
+          // ── Step 3: Relink users parented to this duplicate ──────────────
+          // Fetches via POST /v2/entities/search (filter by parent relationship).
+          // Skips users already relinked in Step 2 to avoid double-counting.
+          if (!sse.isAborted()) {
+            const usersPayload = {
+              data: {
+                filter: {
+                  type: ['user'],
+                  relationships: { parent: [{ id: dupId }] },
+                },
+              },
+            };
+
+            let cursor = null;
+            do {
+              const url = cursor
+                ? `/v2/entities/search?pageCursor=${encodeURIComponent(cursor)}`
+                : '/v2/entities/search';
+              const r = await withRetry(
+                () => pbFetch('post', url, usersPayload),
+                `search users for duplicate ${dupId}`
+              );
+              for (const user of (r.data || [])) {
+                if (sse.isAborted()) break;
+                if (relinkUserIds.has(user.id)) continue; // already handled via notes path
+                try {
+                  if (!dryRun) {
+                    await withRetry(
+                      () => pbFetch('put', `/v2/entities/${user.id}/relationships/parent`, {
+                        data: { target: { id: dr.sfCompanyId }, type: 'company' },
+                      }),
+                      `relink user ${user.id} to target company`
+                    );
+                  }
+                  sse.log('success', `Relinked user ${user.id} → target company (direct parent)${dryRun ? ' [DRY RUN]' : ''}`, { uuid: user.id });
+                  relinkUserIds.add(user.id);
+                  entry.usersRelinked++;
+                  entry.userIds.push(user.id);
+                  usersRelinked++;
+                } catch (relinkErr) {
+                  const msg = parseApiError(relinkErr);
+                  sse.log('error', `Relink failed — user ${user.id}: ${msg}`, { uuid: user.id });
+                  relinkFailed = true;
+                  errors++;
+                  entry.error = `relink failed: ${msg}`;
+                }
+              }
+              cursor = r.links?.next
+                ? (r.links.next.match(/pageCursor=([^&]+)/)?.[1] ?? null)
+                : null;
+            } while (cursor && !sse.isAborted());
+          }
+
+          // ── Step 4: Delete duplicate (v2) — only if all relinks succeeded ─
           if (relinkFailed) {
-            sse.log('warn', `Skipping DELETE for ${dupId.slice(0, 8)} — one or more relinks failed`);
+            sse.log('warn', `Skipping DELETE for ${dupId} — one or more relinks failed`, { uuid: dupId });
           } else if (dryRun) {
-            sse.log('info', `[DRY RUN] Would delete company ${dupId.slice(0, 8)} (${dr.domain})`);
+            sse.log('info', `[DRY RUN] Would delete company ${dupId} (${dr.domain})`, { uuid: dupId });
           } else {
             await withRetry(
-              () => pbFetch('delete', `/companies/${dupId}`),
+              () => pbFetch('delete', `/v2/entities/${dupId}`),
               `delete company ${dupId}`
             );
-            sse.log('success', `Deleted duplicate company ${dupId.slice(0, 8)} (${dr.domain})`);
+            sse.log('success', `Deleted duplicate company ${dupId} (${dr.domain})`, { uuid: dupId });
             entry.deleted = true;
             deleted++;
           }
 
         } catch (err) {
           const msg = parseApiError(err);
-          sse.log('error', `Error processing duplicate ${dupId.slice(0, 8)} (${dr.domain}): ${msg}`);
+          sse.log('error', `Error processing duplicate ${dupId} (${dr.domain}): ${msg}`, { uuid: dupId });
           entry.error = msg;
           errors++;
         }
