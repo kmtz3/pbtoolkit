@@ -163,17 +163,21 @@
 
   // ── Render preview ─────────────────────────────────────────
   function renderPreview(data) {
-    const { domainRecords, skippedRows, totalDomains, totalDuplicates } = data;
+    const { domainRecords, skippedRows, totalDomains, totalDuplicates, matchCriteria, fuzzyMatch } = data;
     const isManual = domainRecords[0]?.isManualMode ?? false;
 
     // Summary banner
     const summaryText = dc$('dc-preview-summary-text');
     if (summaryText) {
       if (totalDomains > 0) {
+        const matchLabel = matchCriteria
+          ? ` · ${matchCriteria}${fuzzyMatch ? ' (fuzzy)' : ''} match`
+          : '';
         summaryText.textContent =
           `${totalDomains} group${totalDomains !== 1 ? 's' : ''} · ` +
           `${totalDuplicates} duplicate compan${totalDuplicates !== 1 ? 'ies' : 'y'} to delete` +
           (isManual ? ' · manual target selection' : '') +
+          matchLabel +
           (skippedRows.length ? ` · ${skippedRows.length} skipped` : '');
       } else {
         summaryText.textContent = `No duplicate groups found.${skippedRows.length ? ` ${skippedRows.length} domain(s) skipped.` : ''}`;
@@ -501,11 +505,11 @@
       : target;
 
     const leftEl = dc$('dc-split-left');
-    if (leftEl) leftEl.innerHTML = renderCompanyCard(targetWithCounts, dr.domain, 'TARGET — kept', true, hasCounts);
+    if (leftEl) leftEl.innerHTML = renderCompanyCard(targetWithCounts, 'TARGET — kept', true, hasCounts);
 
     const rightEl = dc$('dc-split-right');
     if (rightEl) {
-      rightEl.innerHTML = renderCompanyCard(dup, dr.domain, `DUPLICATE ${_compareDupIdx + 1} — will be deleted`, false, hasCounts);
+      rightEl.innerHTML = renderCompanyCard(dup, `DUPLICATE ${_compareDupIdx + 1} — will be deleted`, false, hasCounts);
       const setBtn = document.createElement('button');
       setBtn.className = 'btn btn-secondary';
       setBtn.textContent = 'Set as target';
@@ -515,7 +519,7 @@
     }
   }
 
-  function renderCompanyCard(c, _groupLabel, roleLabel, isTarget = false, hasCounts = false) {
+  function renderCompanyCard(c, roleLabel, isTarget = false, hasCounts = false) {
     const noteLabel = isTarget ? 'Notes incoming (total)' : 'Notes to move';
     const userLabel = isTarget ? 'Users incoming (total)' : 'Users to move';
     const showSection = hasCounts || c.notesCount != null || c.usersCount != null;

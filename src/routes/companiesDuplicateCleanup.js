@@ -411,7 +411,7 @@ router.post('/scan', pbAuth, async (req, res) => {
     }
 
     sse.progress('Scan complete.', 100);
-    sse.complete({ domainRecords, skippedRows, totalDomains: domainRecords.length, totalDuplicates });
+    sse.complete({ domainRecords, skippedRows, totalDomains: domainRecords.length, totalDuplicates, matchCriteria, fuzzyMatch });
 
   } catch (err) {
     console.error('[companiesDuplicateCleanup/scan]', err);
