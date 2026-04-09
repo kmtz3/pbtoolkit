@@ -26,6 +26,16 @@ const { parseApiError } = require('../lib/errorUtils');
 
 const router = express.Router();
 
+// Stop flag — set by POST /run/stop so the run loop can exit gracefully without
+// the client aborting the SSE connection (which would prevent the complete event arriving).
+let _stopRequested = false;
+
+// POST /run/stop  — signal a running merge to stop after the current duplicate
+router.post('/run/stop', pbAuth, (_req, res) => {
+  _stopRequested = true;
+  res.sendStatus(204);
+});
+
 
 // ---------------------------------------------------------------------------
 // Origins cache (per-token, 30-minute TTL — mirrors teamCache pattern)
@@ -117,16 +127,21 @@ router.get('/origins', pbAuth, async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /scan  (SSE) — discover duplicates via API, no CSV upload required
 //
-// Body: { primaryOrigin?, manualMode?, matchCriteria?, fuzzyMatch? }
+// Body: { primaryOrigin?, manualMode?, matchCriteria?, fuzzyMatch?, noDomainOnly? }
 //
 // matchCriteria:
 //   'domain'      (default) — companies are duplicates if they share the same domain
 //   'domain+name' — companies are duplicates only if they share both domain AND name
+//   'name'        — duplicates if they share the same name (all companies by default)
 //
-// fuzzyMatch (only meaningful with 'domain+name'):
+// fuzzyMatch (meaningful with 'domain+name' or 'name'):
 //   false (default) — exact, case-sensitive name comparison after trim
 //   true  — lowercase + strip non-alphanumeric (except spaces) + collapse spaces
 //           e.g. 'Acme Inc' = 'ACME, INC.' but 'Acme Inc' ≠ 'Acme'
+//
+// noDomainOnly (only meaningful with matchCriteria='name'):
+//   false (default) — match by name across all companies regardless of domain
+//   true  — restrict name matching to companies that have no domain set
 //
 // Origin mode (default):
 //   For each group with 2+ companies, exactly one must match primaryOrigin
@@ -162,6 +177,7 @@ router.post('/scan', pbAuth, async (req, res) => {
     manualMode    = false,
     matchCriteria = 'domain',
     fuzzyMatch    = false,
+    noDomainOnly  = false,
   } = req.body || {};
 
   try {
@@ -184,11 +200,13 @@ router.post('/scan', pbAuth, async (req, res) => {
     sse.log('info', `Fetched ${v2Companies.length} compan${v2Companies.length === 1 ? 'y' : 'ies'} from v2 API`);
     if (sse.isAborted()) { sse.complete({ domainRecords: [], skippedRows: [], totalDomains: 0, totalDuplicates: 0, stopped: true }); return; }
 
-    // Build initial source map from v2 metadata.source.system
-    // id → sourceOrigin (string | null)
-    const sourceMap = {};
+    // Build initial source maps from v2 metadata
+    // id → sourceOrigin (string | null), id → sourceRecordId (string | null)
+    const sourceMap    = {};
+    const recordIdMap  = {};
     for (const c of v2Companies) {
-      sourceMap[c.id] = c.metadata?.source?.system || null;
+      sourceMap[c.id]   = c.metadata?.source?.system    || null;
+      recordIdMap[c.id] = c.metadata?.source?.recordId  || null;
     }
 
     // ── Step 2: v1 fallback for ids where v2 source is null ──────────────
@@ -210,6 +228,8 @@ router.post('/scan', pbAuth, async (req, res) => {
         for (const c of batch) {
           if (c.id && missingSourceIds.has(c.id)) {
             sourceMap[c.id] = c.sourceOrigin || null;
+            // Only fall back to v1 sourceRecordId if v2 recordId was also null
+            if (!recordIdMap[c.id]) recordIdMap[c.id] = c.sourceRecordId || null;
             filled++;
           }
         }
@@ -233,20 +253,88 @@ router.post('/scan', pbAuth, async (req, res) => {
       nameMap[c.id] = c.fields?.name || null;
     }
 
-    const byDomain = {};  // domain → [{ id, name, sourceOrigin }]
+    const byDomain   = {};  // domain → [{ id, name, sourceOrigin, sourceRecordId }]
+    const namePool   = [];  // for name-only mode: companies eligible for name matching
     for (const c of v2Companies) {
       const domain = (c.fields?.domain || '').trim().toLowerCase();
-      if (!domain) continue;
+      const entry  = { id: c.id, name: nameMap[c.id] || null, domain: domain || null, sourceOrigin: sourceMap[c.id] || null, sourceRecordId: recordIdMap[c.id] || null };
+      if (!domain) {
+        if (matchCriteria === 'name') namePool.push(entry);
+        continue;
+      }
       if (!byDomain[domain]) byDomain[domain] = [];
-      byDomain[domain].push({ id: c.id, name: nameMap[c.id] || null, sourceOrigin: sourceMap[c.id] || null });
+      byDomain[domain].push(entry);
+      // Include domain-having companies in name pool unless restricted to no-domain only
+      if (matchCriteria === 'name' && !noDomainOnly) namePool.push(entry);
     }
 
-    // ── Step 4: Build domain records ──────────────────────────────────────
+    // ── Step 4: Build duplicate records ──────────────────────────────────────
     const domainRecords = [];
     const skippedRows   = [];
 
-    for (const [domain, domainCompanies] of Object.entries(byDomain)) {
-      // Determine groups to process:
+    // Helper: resolve a group of companies into a domainRecord or skippedRow entry.
+    // domain    — the domain key (empty string for name-only groups)
+    // companies — array of { id, name, sourceOrigin, sourceRecordId }
+    // matchName — display name for sub-grouped records (domain+name or name mode)
+    const resolveGroup = (domain, companies, matchName) => {
+      if (companies.length < 2) return;
+
+      if (manualMode) {
+        const sorted = [...companies].sort((a, b) => {
+          if (a.sourceOrigin && !b.sourceOrigin) return -1;
+          if (!a.sourceOrigin && b.sourceOrigin) return 1;
+          if (a.sourceOrigin === 'salesforce') return -1;
+          if (b.sourceOrigin === 'salesforce') return 1;
+          return 0;
+        });
+        const target = sorted[0];
+        const rec = {
+          domain,
+          sfCompanyId:             target.id,
+          sfCompanyName:           target.name || target.id,
+          sfCompanyDomain:         target.domain || null,
+          sfCompanyOrigin:         target.sourceOrigin,
+          sfCompanySourceRecordId: target.sourceRecordId || null,
+          duplicates:              sorted.slice(1).map(c => ({ id: c.id, name: c.name || c.id, domain: c.domain || null, sourceOrigin: c.sourceOrigin, sourceRecordId: c.sourceRecordId || null })),
+          isManualMode:            true,
+        };
+        if (matchName) rec.matchName = matchName;
+        domainRecords.push(rec);
+      } else {
+        const primary = companies.filter(c => c.sourceOrigin === primaryOrigin);
+        const others  = companies.filter(c => c.sourceOrigin !== primaryOrigin);
+
+        if (primary.length === 1) {
+          const rec = {
+            domain,
+            sfCompanyId:             primary[0].id,
+            sfCompanyName:           primary[0].name || primary[0].id,
+            sfCompanyDomain:         primary[0].domain || null,
+            sfCompanyOrigin:         primary[0].sourceOrigin,
+            sfCompanySourceRecordId: primary[0].sourceRecordId || null,
+            duplicates:              others.map(c => ({ id: c.id, name: c.name || c.id, domain: c.domain || null, sourceOrigin: c.sourceOrigin, sourceRecordId: c.sourceRecordId || null })),
+            isManualMode:            false,
+          };
+          if (matchName) rec.matchName = matchName;
+          domainRecords.push(rec);
+        } else if (primary.length === 0) {
+          const raw = companies.map(c => `${c.id} (${c.sourceOrigin || 'unknown'})`).join(', ');
+          const row = { domain, uuidWithOrigin: raw, reason: 'no_primary_origin', primaryOrigin };
+          if (matchName) row.matchName = matchName;
+          skippedRows.push(row);
+        } else {
+          const primaryIds = primary.map(c => c.id);
+          const raw        = companies.map(c => `${c.id} (${c.sourceOrigin || 'unknown'})`).join(', ');
+          const row        = { domain, uuidWithOrigin: raw, reason: 'multiple_primary_origin', primaryOrigin, sfUuids: primaryIds };
+          if (matchName) row.matchName = matchName;
+          skippedRows.push(row);
+        }
+      }
+    };
+
+    // Domain-based grouping (criteria: 'domain' or 'domain+name'; skip for 'name')
+    for (const [domain, domainCompanies] of matchCriteria === 'name' ? [] : Object.entries(byDomain)) {
+      // Determine sub-groups:
       //   domain-only  → one group containing all companies for this domain
       //   domain+name  → sub-groups by normalized name; only groups with 2+ companies
       let groups; // [{ companies: [...], matchName: string|null }]
@@ -264,65 +352,29 @@ router.post('/scan', pbAuth, async (req, res) => {
         if (domainCompanies.length < 2) continue;
         groups = [{ companies: domainCompanies, matchName: null }];
       }
+      for (const { companies, matchName } of groups) resolveGroup(domain, companies, matchName);
+    }
 
-      for (const { companies, matchName } of groups) {
-        if (companies.length < 2) continue;
-
-        if (manualMode) {
-          // Manual mode: all duplicate groups included; default target = best available
-          const sorted = [...companies].sort((a, b) => {
-            if (a.sourceOrigin && !b.sourceOrigin) return -1;
-            if (!a.sourceOrigin && b.sourceOrigin) return 1;
-            if (a.sourceOrigin === 'salesforce') return -1;
-            if (b.sourceOrigin === 'salesforce') return 1;
-            return 0;
-          });
-          const target = sorted[0];
-          const rec = {
-            domain,
-            sfCompanyId:     target.id,
-            sfCompanyName:   target.name || target.id,
-            sfCompanyOrigin: target.sourceOrigin,
-            duplicates:      sorted.slice(1).map(c => ({ id: c.id, name: c.name || c.id, sourceOrigin: c.sourceOrigin })),
-            isManualMode:    true,
-          };
-          if (matchName) rec.matchName = matchName;
-          domainRecords.push(rec);
-        } else {
-          // Origin mode: exactly 1 company must match primaryOrigin
-          const primary = companies.filter(c => c.sourceOrigin === primaryOrigin);
-          const others  = companies.filter(c => c.sourceOrigin !== primaryOrigin);
-
-          if (primary.length === 1) {
-            const rec = {
-              domain,
-              sfCompanyId:     primary[0].id,
-              sfCompanyName:   primary[0].name || primary[0].id,
-              sfCompanyOrigin: primary[0].sourceOrigin,
-              duplicates:      others.map(c => ({ id: c.id, name: c.name || c.id, sourceOrigin: c.sourceOrigin })),
-              isManualMode:    false,
-            };
-            if (matchName) rec.matchName = matchName;
-            domainRecords.push(rec);
-          } else if (primary.length === 0) {
-            const raw = companies.map(c => `${c.id} (${c.sourceOrigin || 'unknown'})`).join(', ');
-            const row = { domain, uuidWithOrigin: raw, reason: 'no_primary_origin', primaryOrigin };
-            if (matchName) row.matchName = matchName;
-            skippedRows.push(row);
-          } else {
-            const primaryIds = primary.map(c => c.id);
-            const raw        = companies.map(c => `${c.id} (${c.sourceOrigin || 'unknown'})`).join(', ');
-            const row        = { domain, uuidWithOrigin: raw, reason: 'multiple_primary_origin', primaryOrigin, sfUuids: primaryIds };
-            if (matchName) row.matchName = matchName;
-            skippedRows.push(row);
-          }
-        }
+    // Name-only grouping: companies grouped by name.
+    // noDomainOnly=false (default): all companies; noDomainOnly=true: no-domain companies only.
+    if (matchCriteria === 'name' && namePool.length > 0) {
+      const byName = {};
+      for (const c of namePool) {
+        const key = normalizeNameForMatch(c.name || '', fuzzyMatch);
+        if (!key) continue;
+        if (!byName[key]) byName[key] = [];
+        byName[key].push(c);
+      }
+      for (const [key, nameGroup] of Object.entries(byName)) {
+        // Exact match: show the original name; fuzzy: show the normalized key that was matched on
+        const matchName = fuzzyMatch ? key : (nameGroup[0].name || nameGroup[0].id);
+        resolveGroup('', nameGroup, matchName);
       }
     }
 
     const totalDuplicates = domainRecords.reduce((n, r) => n + r.duplicates.length, 0);
 
-    sse.log('info', `Found ${domainRecords.length} domain(s) with duplicates · ${skippedRows.length} skipped`);
+    sse.log('info', `Found ${domainRecords.length} group${domainRecords.length !== 1 ? 's' : ''} with duplicates · ${skippedRows.length} skipped`);
 
     // ── Step 5: Fetch note + user counts ─────────────────────────────────
     // Origin mode: counts for duplicates only (target is the keeper — its counts don't change).
@@ -341,7 +393,7 @@ router.post('/scan', pbAuth, async (req, res) => {
         const { dr, obj, isTarget } = companiesToCount[i];
         const id = isTarget ? dr.sfCompanyId : obj.id;
         const pct = 80 + Math.round((i / companiesToCount.length) * 18);
-        sse.progress(`Counting notes for ${dr.domain} (${i + 1}/${companiesToCount.length})…`, pct);
+        sse.progress(`Counting notes for ${dr.matchName || dr.domain || '(no domain)'} (${i + 1}/${companiesToCount.length})…`, pct);
         try {
           const counts = await fetchNoteCounts(pbFetch, withRetry, id);
           if (isTarget) {
@@ -470,7 +522,9 @@ function resolveTarget(note) {
 // ---------------------------------------------------------------------------
 
 router.post('/run', pbAuth, async (req, res) => {
+  _stopRequested = false;
   const sse = startSSE(res);
+  const shouldStop = () => sse.isAborted() || _stopRequested;
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { domainRecords = [] } = req.body || {};
 
@@ -488,14 +542,14 @@ router.post('/run', pbAuth, async (req, res) => {
     );
 
     for (const dr of domainRecords) {
-      if (sse.isAborted()) break;
+      if (shouldStop()) break;
 
       for (const dupId of getDupIds(dr)) {
-        if (sse.isAborted()) break;
+        if (shouldStop()) break;
 
         const pct = total > 0 ? Math.round((processed / total) * 90) : 0;
         sse.progress(
-          `[${processed + 1}/${total}] ${dr.domain} — duplicate ${dupId.slice(0, 8)}…`, pct
+          `[${processed + 1}/${total}] ${dr.matchName || dr.domain || '(no domain)'} — duplicate ${dupId.slice(0, 8)}…`, pct
         );
 
         const entry = {
@@ -537,7 +591,7 @@ router.post('/run', pbAuth, async (req, res) => {
           const relinkUserIds = new Set();
 
           for (const note of notes) {
-            if (sse.isAborted()) break;
+            if (shouldStop()) break;
 
             const noteId = note.id || '';
             const { targetId, targetType } = resolveTarget(note);
@@ -579,7 +633,7 @@ router.post('/run', pbAuth, async (req, res) => {
           // ── Step 3: Relink users parented to this duplicate ──────────────
           // Fetches via POST /v2/entities/search (filter by parent relationship).
           // Skips users already relinked in Step 2 to avoid double-counting.
-          if (!sse.isAborted()) {
+          if (!shouldStop()) {
             const usersPayload = {
               data: {
                 filter: {
@@ -599,7 +653,7 @@ router.post('/run', pbAuth, async (req, res) => {
                 `search users for duplicate ${dupId}`
               );
               for (const user of (r.data || [])) {
-                if (sse.isAborted()) break;
+                if (shouldStop()) break;
                 if (relinkUserIds.has(user.id)) continue; // already handled via notes path
                 try {
                   await withRetry(
@@ -624,7 +678,7 @@ router.post('/run', pbAuth, async (req, res) => {
               cursor = r.links?.next
                 ? (r.links.next.match(/pageCursor=([^&]+)/)?.[1] ?? null)
                 : null;
-            } while (cursor && !sse.isAborted());
+            } while (cursor && !shouldStop());
           }
 
           // ── Step 4: Delete duplicate (v2) — only if all relinks succeeded ─
@@ -635,14 +689,14 @@ router.post('/run', pbAuth, async (req, res) => {
               () => pbFetch('delete', `/v2/entities/${dupId}`),
               `delete company ${dupId}`
             );
-            sse.log('success', `Deleted duplicate company ${dupId} (${dr.domain})`, { uuid: dupId });
+            sse.log('success', `Deleted duplicate company ${dupId} (${dr.matchName || dr.domain || 'no domain'})`, { uuid: dupId });
             entry.deleted = true;
             deleted++;
           }
 
         } catch (err) {
           const msg = parseApiError(err);
-          sse.log('error', `Error processing duplicate ${dupId} (${dr.domain}): ${msg}`, { uuid: dupId });
+          sse.log('error', `Error processing duplicate ${dupId} (${dr.matchName || dr.domain || 'no domain'}): ${msg}`, { uuid: dupId });
           entry.error = msg;
           errors++;
         }
@@ -652,7 +706,7 @@ router.post('/run', pbAuth, async (req, res) => {
       }
     }
 
-    const stopped = sse.isAborted();
+    const stopped = shouldStop();
     sse.progress(stopped ? 'Stopped.' : 'Merge complete.', 100);
     sse.complete({ notesRelinked, usersRelinked, deleted, errors, stopped, actionLog });
 

@@ -92,6 +92,23 @@
                           <span class="info-icon" data-tip="Case-insensitive, punctuation-ignored comparison. 'Acme Inc' and 'ACME, INC.' are treated as the same name. 'Acme Inc' and 'Acme' are not.">i</span>
                         </label>
                       </div>
+                      <div style="display:flex;flex-direction:column;gap:6px;">
+                        <label class="checkbox-label">
+                          <input type="radio" name="dc-match" value="name">
+                          Name only
+                          <span class="info-icon" data-tip="Match companies by name across your whole workspace, regardless of domain. Use the options below to narrow the scope or enable fuzzy matching.">i</span>
+                        </label>
+                        <label class="checkbox-label" id="dc-no-domain-only-label" style="margin-left:20px;opacity:0.4;pointer-events:none;">
+                          <input type="checkbox" id="dc-no-domain-only-checkbox">
+                          Only companies without a domain
+                          <span class="info-icon" data-tip="Restrict name matching to companies that have no domain set. Useful for cleaning up unlinked or unmapped records only.">i</span>
+                        </label>
+                        <label class="checkbox-label" id="dc-fuzzy-name-label" style="margin-left:20px;opacity:0.4;pointer-events:none;">
+                          <input type="checkbox" id="dc-fuzzy-name-checkbox">
+                          Fuzzy matching
+                          <span class="info-icon" data-tip="Case-insensitive, punctuation-ignored comparison. 'Acme Inc' and 'ACME, INC.' are treated as the same name. 'Acme Inc' and 'Acme' are not.">i</span>
+                        </label>
+                      </div>
                     </div>
                   </div>
 
@@ -130,7 +147,7 @@
                     <span class="alert-icon">✅</span>
                     <span>No duplicate groups found. Nothing to merge.</span>
                   </div>
-                  <button class="btn btn-secondary" id="dc-no-dup-rescan">Re-scan</button>
+                  <button class="btn btn-secondary" id="dc-no-dup-rescan">Adjust options</button>
                 </div>
 
                 <!-- Groups list -->
@@ -151,6 +168,7 @@
                     <details>
                       <summary style="cursor:pointer;font-size:13px;color:var(--c-muted);user-select:none;">
                         <span id="dc-skipped-count"></span> domain(s) skipped — <span id="dc-skipped-reason"></span>
+                        <span class="info-icon" data-tip="These groups couldn't be auto-resolved because the target company is ambiguous. To merge them yourself, go back and switch 'Primary record origin' to 'Let me choose per group' — you'll be able to pick the target for each group manually.">i</span>
                       </summary>
                       <div style="overflow-x:auto;margin-top:8px;">
                         <table class="mapping-table" id="dc-skipped-table">
@@ -168,7 +186,7 @@
                   </div>
 
                   <!-- Merge action -->
-                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:20px;">
                     <button class="btn btn-danger" id="dc-merge-btn">Merge &amp; delete duplicates</button>
                     <button class="btn btn-secondary" id="dc-rescan-btn">Adjust options</button>
                   </div>
@@ -188,6 +206,8 @@
                   <span id="dc-run-progress-pct" style="margin-left:auto;"></span>
                 </div>
 
+                <button class="btn btn-danger btn-sm mt-8" id="dc-run-stop">⏹ Stop</button>
+
                 <div id="dc-run-log" class="live-log hidden mt-16">
                   <div class="live-log-header">
                     <span>Live log</span>
@@ -195,8 +215,6 @@
                   </div>
                   <div id="dc-run-log-entries" class="live-log-scroll"></div>
                 </div>
-
-                <button class="btn btn-danger btn-sm mt-8" id="dc-run-stop">⏹ Stop</button>
               </div><!-- /dc-running -->
 
               <!-- ════════════════════════════════
@@ -205,6 +223,13 @@
               <div id="dc-results" class="hidden">
                 <div id="dc-results-summary"></div>
 
+                <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                  <button class="btn btn-primary hidden" id="dc-continue-run">▶ Continue merge</button>
+                  <button class="btn btn-secondary" id="dc-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm" id="dc-download-audit">↓ Download audit log (JSON)</button>
+                  <button class="btn btn-ghost btn-sm" id="dc-start-over">Start over</button>
+                </div>
+
                 <div id="dc-results-log" class="live-log hidden mt-16">
                   <div class="live-log-header">
                     <span>Log</span>
@@ -212,12 +237,6 @@
                     <button class="btn btn-ghost btn-sm hidden" id="dc-results-download-log" style="margin-left:auto;">↓ Download log</button>
                   </div>
                   <div id="dc-results-log-entries" class="live-log-scroll"></div>
-                </div>
-
-                <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-                  <button class="btn btn-secondary" id="dc-back-to-preview">← Back to preview</button>
-                  <button class="btn btn-ghost btn-sm" id="dc-download-audit">↓ Download audit log (JSON)</button>
-                  <button class="btn btn-ghost btn-sm" id="dc-start-over">Start over</button>
                 </div>
               </div><!-- /dc-results -->
 

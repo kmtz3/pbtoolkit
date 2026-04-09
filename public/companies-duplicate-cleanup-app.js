@@ -12,7 +12,8 @@
   let _groupCardEls    = new Map(); // domainRecord → { el: <details>, di: number }
   let _scanCtrl        = null;  // AbortController for scan SSE
   let _runCtrl         = null;  // AbortController for run SSE
-  let _auditLog        = null;  // action log from last run
+  let _auditLog        = null;  // cumulative action log across all run segments
+  let _pendingRun      = null;  // original toProcess list for current run (enables continue)
   let _logAppender     = null;
   let _fromRun         = false; // true if last error came from /run (enables back-to-preview)
   let _originsLoaded   = false;
@@ -42,6 +43,7 @@
     _selectedDomains = new Set();
     _groupCardEls    = new Map();
     _auditLog        = null;
+    _pendingRun      = null;
     _fromRun         = false;
     _originsLoaded   = false;
     _originsLoading  = false;
@@ -125,7 +127,10 @@
     const manualMode    = checkedOrigin === '__manual__';
     const primaryOrigin = manualMode ? null : (checkedOrigin || 'salesforce');
     const matchCriteria = document.querySelector('input[name="dc-match"]:checked')?.value ?? 'domain';
-    const fuzzyMatch    = dc$('dc-fuzzy-checkbox')?.checked ?? false;
+    const fuzzyMatch    = matchCriteria === 'name'
+      ? (dc$('dc-fuzzy-name-checkbox')?.checked ?? false)
+      : (dc$('dc-fuzzy-checkbox')?.checked ?? false);
+    const noDomainOnly  = matchCriteria === 'name' && (dc$('dc-no-domain-only-checkbox')?.checked ?? false);
 
     _fromRun = false;
     _selectedDomains = new Set();
@@ -135,7 +140,7 @@
 
     _scanCtrl = subscribeSSE(
       '/api/companies-duplicate-cleanup/scan',
-      { primaryOrigin, manualMode, matchCriteria, fuzzyMatch },
+      { primaryOrigin, manualMode, matchCriteria, fuzzyMatch, noDomainOnly },
       {
         onProgress({ message, percent }) { setProgress('dc', message, percent ?? 0); },
         onLog() {},
@@ -166,7 +171,7 @@
     if (summaryText) {
       if (totalDomains > 0) {
         summaryText.textContent =
-          `${totalDomains} domain group${totalDomains !== 1 ? 's' : ''} · ` +
+          `${totalDomains} group${totalDomains !== 1 ? 's' : ''} · ` +
           `${totalDuplicates} duplicate compan${totalDuplicates !== 1 ? 'ies' : 'y'} to delete` +
           (isManual ? ' · manual target selection' : '') +
           (skippedRows.length ? ` · ${skippedRows.length} skipped` : '');
@@ -209,7 +214,7 @@
             : `${(s.sfUuids || []).length} "${o}" companies found (expected 1)`;
           const tr = document.createElement('tr');
           tr.innerHTML = `
-            <td>${esc(s.matchName ? `${s.domain} · ${s.matchName}` : s.domain)}</td>
+            <td>${esc(s.domain ? (s.matchName ? `${s.domain} · ${s.matchName}` : s.domain) : (s.matchName || '(no domain)'))}</td>
             <td>${esc(reasonLabel)}</td>
             <td style="font-family:monospace;font-size:11px;">${esc((s.sfUuids || []).join(', ') || '—')}</td>
           `;
@@ -229,11 +234,13 @@
     if (!dr.allCompanies) {
       dr.allCompanies = [
         {
-          id:          dr.sfCompanyId,
-          name:        dr.sfCompanyName,
-          sourceOrigin: dr.sfCompanyOrigin || null,
-          notesCount:  dr.sfNotesCount ?? null,
-          usersCount:  dr.sfUsersCount ?? null,
+          id:             dr.sfCompanyId,
+          name:           dr.sfCompanyName,
+          domain:         dr.sfCompanyDomain || null,
+          sourceOrigin:   dr.sfCompanyOrigin || null,
+          sourceRecordId: dr.sfCompanySourceRecordId || null,
+          notesCount:     dr.sfNotesCount ?? null,
+          usersCount:     dr.sfUsersCount ?? null,
         },
         ...(dr.duplicates || []),
       ];
@@ -284,7 +291,9 @@
 
     const domainLabel = document.createElement('span');
     domainLabel.className = 'nm-group-title';
-    domainLabel.textContent = dr.matchName ? `${dr.domain} · ${dr.matchName}` : dr.domain;
+    domainLabel.textContent = dr.domain
+      ? (dr.matchName ? `${dr.domain} · ${dr.matchName}` : dr.domain)
+      : (dr.matchName || '(no domain)');
 
     const spacer = document.createElement('span');
     spacer.className = 'nm-group-spacer';
@@ -309,6 +318,7 @@
         <tr>
           <th style="width:80px;">Role</th>
           <th>Company name</th>
+          <th>Domain</th>
           <th>UUID</th>
           <th>Source</th>
           ${hasCounts ? '<th style="text-align:right;width:60px;">Notes</th><th style="text-align:right;width:60px;">Users</th>' : ''}
@@ -318,6 +328,13 @@
     `;
     const tbody = document.createElement('tbody');
 
+    // Pre-compute totals incoming to target from all duplicates (non-manual auto mode display)
+    const dupCompanies   = dr.allCompanies.filter(c => c.id !== dr.sfCompanyId);
+    const incomingNotes  = dupCompanies.every(d => d.notesCount != null)
+      ? dupCompanies.reduce((n, d) => n + d.notesCount, 0) : null;
+    const incomingUsers  = dupCompanies.every(d => d.usersCount != null)
+      ? dupCompanies.reduce((n, d) => n + (d.usersCount ?? 0), 0) : null;
+
     // All companies in stable original order — badge reflects current target
     for (const c of dr.allCompanies) {
       const isTarget = c.id === dr.sfCompanyId;
@@ -326,15 +343,33 @@
       const badge    = isTarget
         ? `<span class="badge badge-ok" style="font-size:10px;">Target</span>`
         : `<span class="badge badge-danger" style="font-size:10px;">Delete</span>`;
-      const noteCell = c.notesCount != null
-        ? `<td style="text-align:right;font-size:12px;">${c.notesCount}</td>`
-        : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
-      const userCell = c.usersCount != null
-        ? `<td style="text-align:right;font-size:12px;">${c.usersCount}</td>`
-        : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+      let noteCell, userCell;
+      if (isTarget && !isManual) {
+        noteCell = incomingNotes != null
+          ? `<td style="text-align:right;font-size:12px;color:var(--c-ok,#22c55e);font-weight:600;">+${incomingNotes}</td>`
+          : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+        userCell = incomingUsers != null
+          ? `<td style="text-align:right;font-size:12px;color:var(--c-ok,#22c55e);font-weight:600;">+${incomingUsers}</td>`
+          : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+      } else if (isTarget && isManual) {
+        const inNoteTag = incomingNotes != null && incomingNotes > 0
+          ? `<span style="color:var(--c-ok,#22c55e);font-weight:600;margin-left:4px;">(+${incomingNotes})</span>` : '';
+        const inUserTag = incomingUsers != null && incomingUsers > 0
+          ? `<span style="color:var(--c-ok,#22c55e);font-weight:600;margin-left:4px;">(+${incomingUsers})</span>` : '';
+        noteCell = `<td style="text-align:right;font-size:12px;">${c.notesCount != null ? c.notesCount : '—'}${inNoteTag}</td>`;
+        userCell = `<td style="text-align:right;font-size:12px;">${c.usersCount != null ? c.usersCount : '—'}${inUserTag}</td>`;
+      } else {
+        noteCell = c.notesCount != null
+          ? `<td style="text-align:right;font-size:12px;">${c.notesCount}</td>`
+          : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+        userCell = c.usersCount != null
+          ? `<td style="text-align:right;font-size:12px;">${c.usersCount}</td>`
+          : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+      }
       tr.innerHTML = `
         <td>${badge}</td>
         <td>${esc(c.name || c.id)}</td>
+        <td style="font-size:12px;color:var(--c-muted);">${esc(c.domain || '—')}</td>
         <td style="font-family:monospace;font-size:11px;color:var(--c-muted);">${esc(c.id.slice(0, 18))}…</td>
         <td style="font-size:12px;">${esc(c.sourceOrigin || '—')}</td>
         ${hasCounts ? noteCell + userCell : ''}
@@ -382,9 +417,11 @@
   // ── Target swap (manual mode only) ────────────────────────
   function swapTarget(dr, newTarget) {
     const oldTargetId  = dr.sfCompanyId;
-    dr.sfCompanyId     = newTarget.id;
-    dr.sfCompanyName   = newTarget.name;
-    dr.sfCompanyOrigin = newTarget.sourceOrigin;
+    dr.sfCompanyId             = newTarget.id;
+    dr.sfCompanyName           = newTarget.name;
+    dr.sfCompanyDomain         = newTarget.domain || null;
+    dr.sfCompanyOrigin         = newTarget.sourceOrigin;
+    dr.sfCompanySourceRecordId = newTarget.sourceRecordId || null;
     dr.duplicates      = dr.allCompanies.filter(c => c.id !== newTarget.id);
     rerenderDomainBlock(dr);
     // Keep compare modal open and pointing at the old target (now a duplicate)
@@ -433,12 +470,12 @@
     const dr      = _compareDr;
     const dups    = dcDuplicates(dr);
     const records = _previewData?.domainRecords || [];
-    const target  = { id: dr.sfCompanyId, name: dr.sfCompanyName, sourceOrigin: dr.sfCompanyOrigin };
+    const target  = { id: dr.sfCompanyId, name: dr.sfCompanyName, domain: dr.sfCompanyDomain || null, sourceOrigin: dr.sfCompanyOrigin, sourceRecordId: dr.sfCompanySourceRecordId || null };
     const dup     = dups[_compareDupIdx];
     if (!dup) return;
 
     dcText('dc-cmp-group-nav',   `${_compareDrIdx + 1} / ${records.length}`);
-    dcText('dc-cmp-group-label', dr.domain);
+    dcText('dc-cmp-group-label', dr.domain || dr.matchName || '(no domain)');
     dcText('dc-cmp-dup-nav',     `${_compareDupIdx + 1} / ${dups.length}`);
 
     const modalCb = dc$('dc-cmp-group-select');
@@ -478,12 +515,16 @@
     }
   }
 
-  function renderCompanyCard(c, domain, roleLabel, isTarget = false, hasCounts = false) {
+  function renderCompanyCard(c, _groupLabel, roleLabel, isTarget = false, hasCounts = false) {
     const noteLabel = isTarget ? 'Notes incoming (total)' : 'Notes to move';
     const userLabel = isTarget ? 'Users incoming (total)' : 'Users to move';
     const showSection = hasCounts || c.notesCount != null || c.usersCount != null;
-    const noteVal = c.notesCount != null ? c.notesCount : '—';
-    const userVal = c.usersCount != null ? c.usersCount : '—';
+    const noteVal = c.notesCount != null
+      ? (isTarget && c.notesCount > 0 ? `<span style="color:var(--c-ok,#22c55e);">+${c.notesCount}</span>` : c.notesCount)
+      : '—';
+    const userVal = c.usersCount != null
+      ? (isTarget && c.usersCount > 0 ? `<span style="color:var(--c-ok,#22c55e);">+${c.usersCount}</span>` : c.usersCount)
+      : '—';
     const countRows = showSection ? `
       <div style="display:flex;gap:24px;margin-top:16px;padding-top:14px;border-top:1px solid var(--c-border);">
         <div><div style="font-size:11px;color:var(--c-muted);margin-bottom:2px;">${noteLabel}</div><div style="font-size:22px;font-weight:600;line-height:1;">${noteVal}</div></div>
@@ -495,11 +536,15 @@
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <tr>
           <td style="color:var(--c-muted);padding:4px 0;white-space:nowrap;width:70px;vertical-align:top;">Domain</td>
-          <td style="padding:4px 10px;">${esc(domain)}</td>
+          <td style="padding:4px 10px;">${esc(c.domain || '—')}</td>
         </tr>
         <tr>
           <td style="color:var(--c-muted);padding:4px 0;vertical-align:top;">Source</td>
           <td style="padding:4px 10px;">${esc(c.sourceOrigin || '—')}</td>
+        </tr>
+        <tr>
+          <td style="color:var(--c-muted);padding:4px 0;vertical-align:top;white-space:nowrap;">Source record ID</td>
+          <td style="padding:4px 10px;font-family:monospace;font-size:11px;word-break:break-all;">${esc(c.sourceRecordId || '—')}</td>
         </tr>
         <tr>
           <td style="color:var(--c-muted);padding:4px 0;vertical-align:top;">UUID</td>
@@ -559,21 +604,26 @@
   function startSingleGroupMerge(dr, groupNum) {
     const dupCount = dr.duplicates?.length ?? 0;
     showConfirm(
-      `Merge group ${groupNum} (${dr.domain})?\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${esc(dr.sfCompanyName || dr.sfCompanyId)}, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone.`,
+      `Merge group ${groupNum} (${dr.domain || dr.matchName || 'no domain'})?\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${esc(dr.sfCompanyName || dr.sfCompanyId)}, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone.`,
       { confirmText: 'Merge this group', danger: true }
     ).then((confirmed) => { if (confirmed) runMerge([dr]); });
   }
 
   // ── Run merge via SSE ──────────────────────────────────────
-  function runMerge(records) {
-    if (!token) { requireToken(() => runMerge(records)); return; }
+  function runMerge(records, isContinuation = false) {
+    if (!token) { requireToken(() => runMerge(records, isContinuation)); return; }
     const toProcess = records ?? (_selectedDomains.size > 0 ? [..._selectedDomains] : _previewData?.domainRecords ?? []);
     if (!toProcess.length) return;
+
+    if (!isContinuation) _pendingRun = toProcess;
 
     _fromRun = true;
     dcGo('running');
     setProgress('dc-run', 'Starting merge…', 0);
-    if (_logAppender) _logAppender.reset();
+    if (_logAppender) {
+      if (isContinuation) _logAppender.separator('▶ Continuing merge');
+      else _logAppender.reset();
+    }
 
     _runCtrl = subscribeSSE(
       '/api/companies-duplicate-cleanup/run',
@@ -583,7 +633,10 @@
         onLog(entry) { if (_logAppender) _logAppender(entry); },
         onComplete(data) {
           _runCtrl  = null;
-          _auditLog = data.actionLog || [];
+          // Accumulate audit log across continuation segments
+          _auditLog = isContinuation && _auditLog
+            ? [..._auditLog, ...(data.actionLog || [])]
+            : (data.actionLog || []);
           renderResults(data);
           dcGo('results');
         },
@@ -594,9 +647,54 @@
           if (_logAppender?.getRows().length > 0) dcShow('dc-error-download-log');
           dcGo('error');
         },
-        onAbort() {},
+        onAbort() {
+          _runCtrl = null;
+          dcGo('preview');
+        },
       }
     );
+  }
+
+  // ── Continue a stopped run with remaining unprocessed dups ─
+  function continueRun() {
+    if (!_pendingRun || !_auditLog) return;
+    const processedDupIds = new Set(_auditLog.map(e => e.duplicateCompanyId));
+    const remaining = _pendingRun
+      .map(dr => ({ ...dr, duplicates: (dr.duplicates || []).filter(d => !processedDupIds.has(d.id)) }))
+      .filter(dr => dr.duplicates.length > 0);
+    if (!remaining.length) return;
+    runMerge(remaining, true);
+  }
+
+  // ── Prune successfully merged groups before returning to preview ───────────
+  // Removes groups whose duplicates were all deleted from _previewData so that
+  // "Back to preview" after a stopped run doesn't re-show already-deleted companies.
+  function pruneCompletedFromPreview() {
+    if (!_previewData || !_auditLog?.length) return;
+    const deletedIds = new Set(_auditLog.filter(e => e.deleted).map(e => e.duplicateCompanyId));
+    if (!deletedIds.size) return;
+
+    const kept = [];
+    for (const dr of _previewData.domainRecords) {
+      const remainingDups = (dr.duplicates || []).filter(d => !deletedIds.has(d.id));
+      if (remainingDups.length === 0) {
+        // Every dup in this group was successfully deleted — drop it entirely
+        _selectedDomains.delete(dr);
+        continue;
+      }
+      // Some dups deleted — trim in-place to preserve object reference for _selectedDomains
+      if (remainingDups.length !== (dr.duplicates || []).length) {
+        dr.duplicates = remainingDups;
+        if (dr.allCompanies) {
+          dr.allCompanies = dr.allCompanies.filter(c => c.id === dr.sfCompanyId || !deletedIds.has(c.id));
+        }
+      }
+      kept.push(dr);
+    }
+
+    _previewData.domainRecords  = kept;
+    _previewData.totalDomains   = kept.length;
+    _previewData.totalDuplicates = kept.reduce((n, dr) => n + (dr.duplicates || []).length, 0);
   }
 
   // ── Render results summary ─────────────────────────────────
@@ -604,6 +702,15 @@
     const { notesRelinked = 0, usersRelinked = 0, deleted = 0, errors = 0, stopped = false } = data;
     const summaryEl = dc$('dc-results-summary');
     if (!summaryEl) return;
+
+    // Compute remaining unprocessed dups across all run segments
+    let remainingCount = 0;
+    if (stopped && _pendingRun && _auditLog) {
+      const processedDupIds = new Set(_auditLog.map(e => e.duplicateCompanyId));
+      remainingCount = _pendingRun.reduce(
+        (n, dr) => n + (dr.duplicates || []).filter(d => !processedDupIds.has(d.id)).length, 0
+      );
+    }
 
     const hasErrors  = errors > 0;
     const alertClass = (stopped || hasErrors) ? 'alert-warn' : 'alert-ok';
@@ -615,13 +722,25 @@
     if (usersRelinked) parts.push(`${usersRelinked} user${usersRelinked !== 1 ? 's' : ''} updated`);
     if (deleted)       parts.push(`${deleted} compan${deleted !== 1 ? 'ies' : 'y'} deleted`);
     if (errors)        parts.push(`${errors} error${errors !== 1 ? 's' : ''}`);
+    if (remainingCount) parts.push(`${remainingCount} left undone`);
 
     summaryEl.innerHTML = `
       <div class="alert ${alertClass}" style="margin-bottom:0;">
         <span class="alert-icon">${icon}</span>
-        <span><strong>${status}.</strong> ${parts.join(' · ') || 'Nothing done.'}${stopped ? ' (incomplete)' : ''}</span>
+        <span><strong>${status}.</strong> ${parts.join(' · ') || 'Nothing done.'}</span>
       </div>
     `;
+
+    if (stopped && remainingCount > 0) dcShow('dc-continue-run');
+    else dcHide('dc-continue-run');
+
+    // Hide "Back to preview" if no groups remain after this run (all merged/deleted)
+    const deletedIds = new Set((_auditLog || []).filter(e => e.deleted).map(e => e.duplicateCompanyId));
+    const remainingGroups = (_previewData?.domainRecords || []).filter(dr =>
+      (dr.duplicates || []).some(d => !deletedIds.has(d.id))
+    ).length;
+    if (remainingGroups > 0) dcShow('dc-back-to-preview');
+    else dcHide('dc-back-to-preview');
 
     const runEntries = dc$('dc-run-log-entries');
     const resEntries = dc$('dc-results-log-entries');
@@ -666,16 +785,30 @@
       requireToken(() => loadOrigins(true));
     });
 
-    // Match criteria — enable fuzzy only when Domain + Name is selected
+    // Match criteria — enable the appropriate fuzzy sub-option
     document.querySelectorAll('input[name="dc-match"]').forEach(radio => {
       radio.addEventListener('change', () => {
-        const enabled = document.querySelector('input[name="dc-match"]:checked')?.value === 'domain+name';
-        const label   = dc$('dc-fuzzy-label');
+        const val            = document.querySelector('input[name="dc-match"]:checked')?.value;
+        const domNameEnabled = val === 'domain+name';
+        const nameEnabled    = val === 'name';
+        const label           = dc$('dc-fuzzy-label');
+        const nameLabel       = dc$('dc-fuzzy-name-label');
+        const noDomainLabel   = dc$('dc-no-domain-only-label');
         if (label) {
-          label.style.opacity       = enabled ? '1'    : '0.4';
-          label.style.pointerEvents = enabled ? 'auto' : 'none';
+          label.style.opacity       = domNameEnabled ? '1'    : '0.4';
+          label.style.pointerEvents = domNameEnabled ? 'auto' : 'none';
         }
-        if (!enabled) { const cb = dc$('dc-fuzzy-checkbox'); if (cb) cb.checked = false; }
+        if (nameLabel) {
+          nameLabel.style.opacity       = nameEnabled ? '1'    : '0.4';
+          nameLabel.style.pointerEvents = nameEnabled ? 'auto' : 'none';
+        }
+        if (noDomainLabel) {
+          noDomainLabel.style.opacity       = nameEnabled ? '1'    : '0.4';
+          noDomainLabel.style.pointerEvents = nameEnabled ? 'auto' : 'none';
+        }
+        if (!domNameEnabled) { const cb = dc$('dc-fuzzy-checkbox');          if (cb) cb.checked = false; }
+        if (!nameEnabled)    { const cb = dc$('dc-fuzzy-name-checkbox');     if (cb) cb.checked = false; }
+        if (!nameEnabled)    { const cb = dc$('dc-no-domain-only-checkbox'); if (cb) cb.checked = false; }
       });
     });
 
@@ -717,19 +850,36 @@
 
     // Adjust options → back to idle so user can change source selection before re-scanning
     dc$('dc-rescan-btn')?.addEventListener('click', () => dcGo('idle'));
-    // No duplicates found → re-scan directly (options don't need changing)
-    dc$('dc-no-dup-rescan')?.addEventListener('click', runScan);
+    // No duplicates found → go back to idle so user can adjust options before re-scanning
+    dc$('dc-no-dup-rescan')?.addEventListener('click', () => dcGo('idle'));
 
     // Merge button
     dc$('dc-merge-btn')?.addEventListener('click', startMerge);
 
-    // Run stop
-    dc$('dc-run-stop')?.addEventListener('click', () => {
-      if (_runCtrl) { _runCtrl.abort(); _runCtrl = null; }
+    // Run stop — signal the server to finish the current duplicate then stop gracefully.
+    // We do NOT abort the SSE connection so we still receive the complete event with partial results.
+    dc$('dc-run-stop')?.addEventListener('click', async () => {
+      const btn = dc$('dc-run-stop');
+      if (btn) { btn.disabled = true; btn.textContent = '⏹ Stopping…'; }
+      try {
+        await fetch('/api/companies-duplicate-cleanup/run/stop', {
+          method: 'POST', headers: buildHeaders(),
+        });
+      } catch (_e) {
+        // If the stop request itself fails, fall back to hard abort
+        if (_runCtrl) { _runCtrl.abort(); _runCtrl = null; }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '⏹ Stop'; }
+      }
     });
 
     // Results actions
-    dc$('dc-back-to-preview')?.addEventListener('click', () => dcGo('preview'));
+    dc$('dc-continue-run')?.addEventListener('click', continueRun);
+    dc$('dc-back-to-preview')?.addEventListener('click', () => {
+      pruneCompletedFromPreview();
+      renderPreview(_previewData);
+      dcGo('preview');
+    });
     dc$('dc-results-download-log')?.addEventListener('click', () => {
       if (_logAppender) downloadLogCsv(_logAppender, 'companies-merge');
     });
@@ -737,7 +887,11 @@
     dc$('dc-start-over')?.addEventListener('click', resetModule);
 
     // Error actions
-    dc$('dc-error-back-to-preview')?.addEventListener('click', () => dcGo('preview'));
+    dc$('dc-error-back-to-preview')?.addEventListener('click', () => {
+      pruneCompletedFromPreview();
+      renderPreview(_previewData);
+      dcGo('preview');
+    });
     dc$('dc-error-download-log')?.addEventListener('click', () => {
       if (_logAppender) downloadLogCsv(_logAppender, 'companies-merge');
     });
