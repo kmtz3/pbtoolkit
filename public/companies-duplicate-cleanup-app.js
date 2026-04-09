@@ -577,7 +577,7 @@
 
     _runCtrl = subscribeSSE(
       '/api/companies-duplicate-cleanup/run',
-      { domainRecords: toProcess, dryRun: false },
+      { domainRecords: toProcess },
       {
         onProgress({ message, percent }) { setProgress('dc-run', message, percent ?? 0); },
         onLog(entry) { if (_logAppender) _logAppender(entry); },

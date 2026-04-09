@@ -17,7 +17,6 @@
  * Rate limiting: pbFetch throttles via token-bucket (minDelay + remaining-based backoff).
  * Retries: withRetry wraps every mutating call — up to 6 attempts, exponential backoff,
  *          honours Retry-After on 429s.
- * dry-run mode: steps 1–4 are logged but no mutating calls are made.
  */
 
 const express = require('express');
@@ -473,7 +472,7 @@ function resolveTarget(note) {
 router.post('/run', pbAuth, async (req, res) => {
   const sse = startSSE(res);
   const { pbFetch, withRetry } = res.locals.pbClient;
-  const { domainRecords = [], dryRun = false } = req.body || {};
+  const { domainRecords = [] } = req.body || {};
 
   let notesRelinked = 0, usersRelinked = 0, deleted = 0, errors = 0;
   const actionLog = [];
@@ -485,7 +484,7 @@ router.post('/run', pbAuth, async (req, res) => {
 
   try {
     sse.progress(
-      `Starting merge of ${domainRecords.length} domain(s)${dryRun ? ' [dry run]' : ''}…`, 0
+      `Starting merge of ${domainRecords.length} domain(s)…`, 0
     );
 
     for (const dr of domainRecords) {
@@ -518,21 +517,17 @@ router.post('/run', pbAuth, async (req, res) => {
           // ── Step 1: Find and relink all notes linked to this duplicate ───
           const notes = [];
 
-          if (dryRun) {
-            sse.log('info', `[DRY RUN] Would search notes for duplicate company ${dupId}…`, { uuid: dupId });
-          } else {
-            const payload = { data: { relationships: { customer: { ids: [dupId] } } } };
-            let r = await withRetry(
-              () => pbFetch('post', '/v2/notes/search', payload),
-              `search notes for ${dupId}`
-            );
+          const payload = { data: { relationships: { customer: { ids: [dupId] } } } };
+          let r = await withRetry(
+            () => pbFetch('post', '/v2/notes/search', payload),
+            `search notes for ${dupId}`
+          );
+          if (r.data?.length) notes.push(...r.data);
+          let nextUrl = r.links?.next || null;
+          while (nextUrl) {
+            r = await withRetry(() => pbFetch('get', nextUrl), `paginate notes for ${dupId}`);
             if (r.data?.length) notes.push(...r.data);
-            let nextUrl = r.links?.next || null;
-            while (nextUrl) {
-              r = await withRetry(() => pbFetch('get', nextUrl), `paginate notes for ${dupId}`);
-              if (r.data?.length) notes.push(...r.data);
-              nextUrl = r.links?.next || null;
-            }
+            nextUrl = r.links?.next || null;
           }
 
           entry.notesFound = notes.length;
@@ -549,29 +544,25 @@ router.post('/run', pbAuth, async (req, res) => {
 
             try {
               if (targetType === 'user') {
-                if (!dryRun) {
-                  await withRetry(
-                    () => pbFetch('put', `/v2/entities/${targetId}/relationships/parent`, {
-                      data: { target: { id: dr.sfCompanyId }, type: 'company' },
-                    }),
-                    `relink user ${targetId} to target company`
-                  );
-                }
-                sse.log('success', `Relinked user ${targetId} → target company (via note ${noteId})${dryRun ? ' [DRY RUN]' : ''}`, { uuid: targetId });
+                await withRetry(
+                  () => pbFetch('put', `/v2/entities/${targetId}/relationships/parent`, {
+                    data: { target: { id: dr.sfCompanyId }, type: 'company' },
+                  }),
+                  `relink user ${targetId} to target company`
+                );
+                sse.log('success', `Relinked user ${targetId} → target company (via note ${noteId})`, { uuid: targetId });
                 relinkUserIds.add(targetId);
                 entry.usersRelinked++;
                 entry.userIds.push(targetId);
                 usersRelinked++;
               } else {
-                if (!dryRun) {
-                  await withRetry(
-                    () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
-                      data: { target: { type: 'company', id: dr.sfCompanyId } },
-                    }),
-                    `relink note ${noteId} to target company`
-                  );
-                }
-                sse.log('success', `Relinked note ${noteId} → target company${dryRun ? ' [DRY RUN]' : ''}`, { uuid: noteId });
+                await withRetry(
+                  () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
+                    data: { target: { type: 'company', id: dr.sfCompanyId } },
+                  }),
+                  `relink note ${noteId} to target company`
+                );
+                sse.log('success', `Relinked note ${noteId} → target company`, { uuid: noteId });
                 entry.notesRelinked++;
                 entry.noteIds.push(noteId);
                 notesRelinked++;
@@ -611,15 +602,13 @@ router.post('/run', pbAuth, async (req, res) => {
                 if (sse.isAborted()) break;
                 if (relinkUserIds.has(user.id)) continue; // already handled via notes path
                 try {
-                  if (!dryRun) {
-                    await withRetry(
-                      () => pbFetch('put', `/v2/entities/${user.id}/relationships/parent`, {
-                        data: { target: { id: dr.sfCompanyId }, type: 'company' },
-                      }),
-                      `relink user ${user.id} to target company`
-                    );
-                  }
-                  sse.log('success', `Relinked user ${user.id} → target company (direct parent)${dryRun ? ' [DRY RUN]' : ''}`, { uuid: user.id });
+                  await withRetry(
+                    () => pbFetch('put', `/v2/entities/${user.id}/relationships/parent`, {
+                      data: { target: { id: dr.sfCompanyId }, type: 'company' },
+                    }),
+                    `relink user ${user.id} to target company`
+                  );
+                  sse.log('success', `Relinked user ${user.id} → target company (direct parent)`, { uuid: user.id });
                   relinkUserIds.add(user.id);
                   entry.usersRelinked++;
                   entry.userIds.push(user.id);
@@ -641,8 +630,6 @@ router.post('/run', pbAuth, async (req, res) => {
           // ── Step 4: Delete duplicate (v2) — only if all relinks succeeded ─
           if (relinkFailed) {
             sse.log('warn', `Skipping DELETE for ${dupId} — one or more relinks failed`, { uuid: dupId });
-          } else if (dryRun) {
-            sse.log('info', `[DRY RUN] Would delete company ${dupId} (${dr.domain})`, { uuid: dupId });
           } else {
             await withRetry(
               () => pbFetch('delete', `/v2/entities/${dupId}`),
@@ -667,7 +654,7 @@ router.post('/run', pbAuth, async (req, res) => {
 
     const stopped = sse.isAborted();
     sse.progress(stopped ? 'Stopped.' : 'Merge complete.', 100);
-    sse.complete({ notesRelinked, usersRelinked, deleted, errors, stopped, dryRun, actionLog });
+    sse.complete({ notesRelinked, usersRelinked, deleted, errors, stopped, actionLog });
 
   } catch (err) {
     console.error('[companiesDuplicateCleanup/run]', err);
