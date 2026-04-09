@@ -21,6 +21,7 @@
   let _compareDr       = null;  // domain record open in compare modal
   let _compareDrIdx    = 0;     // index in _previewData.domainRecords
   let _compareDupIdx   = 0;     // index into current dr's duplicates (non-target companies)
+  let _vs              = null;  // createViewState handle
 
   // ── DOM helpers ───────────────────────────────────────────
   function dc$(id) { return document.getElementById(id); }
@@ -30,7 +31,6 @@
 
   // ── View state ────────────────────────────────────────────
   const DC_STATES = ['idle', 'scanning', 'preview', 'running', 'results', 'error'];
-  let _vs = null;
 
   function dcGo(state) { _vs?.go(state); }
 
@@ -43,6 +43,8 @@
     _groupCardEls    = new Map();
     _auditLog        = null;
     _fromRun         = false;
+    _originsLoaded   = false;
+    _originsLoading  = false;
     if (_logAppender) _logAppender.reset();
     dcHide('dc-results-download-log');
     dcHide('dc-error-download-log');
@@ -93,33 +95,13 @@
 
         const list = dc$('dc-origin-list');
         if (list) {
-          list.innerHTML = '';
-
           const displayOrigins = origins.filter(o => o !== 'manual');
-          for (const o of displayOrigins) {
-            const lbl = document.createElement('label');
-            lbl.className = 'checkbox-label';
-            const radio = document.createElement('input');
-            radio.type  = 'radio';
-            radio.name  = 'dc-origin';
-            radio.value = o;
-            if (o === 'salesforce' || (displayOrigins[0] === o && !displayOrigins.includes('salesforce'))) radio.checked = true;
-            lbl.appendChild(radio);
-            lbl.appendChild(document.createTextNode('\u00a0' + o.charAt(0).toUpperCase() + o.slice(1)));
-            list.appendChild(lbl);
-          }
-
-          // Manual option (always last)
-          const manualLbl = document.createElement('label');
-          manualLbl.className = 'checkbox-label';
-          const manualRadio = document.createElement('input');
-          manualRadio.type  = 'radio';
-          manualRadio.name  = 'dc-origin';
-          manualRadio.value = '__manual__';
-          if (displayOrigins.length === 0) manualRadio.checked = true;
-          manualLbl.appendChild(manualRadio);
-          manualLbl.appendChild(document.createTextNode('\u00a0Let me choose per group'));
-          list.appendChild(manualLbl);
+          const autoDefault = o => o === 'salesforce' || (displayOrigins[0] === o && !displayOrigins.includes('salesforce'));
+          list.innerHTML =
+            displayOrigins.map(o =>
+              `<label class="checkbox-label"><input type="radio" name="dc-origin" value="${esc(o)}"${autoDefault(o) ? ' checked' : ''}>&nbsp;${esc(o.charAt(0).toUpperCase() + o.slice(1))}</label>`
+            ).join('') +
+            `<label class="checkbox-label"><input type="radio" name="dc-origin" value="__manual__"${displayOrigins.length === 0 ? ' checked' : ''}>&nbsp;Let me choose per group</label>`;
         }
         dcShow('dc-origins-field');
       })
@@ -792,11 +774,7 @@
     });
 
     // Disconnect: clear origins state + reset
-    window.addEventListener('pb:disconnect', () => {
-      _originsLoaded  = false;
-      _originsLoading = false;
-      resetModule();
-    });
+    window.addEventListener('pb:disconnect', resetModule);
 
     // Retry origins on connect
     window.addEventListener('pb:connected', () => {

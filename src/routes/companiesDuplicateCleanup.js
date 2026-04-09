@@ -23,20 +23,17 @@
 const express = require('express');
 const { pbAuth } = require('../middleware/pbAuth');
 const { startSSE } = require('../lib/sse');
-const { parseCSV } = require('../lib/csvUtils');
 const { parseApiError } = require('../lib/errorUtils');
 
 const router = express.Router();
 
-// UUID regex — reset lastIndex before each use (global flag)
-const SF_UUID_RE  = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*\(salesforce\)/gi;
-const ANY_UUID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
 
 // ---------------------------------------------------------------------------
 // Origins cache (per-token, 30-minute TTL — mirrors teamCache pattern)
 // ---------------------------------------------------------------------------
 
-const ORIGINS_CACHE_TTL_MS = 30 * 60 * 1000;
+const ORIGINS_CACHE_TTL_MS    = 30 * 60 * 1000;
+const ORIGINS_CACHE_MAX_ENTRIES = 50;
 const originsCache = new Map();
 
 function getCachedOrigins(token) {
@@ -45,7 +42,19 @@ function getCachedOrigins(token) {
   return entry.origins;
 }
 
+function pruneOriginsCache() {
+  if (originsCache.size < ORIGINS_CACHE_MAX_ENTRIES) return;
+  for (const [key, entry] of originsCache) {
+    if (Date.now() - entry.fetchedAt > ORIGINS_CACHE_TTL_MS) originsCache.delete(key);
+  }
+  if (originsCache.size >= ORIGINS_CACHE_MAX_ENTRIES) {
+    const oldest = [...originsCache.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
+    originsCache.delete(oldest[0][0]);
+  }
+}
+
 function setCachedOrigins(token, origins) {
+  pruneOriginsCache();
   originsCache.set(token, { origins, fetchedAt: Date.now() });
 }
 
@@ -54,7 +63,7 @@ function setCachedOrigins(token, origins) {
 // ---------------------------------------------------------------------------
 
 router.get('/origins', pbAuth, async (req, res) => {
-  const token = req.session?.pbToken || req.headers['x-pb-token'];
+  const token = res.locals.pbToken;
   const forceRefresh = req.query.refresh === 'true';
 
   if (!forceRefresh) {
@@ -433,58 +442,6 @@ async function fetchNoteCounts(pbFetch, withRetry, companyId) {
   return { notesCount, usersCount: allUserIds.size };
 }
 
-// ---------------------------------------------------------------------------
-// CSV parser
-// ---------------------------------------------------------------------------
-
-/**
- * Parse the companies CSV.
- * Returns { domainRecords, skippedRows }.
- * Rows with 0 or 2+ Salesforce UUIDs land in skippedRows.
- */
-function parseDuplicatesCsv(csvText) {
-  const { rows, errors } = parseCSV(csvText);
-  if (errors.length) throw new Error(`CSV parse error: ${errors[0]}`);
-  if (!rows.length)  throw new Error('CSV is empty or has no data rows.');
-
-  // Column lookup — case-insensitive
-  const firstRow = rows[0];
-  const colMap   = Object.keys(firstRow).reduce((m, k) => { m[k.toLowerCase()] = k; return m; }, {});
-  if (!colMap['domain'] || !colMap['uuid_with_origin']) {
-    throw new Error(
-      `CSV must have 'domain' and 'uuid_with_origin' columns. Found: ${Object.keys(firstRow).join(', ')}`
-    );
-  }
-  const domainCol = colMap['domain'];
-  const uuidCol   = colMap['uuid_with_origin'];
-
-  const domainRecords = [];
-  const skippedRows   = [];
-
-  for (const row of rows) {
-    const domain = (row[domainCol] || '').trim().toLowerCase();
-    const raw    = (row[uuidCol]   || '').trim();
-    if (!domain) continue;
-
-    SF_UUID_RE.lastIndex  = 0;
-    ANY_UUID_RE.lastIndex = 0;
-
-    const sfUuids  = [...raw.matchAll(SF_UUID_RE)].map(m => m[1].toLowerCase());
-    const allUuids = [...raw.matchAll(ANY_UUID_RE)].map(m => m[1].toLowerCase());
-    const sfSet    = new Set(sfUuids);
-    const dups     = allUuids.filter(u => !sfSet.has(u));
-
-    if (sfUuids.length === 1) {
-      domainRecords.push({ domain, sfCompanyId: sfUuids[0], duplicateIds: dups });
-    } else if (sfUuids.length === 0) {
-      skippedRows.push({ domain, uuidWithOrigin: raw, reason: 'no_salesforce_uuid' });
-    } else {
-      skippedRows.push({ domain, uuidWithOrigin: raw, reason: 'multiple_salesforce_uuids', sfUuids });
-    }
-  }
-
-  return { domainRecords, skippedRows };
-}
 
 // ---------------------------------------------------------------------------
 // Resolve the relationship target for a note
@@ -508,28 +465,6 @@ function resolveTarget(note) {
   return { targetId: note.id, targetType: 'note' };
 }
 
-// ---------------------------------------------------------------------------
-// POST /preview
-// ---------------------------------------------------------------------------
-
-router.post('/preview', pbAuth, (req, res) => {
-  try {
-    const { csvText } = req.body;
-    if (!csvText) return res.status(400).json({ error: 'csvText is required.' });
-
-    const { domainRecords, skippedRows } = parseDuplicatesCsv(csvText);
-    const totalDuplicates = domainRecords.reduce((n, r) => n + r.duplicateIds.length, 0);
-
-    res.json({
-      domainRecords,
-      skippedRows,
-      totalDomains:    domainRecords.length,
-      totalDuplicates,
-    });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
 
 // ---------------------------------------------------------------------------
 // POST /run  (SSE)
