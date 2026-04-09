@@ -1,11 +1,11 @@
 # PBToolkit Manual Testing Guide
-_Generated: 2026-03-15_
+_Updated: 2026-04-09_
 
 ## How to use
 Run automated tests first, then work through each section below.
 
 ```bash
-node --test test/**/*.test.js   # must be all-green before manual testing
+npm test   # NODE_ENV=test is set automatically — must be all-green before manual testing
 ```
 
 Tick each box as you verify it. Re-run after any significant change.
@@ -230,6 +230,42 @@ Tick each box as you verify it. Re-run after any significant change.
 - [ ] Live log colour coding consistent: green = success, red = error, yellow = warn, grey = info
 - [ ] Back-to-tools button present on every module view
 - [ ] Resize browser to narrow width → no horizontal overflow or broken layout
+
+---
+
+---
+
+## 20. Merge Duplicate Companies
+
+**Scan — Origins loader:**
+- [ ] Navigate to Merge Duplicate Companies → origins list loads automatically (spinner shown then radio buttons appear)
+- [ ] If no token connected → "Connect to Productboard first" message shown in place of radio buttons
+- [ ] "Refresh sources" link re-fetches origins (bypasses cache)
+
+**Scan — Origin mode (default):**
+- [ ] Select a primary origin (e.g. Salesforce) and click Scan → progress bar and live log appear
+- [ ] Scan completes → preview panel shows grouped domain cards with duplicate counts
+- [ ] Domain with 0 primary-origin matches → skipped; appears in "Skipped" count
+- [ ] Domain with 2+ primary-origin matches → skipped; reason shown as "multiple targets"
+- [ ] Match Criteria = Domain Only (default) → groups all companies with the same domain
+- [ ] Match Criteria = Domain + Name (exact) → sub-groups by exact company name; companies with different names not grouped
+- [ ] Match Criteria = Domain + Name (fuzzy) → 'Acme Inc' and 'ACME, INC.' treated as same name
+- [ ] Stop button during scan → halts cleanly, partial results shown
+
+**Scan — Manual mode:**
+- [ ] Enable manual mode → all domain groups with 2+ companies shown regardless of origin
+- [ ] Each group card shows a default target (Salesforce preferred, then any non-null origin, then first)
+- [ ] "Swap target" button in each group → selected company becomes the new target
+- [ ] Compare modal opens on click → side-by-side target vs duplicate with notes/users counts
+
+**Run:**
+- [ ] Select groups and click Merge → confirmation prompt shown with count of duplicates
+- [ ] Confirm → SSE run starts, live log shows per-company relink and delete entries
+- [ ] Completed run → results panel shows notesRelinked / usersRelinked / deleted / errors counts
+- [ ] One relink failure → DELETE skipped for that company; others proceed; error count incremented
+- [ ] Back-to-preview button → returns to preview with previous scan data intact
+- [ ] Download action log → CSV with per-duplicate audit entries
+- [ ] Disconnect token → module resets to idle, origins cleared
 
 ---
 
