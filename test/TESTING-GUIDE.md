@@ -250,6 +250,10 @@ Tick each box as you verify it. Re-run after any significant change.
 - [ ] Match Criteria = Domain Only (default) → groups all companies with the same domain
 - [ ] Match Criteria = Domain + Name (exact) → sub-groups by exact company name; companies with different names not grouped
 - [ ] Match Criteria = Domain + Name (fuzzy) → 'Acme Inc' and 'ACME, INC.' treated as same name
+- [ ] Match Criteria = Name only → "Fuzzy matching" sub-checkbox under Name only becomes enabled; Domain+Name fuzzy stays disabled and unchecked
+- [ ] Match Criteria = Name only (non-fuzzy) → `[TEST] NodomExact Alpha Co` pair (NE1) appears; `[TEST] NodomFuzzy Corp` / `[TEST] NODOMFUZZY, CORP.` pair (NF1) does NOT (run `node test/create-name-only-fixtures.js` first)
+- [ ] Match Criteria = Name only (fuzzy) → both NE1 and NF1 pairs appear
+- [ ] Match Criteria = Domain Only → neither NE1 nor NF1 appears (no-domain companies excluded)
 - [ ] Stop button during scan → halts cleanly, partial results shown
 
 **Scan — Manual mode:**
@@ -263,7 +267,8 @@ Tick each box as you verify it. Re-run after any significant change.
 - [ ] Confirm → SSE run starts, live log shows per-company relink and delete entries
 - [ ] Completed run → results panel shows notesRelinked / usersRelinked / deleted / errors counts
 - [ ] One relink failure → DELETE skipped for that company; others proceed; error count incremented
-- [ ] Back-to-preview button → returns to preview with previous scan data intact
+- [ ] Back-to-preview button (after clean run) → returns to preview with scan data intact
+- [ ] Back-to-preview button (after stopped run) → successfully merged groups are removed from the preview; only unfinished groups remain; re-merging does not produce "company not found" errors
 - [ ] Download action log → CSV with per-duplicate audit entries
 - [ ] Disconnect token → module resets to idle, origins cleared
 

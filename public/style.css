@@ -302,6 +302,19 @@ body {
   transform: rotate(180deg);
 }
 
+/* When desktop sidebar is collapsed, drop attribution below the content (mirrors mobile behaviour) */
+#app-screen:has(.main-content.sidebar-collapsed) .bottom-left {
+  position: static;
+  bottom: auto;
+  left: auto;
+  z-index: auto;
+  padding: 16px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
 .mobile-nav-toggle { display: none; }
 
 /* ── Panel / Card ── */
@@ -562,7 +575,7 @@ input:focus, select:focus, textarea:focus {
   cursor: pointer;
 }
 .radio-label input[type="radio"] { margin: 0; cursor: pointer; }
-.filter-sub { }
+
 .filter-dynamic-row { display: flex; gap: 8px; align-items: center; }
 .filter-dynamic-row input, .filter-dynamic-row select { width: auto; }
 

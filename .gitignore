@@ -10,4 +10,5 @@ claude.env
 !.claude/commands/**
 implementation_notes/
 openapi v2 public API/
-plan*test/duplicate-company-fixtures.json
+plan*
+test/*.json

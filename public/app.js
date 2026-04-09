@@ -924,6 +924,21 @@ function makeLogAppender(logId, entriesId, countsId, defaultEntityType = '') {
     if (logEl)     logEl.classList.add('hidden');
   };
 
+  // separator(label) — inserts a visual divider into the live log without clearing it.
+  // Used when continuing a stopped run so the full log stays intact across segments.
+  append.separator = (label) => {
+    const entriesEl = document.getElementById(entriesId);
+    const logEl     = document.getElementById(logId);
+    if (!entriesEl) return;
+    logEl?.classList.remove('hidden');
+    const div = document.createElement('div');
+    div.style.cssText = 'border-top:1px solid rgba(255,255,255,0.18);margin:6px 0;padding-top:6px;font-size:10px;text-align:center;letter-spacing:.06em;color:rgba(255,255,255,0.55);';
+    div.textContent = label || '── continuing ──';
+    entriesEl.appendChild(div);
+    entriesEl.scrollTop = entriesEl.scrollHeight;
+    _buffer.push({ timestamp: new Date().toISOString(), level: 'info', row_num: '', uuid: '', entity_type: defaultEntityType, message: label || '── continuing ──' });
+  };
+
   return append;
 }
 

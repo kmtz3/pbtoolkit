@@ -19,6 +19,16 @@
  *     - fuzzy match: normalises names before grouping
  *     - v1 fallback fills null v2 source origins
  *     - missing token → 400
+ *     - name-only: groups no-domain companies with identical names
+ *     - name-only: exact mode does not group differently-cased/punctuated names
+ *     - name-only: fuzzy mode groups differently-cased/punctuated names
+ *     - name-only: companies with a domain are unaffected
+ *     - name-only: skips group with no primary origin (no_primary_origin)
+ *     - name-only: manual mode returns all name groups with isManualMode: true
+ *     - name-only: singleton no-domain companies are not grouped
+ *
+ *   POST /api/companies-duplicate-cleanup/run   (SSE) [additional]
+ *     - no-domain (name-only) record with empty domain completes successfully
  *
  *   POST /api/companies-duplicate-cleanup/run   (SSE)
  *     - note with company customer → PUT /v2/notes/{id}/relationships/customer
@@ -605,4 +615,197 @@ test('run: missing token returns 400', async () => {
     .post('/api/companies-duplicate-cleanup/run')
     .send({ domainRecords: [] });
   assert.equal(res.status, 400);
+});
+
+// ── POST /scan — name-only matchCriteria ──────────────────────────────────────
+
+const ND_SF_ID  = 'ffffffff-0010-0000-0000-000000000000'; // no-domain salesforce co
+const ND_HB_ID  = 'ffffffff-0011-0000-0000-000000000000'; // no-domain hubspot co
+const ND_HB2_ID = 'ffffffff-0012-0000-0000-000000000000'; // no-domain hubspot co (2)
+
+/** Minimal v2 company with no domain. */
+function noDomainCompany(id, sourceSystem, name) {
+  return {
+    id,
+    type: 'company',
+    fields: { name: name || `NoCo-${id.slice(0, 4)}`, domain: null },
+    metadata: { source: sourceSystem ? { system: sourceSystem } : {} },
+  };
+}
+
+test('scan: name-only — groups no-domain companies with identical names (origin mode)', async () => {
+  reset({
+    v2Companies: [
+      noDomainCompany(ND_SF_ID,  'salesforce', 'Acme Corp'),
+      noDomainCompany(ND_HB_ID,  'hubspot',    'Acme Corp'), // exact match → forms group
+      noDomainCompany(ND_HB2_ID, 'hubspot',    'Beta Inc'),  // different name → singleton
+    ],
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/scan')
+    .set('x-pb-token', 'token-scan-nameonly-basic')
+    .send({ primaryOrigin: 'salesforce', matchCriteria: 'name' });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.domainRecords.length, 1, 'Only the Acme Corp pair should form a group');
+  const dr = complete.domainRecords[0];
+  assert.equal(dr.domain,           '',           'domain is empty string for name-only groups');
+  assert.equal(dr.matchName,        'Acme Corp',  'matchName set to the shared company name');
+  assert.equal(dr.sfCompanyId,      ND_SF_ID);
+  assert.equal(dr.duplicates.length, 1);
+  assert.equal(dr.duplicates[0].id,  ND_HB_ID);
+  assert.equal(dr.isManualMode,      false);
+});
+
+test('scan: name-only — exact mode does not group differently-cased/punctuated names', async () => {
+  reset({
+    v2Companies: [
+      noDomainCompany(ND_SF_ID, 'salesforce', 'Acme Corp'),
+      noDomainCompany(ND_HB_ID, 'hubspot',    'ACME, CORP.'),
+    ],
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/scan')
+    .set('x-pb-token', 'token-scan-nameonly-exact-miss')
+    .send({ primaryOrigin: 'salesforce', matchCriteria: 'name', fuzzyMatch: false });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.domainRecords.length, 0,
+    'Exact name-only must not group differently-cased names');
+  assert.equal(complete.skippedRows.length, 0);
+});
+
+test('scan: name-only — fuzzy mode groups differently-cased/punctuated names', async () => {
+  reset({
+    v2Companies: [
+      noDomainCompany(ND_SF_ID, 'salesforce', 'Acme Corp'),
+      noDomainCompany(ND_HB_ID, 'hubspot',    'ACME, CORP.'),
+    ],
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/scan')
+    .set('x-pb-token', 'token-scan-nameonly-fuzzy')
+    .send({ primaryOrigin: 'salesforce', matchCriteria: 'name', fuzzyMatch: true });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.domainRecords.length, 1,
+    'Fuzzy name-only must group Acme Corp / ACME, CORP.');
+  assert.equal(complete.domainRecords[0].sfCompanyId,       ND_SF_ID);
+  assert.equal(complete.domainRecords[0].duplicates[0].id,  ND_HB_ID);
+});
+
+test('scan: name-only — companies with a domain are not grouped', async () => {
+  // Two companies share the same name but both have a domain — should be skipped in name-only mode
+  reset({
+    v2Companies: [
+      company(SF_ID, 'acme.com', 'salesforce', 'Acme Corp'), // has domain → ignored
+      company(HB_ID, 'acme.com', 'hubspot',    'Acme Corp'), // has domain → ignored
+      noDomainCompany(ND_HB2_ID, 'hubspot', 'Solo Inc'),     // no domain but unique → no group
+    ],
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/scan')
+    .set('x-pb-token', 'token-scan-nameonly-domain-ignored')
+    .send({ primaryOrigin: 'salesforce', matchCriteria: 'name' });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.domainRecords.length, 0,
+    'Domain-having companies must not appear in name-only results');
+});
+
+test('scan: name-only — skips group with no primary origin', async () => {
+  reset({
+    v2Companies: [
+      noDomainCompany(ND_SF_ID, 'hubspot',  'Acme Corp'),
+      noDomainCompany(ND_HB_ID, 'intercom', 'Acme Corp'),
+    ],
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/scan')
+    .set('x-pb-token', 'token-scan-nameonly-no-primary')
+    .send({ primaryOrigin: 'salesforce', matchCriteria: 'name' });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.domainRecords.length, 0);
+  assert.equal(complete.skippedRows.length,   1);
+  assert.equal(complete.skippedRows[0].reason,    'no_primary_origin');
+  assert.equal(complete.skippedRows[0].domain,    '');
+  assert.equal(complete.skippedRows[0].matchName, 'Acme Corp');
+});
+
+test('scan: name-only — manual mode returns all name groups with isManualMode: true', async () => {
+  reset({
+    v2Companies: [
+      noDomainCompany(ND_SF_ID, 'salesforce', 'Acme Corp'),
+      noDomainCompany(ND_HB_ID, 'hubspot',    'Acme Corp'),
+    ],
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/scan')
+    .set('x-pb-token', 'token-scan-nameonly-manual')
+    .send({ manualMode: true, matchCriteria: 'name' });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.domainRecords.length, 1);
+  assert.equal(complete.domainRecords[0].isManualMode, true);
+  assert.equal(complete.domainRecords[0].matchName,    'Acme Corp');
+  // salesforce-sourced company preferred as default target
+  assert.equal(complete.domainRecords[0].sfCompanyId, ND_SF_ID);
+});
+
+test('scan: name-only — singleton no-domain companies are not grouped', async () => {
+  reset({
+    v2Companies: [
+      noDomainCompany(ND_SF_ID, 'salesforce', 'Acme Corp'),
+      noDomainCompany(ND_HB_ID, 'hubspot',    'Beta Inc'),  // different name
+    ],
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/scan')
+    .set('x-pb-token', 'token-scan-nameonly-singleton')
+    .send({ primaryOrigin: 'salesforce', matchCriteria: 'name' });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.domainRecords.length, 0,
+    'Companies with unique names should not form any group');
+  assert.equal(complete.skippedRows.length, 0);
+});
+
+// ── POST /run — name-only (empty domain) record ───────────────────────────────
+
+test('run: no-domain (name-only) record — completes successfully with empty domain', async () => {
+  // Verifies that /run works correctly when dr.domain is '' (name-only group with matchName set)
+  reset({
+    notesByCompany: {
+      [HB_ID]: [noteWithCustomer(NOTE_ID, 'company', HB_ID)],
+    },
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/run')
+    .set('x-pb-token', 'token-run-no-domain')
+    .send({
+      domainRecords: [{
+        domain:      '',
+        matchName:   'Acme Corp',
+        sfCompanyId: SF_ID,
+        duplicates:  [{ id: HB_ID }],
+      }],
+    });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.ok(complete, 'Should emit complete event');
+  assert.equal(complete.notesRelinked, 1);
+  assert.equal(complete.deleted,       1);
+  assert.equal(complete.errors,        0);
+
+  const deleted = mockCalls.find(c => c.method === 'DELETE' && c.path === `/v2/entities/${HB_ID}`);
+  assert.ok(deleted, 'Should DELETE the duplicate company');
 });
