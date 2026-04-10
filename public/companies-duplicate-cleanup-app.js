@@ -215,12 +215,12 @@
           const o = s.primaryOrigin || 'selected origin';
           const reasonLabel = s.reason === 'no_primary_origin'
             ? `No "${o}" company found`
-            : `${(s.sfUuids || []).length} "${o}" companies found (expected 1)`;
+            : `${(s.primaryUuids || []).length} "${o}" companies found (expected 1)`;
           const tr = document.createElement('tr');
           tr.innerHTML = `
             <td>${esc(s.domain ? (s.matchName ? `${s.domain} · ${s.matchName}` : s.domain) : (s.matchName || '(no domain)'))}</td>
             <td>${esc(reasonLabel)}</td>
-            <td style="font-family:monospace;font-size:11px;">${esc((s.sfUuids || []).join(', ') || '—')}</td>
+            <td style="font-family:monospace;font-size:11px;">${esc((s.primaryUuids || []).join(', ') || '—')}</td>
           `;
           skippedTbody.appendChild(tr);
         }
@@ -238,18 +238,18 @@
     if (!dr.allCompanies) {
       dr.allCompanies = [
         {
-          id:             dr.sfCompanyId,
-          name:           dr.sfCompanyName,
-          domain:         dr.sfCompanyDomain || null,
-          sourceOrigin:   dr.sfCompanyOrigin || null,
-          sourceRecordId: dr.sfCompanySourceRecordId || null,
-          notesCount:     dr.sfNotesCount ?? null,
-          usersCount:     dr.sfUsersCount ?? null,
+          id:             dr.primaryId,
+          name:           dr.primaryName,
+          domain:         dr.primaryDomain || null,
+          sourceOrigin:   dr.primaryOrigin || null,
+          sourceRecordId: dr.primarySourceRecordId || null,
+          notesCount:     dr.primaryNotesCount ?? null,
+          usersCount:     dr.primaryUsersCount ?? null,
         },
         ...(dr.duplicates || []),
       ];
     }
-    const duplicates = dr.allCompanies.filter(c => c.id !== dr.sfCompanyId);
+    const duplicates = dr.allCompanies.filter(c => c.id !== dr.primaryId);
     const total      = dr.allCompanies.length;
     const isManual   = dr.isManualMode === true;
 
@@ -333,7 +333,7 @@
     const tbody = document.createElement('tbody');
 
     // Pre-compute totals incoming to target from all duplicates (non-manual auto mode display)
-    const dupCompanies   = dr.allCompanies.filter(c => c.id !== dr.sfCompanyId);
+    const dupCompanies   = dr.allCompanies.filter(c => c.id !== dr.primaryId);
     const incomingNotes  = dupCompanies.every(d => d.notesCount != null)
       ? dupCompanies.reduce((n, d) => n + d.notesCount, 0) : null;
     const incomingUsers  = dupCompanies.every(d => d.usersCount != null)
@@ -341,7 +341,7 @@
 
     // All companies in stable original order — badge reflects current target
     for (const c of dr.allCompanies) {
-      const isTarget = c.id === dr.sfCompanyId;
+      const isTarget = c.id === dr.primaryId;
       const tr = document.createElement('tr');
       tr.style.height = '38px';
       const badge    = isTarget
@@ -420,12 +420,12 @@
 
   // ── Target swap (manual mode only) ────────────────────────
   function swapTarget(dr, newTarget) {
-    const oldTargetId  = dr.sfCompanyId;
-    dr.sfCompanyId             = newTarget.id;
-    dr.sfCompanyName           = newTarget.name;
-    dr.sfCompanyDomain         = newTarget.domain || null;
-    dr.sfCompanyOrigin         = newTarget.sourceOrigin;
-    dr.sfCompanySourceRecordId = newTarget.sourceRecordId || null;
+    const oldTargetId  = dr.primaryId;
+    dr.primaryId             = newTarget.id;
+    dr.primaryName           = newTarget.name;
+    dr.primaryDomain         = newTarget.domain || null;
+    dr.primaryOrigin         = newTarget.sourceOrigin;
+    dr.primarySourceRecordId = newTarget.sourceRecordId || null;
     dr.duplicates      = dr.allCompanies.filter(c => c.id !== newTarget.id);
     rerenderDomainBlock(dr);
     // Keep compare modal open and pointing at the old target (now a duplicate)
@@ -450,7 +450,7 @@
 
   function dcDuplicates(dr) {
     return dr.allCompanies
-      ? dr.allCompanies.filter(c => c.id !== dr.sfCompanyId)
+      ? dr.allCompanies.filter(c => c.id !== dr.primaryId)
       : (dr.duplicates || []);
   }
 
@@ -474,7 +474,7 @@
     const dr      = _compareDr;
     const dups    = dcDuplicates(dr);
     const records = _previewData?.domainRecords || [];
-    const target  = { id: dr.sfCompanyId, name: dr.sfCompanyName, domain: dr.sfCompanyDomain || null, sourceOrigin: dr.sfCompanyOrigin, sourceRecordId: dr.sfCompanySourceRecordId || null };
+    const target  = { id: dr.primaryId, name: dr.primaryName, domain: dr.primaryDomain || null, sourceOrigin: dr.primaryOrigin, sourceRecordId: dr.primarySourceRecordId || null };
     const dup     = dups[_compareDupIdx];
     if (!dup) return;
 
@@ -608,7 +608,7 @@
   function startSingleGroupMerge(dr, groupNum) {
     const dupCount = dr.duplicates?.length ?? 0;
     showConfirm(
-      `Merge group ${groupNum} (${dr.domain || dr.matchName || 'no domain'})?\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${dr.sfCompanyName || dr.sfCompanyId}, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone.`,
+      `Merge group ${groupNum} (${dr.domain || dr.matchName || 'no domain'})?\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${dr.primaryName || dr.primaryId}, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone.`,
       { confirmText: 'Merge this group', danger: true }
     ).then((confirmed) => { if (confirmed) runMerge([dr]); });
   }
@@ -690,7 +690,7 @@
       if (remainingDups.length !== (dr.duplicates || []).length) {
         dr.duplicates = remainingDups;
         if (dr.allCompanies) {
-          dr.allCompanies = dr.allCompanies.filter(c => c.id === dr.sfCompanyId || !deletedIds.has(c.id));
+          dr.allCompanies = dr.allCompanies.filter(c => c.id === dr.primaryId || !deletedIds.has(c.id));
         }
       }
       kept.push(dr);

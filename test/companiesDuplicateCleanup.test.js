@@ -1,4 +1,6 @@
 'use strict';
+// Must be set before server.js is required so Express rate limiters are bypassed.
+process.env.NODE_ENV = 'test';
 
 /**
  * Merge Duplicate Companies route tests.
@@ -46,7 +48,7 @@ const request = require('supertest');
 
 // ── Reusable IDs ──────────────────────────────────────────────────────────────
 
-const SF_ID    = 'aaaaaaaa-0001-0000-0000-000000000000'; // salesforce company
+const PRIMARY_ID = 'aaaaaaaa-0001-0000-0000-000000000000'; // primary company (salesforce in tests)
 const HB_ID    = 'bbbbbbbb-0002-0000-0000-000000000000'; // hubspot company
 const HB2_ID   = 'cccccccc-0003-0000-0000-000000000000'; // second hubspot company
 const NOTE_ID  = 'dddddddd-0004-0000-0000-000000000000';
@@ -205,7 +207,7 @@ function noteWithCustomer(id, customerType, customerId) {
 test('origins: returns merged v2 + v1 sources, deduplicated and sorted', async () => {
   reset({
     v2Companies: [
-      company(SF_ID,  'acme.com', 'salesforce'),
+      company(PRIMARY_ID,  'acme.com', 'salesforce'),
       company(HB_ID,  'beta.com', null),          // v2 source null — v1 fallback needed
       company(HB2_ID, 'beta.com', 'salesforce'),  // already has v2 source
     ],
@@ -224,7 +226,7 @@ test('origins: returns merged v2 + v1 sources, deduplicated and sorted', async (
 
 test('origins: second call with same token is served from cache (no extra API calls)', async () => {
   reset({
-    v2Companies: [company(SF_ID, 'acme.com', 'salesforce')],
+    v2Companies: [company(PRIMARY_ID, 'acme.com', 'salesforce')],
     v1Companies: [],
   });
 
@@ -252,7 +254,7 @@ test('origins: second call with same token is served from cache (no extra API ca
 
 test('origins: ?refresh=true bypasses cache and re-fetches', async () => {
   reset({
-    v2Companies: [company(SF_ID, 'acme.com', 'salesforce')],
+    v2Companies: [company(PRIMARY_ID, 'acme.com', 'salesforce')],
     v1Companies: [],
   });
 
@@ -284,7 +286,7 @@ test('origins: missing token returns 400', async () => {
 test('scan: origin mode — creates domain record when exactly 1 primary origin found', async () => {
   reset({
     v2Companies: [
-      company(SF_ID, 'acme.com', 'salesforce'),
+      company(PRIMARY_ID, 'acme.com', 'salesforce'),
       company(HB_ID, 'acme.com', 'hubspot'),
     ],
   });
@@ -302,7 +304,7 @@ test('scan: origin mode — creates domain record when exactly 1 primary origin 
 
   const dr = complete.domainRecords[0];
   assert.equal(dr.domain,       'acme.com');
-  assert.equal(dr.sfCompanyId,  SF_ID);
+  assert.equal(dr.primaryId,  PRIMARY_ID);
   assert.equal(dr.duplicates.length, 1);
   assert.equal(dr.duplicates[0].id, HB_ID);
   assert.equal(dr.isManualMode, false);
@@ -331,7 +333,7 @@ test('scan: origin mode — skips group with no primary origin (no_primary_origi
 test('scan: origin mode — skips group with multiple primary origins (multiple_primary_origin)', async () => {
   reset({
     v2Companies: [
-      company(SF_ID,  'acme.com', 'salesforce'),
+      company(PRIMARY_ID,  'acme.com', 'salesforce'),
       company(HB_ID,  'acme.com', 'salesforce'), // two SF companies → ambiguous
       company(HB2_ID, 'acme.com', 'hubspot'),
     ],
@@ -346,13 +348,13 @@ test('scan: origin mode — skips group with multiple primary origins (multiple_
   assert.equal(complete.domainRecords.length, 0);
   assert.equal(complete.skippedRows.length, 1);
   assert.equal(complete.skippedRows[0].reason, 'multiple_primary_origin');
-  assert.deepEqual(complete.skippedRows[0].sfUuids.sort(), [SF_ID, HB_ID].sort());
+  assert.deepEqual(complete.skippedRows[0].primaryUuids.sort(), [PRIMARY_ID, HB_ID].sort());
 });
 
 test('scan: manual mode — includes all groups with isManualMode: true', async () => {
   reset({
     v2Companies: [
-      company(SF_ID, 'acme.com', 'salesforce'),
+      company(PRIMARY_ID, 'acme.com', 'salesforce'),
       company(HB_ID, 'acme.com', 'hubspot'),
     ],
   });
@@ -366,7 +368,7 @@ test('scan: manual mode — includes all groups with isManualMode: true', async 
   assert.equal(complete.domainRecords.length, 1);
   assert.equal(complete.domainRecords[0].isManualMode, true);
   // salesforce company is preferred as default target
-  assert.equal(complete.domainRecords[0].sfCompanyId, SF_ID);
+  assert.equal(complete.domainRecords[0].primaryId, PRIMARY_ID);
   assert.equal(complete.skippedRows.length, 0);
 });
 
@@ -376,7 +378,7 @@ test('scan: domain+name — sub-groups by name, singleton name groups excluded',
   // 'Acme Corp' is alone in its name group → not a duplicate
   reset({
     v2Companies: [
-      company(SF_ID,  'acme.com', 'salesforce', 'Acme'),
+      company(PRIMARY_ID,  'acme.com', 'salesforce', 'Acme'),
       company(HB_ID,  'acme.com', 'hubspot',    'Acme'),
       company(HB2_ID, 'acme.com', 'hubspot',    'Acme Corp'),
     ],
@@ -397,7 +399,7 @@ test('scan: domain+name — sub-groups by name, singleton name groups excluded',
 test('scan: domain+name — fuzzy match groups Acme Inc and ACME, INC.', async () => {
   reset({
     v2Companies: [
-      company(SF_ID, 'acme.com', 'salesforce', 'Acme Inc'),
+      company(PRIMARY_ID, 'acme.com', 'salesforce', 'Acme Inc'),
       company(HB_ID, 'acme.com', 'hubspot',    'ACME, INC.'),
     ],
   });
@@ -417,15 +419,15 @@ test('scan: domain+name — fuzzy match groups Acme Inc and ACME, INC.', async (
     .send({ primaryOrigin: 'salesforce', matchCriteria: 'domain+name', fuzzyMatch: true });
   const completeFuzzy = parseCompleteEvent(resFuzzy.text);
   assert.equal(completeFuzzy.domainRecords.length, 1, 'Fuzzy match should group Acme Inc / ACME, INC.');
-  assert.equal(completeFuzzy.domainRecords[0].sfCompanyId, SF_ID);
+  assert.equal(completeFuzzy.domainRecords[0].primaryId, PRIMARY_ID);
 });
 
 test('scan: v1 fallback fills null v2 source origins', async () => {
   // HB_ID has null v2 source — v1 back-fills it as hubspot
-  // Combined with SF_ID (salesforce) they form a valid duplicate pair
+  // Combined with PRIMARY_ID (salesforce) they form a valid duplicate pair
   reset({
     v2Companies: [
-      company(SF_ID, 'acme.com', 'salesforce'),
+      company(PRIMARY_ID, 'acme.com', 'salesforce'),
       company(HB_ID, 'acme.com', null),
     ],
     v1Companies: [
@@ -440,7 +442,7 @@ test('scan: v1 fallback fills null v2 source origins', async () => {
 
   const complete = parseCompleteEvent(res.text);
   assert.equal(complete.domainRecords.length, 1);
-  assert.equal(complete.domainRecords[0].sfCompanyId,  SF_ID);
+  assert.equal(complete.domainRecords[0].primaryId,  PRIMARY_ID);
   assert.equal(complete.domainRecords[0].duplicates[0].id, HB_ID);
   assert.equal(complete.domainRecords[0].duplicates[0].sourceOrigin, 'hubspot',
     'v1-back-filled sourceOrigin should appear in the duplicate entry');
@@ -474,7 +476,7 @@ test('run: relinks note with company customer and deletes duplicate', async () =
     .send({
       domainRecords: [{
         domain:      'acme.com',
-        sfCompanyId: SF_ID,
+        primaryId: PRIMARY_ID,
         duplicates:  [{ id: HB_ID }],
       }],
     });
@@ -511,7 +513,7 @@ test('run: relinks note with user customer via user parent relationship', async 
     .send({
       domainRecords: [{
         domain:      'acme.com',
-        sfCompanyId: SF_ID,
+        primaryId: PRIMARY_ID,
         duplicates:  [{ id: HB_ID }],
       }],
     });
@@ -541,7 +543,7 @@ test('run: relinks users directly parented to duplicate via entities/search (Ste
     .send({
       domainRecords: [{
         domain:      'acme.com',
-        sfCompanyId: SF_ID,
+        primaryId: PRIMARY_ID,
         duplicates:  [{ id: HB_ID }],
       }],
     });
@@ -574,7 +576,7 @@ test('run: skips DELETE when a relink fails, increments error count', async () =
     .send({
       domainRecords: [{
         domain:      'acme.com',
-        sfCompanyId: SF_ID,
+        primaryId: PRIMARY_ID,
         duplicates:  [{ id: HB_ID }],
       }],
     });
@@ -619,7 +621,7 @@ test('run: missing token returns 400', async () => {
 
 // ── POST /scan — name-only matchCriteria ──────────────────────────────────────
 
-const ND_SF_ID  = 'ffffffff-0010-0000-0000-000000000000'; // no-domain salesforce co
+const ND_PRIMARY_ID  = 'ffffffff-0010-0000-0000-000000000000'; // no-domain primary co (salesforce in tests)
 const ND_HB_ID  = 'ffffffff-0011-0000-0000-000000000000'; // no-domain hubspot co
 const ND_HB2_ID = 'ffffffff-0012-0000-0000-000000000000'; // no-domain hubspot co (2)
 
@@ -636,7 +638,7 @@ function noDomainCompany(id, sourceSystem, name) {
 test('scan: name-only — groups no-domain companies with identical names (origin mode)', async () => {
   reset({
     v2Companies: [
-      noDomainCompany(ND_SF_ID,  'salesforce', 'Acme Corp'),
+      noDomainCompany(ND_PRIMARY_ID,  'salesforce', 'Acme Corp'),
       noDomainCompany(ND_HB_ID,  'hubspot',    'Acme Corp'), // exact match → forms group
       noDomainCompany(ND_HB2_ID, 'hubspot',    'Beta Inc'),  // different name → singleton
     ],
@@ -652,7 +654,7 @@ test('scan: name-only — groups no-domain companies with identical names (origi
   const dr = complete.domainRecords[0];
   assert.equal(dr.domain,           '',           'domain is empty string for name-only groups');
   assert.equal(dr.matchName,        'Acme Corp',  'matchName set to the shared company name');
-  assert.equal(dr.sfCompanyId,      ND_SF_ID);
+  assert.equal(dr.primaryId,      ND_PRIMARY_ID);
   assert.equal(dr.duplicates.length, 1);
   assert.equal(dr.duplicates[0].id,  ND_HB_ID);
   assert.equal(dr.isManualMode,      false);
@@ -661,7 +663,7 @@ test('scan: name-only — groups no-domain companies with identical names (origi
 test('scan: name-only — exact mode does not group differently-cased/punctuated names', async () => {
   reset({
     v2Companies: [
-      noDomainCompany(ND_SF_ID, 'salesforce', 'Acme Corp'),
+      noDomainCompany(ND_PRIMARY_ID, 'salesforce', 'Acme Corp'),
       noDomainCompany(ND_HB_ID, 'hubspot',    'ACME, CORP.'),
     ],
   });
@@ -680,7 +682,7 @@ test('scan: name-only — exact mode does not group differently-cased/punctuated
 test('scan: name-only — fuzzy mode groups differently-cased/punctuated names', async () => {
   reset({
     v2Companies: [
-      noDomainCompany(ND_SF_ID, 'salesforce', 'Acme Corp'),
+      noDomainCompany(ND_PRIMARY_ID, 'salesforce', 'Acme Corp'),
       noDomainCompany(ND_HB_ID, 'hubspot',    'ACME, CORP.'),
     ],
   });
@@ -693,17 +695,18 @@ test('scan: name-only — fuzzy mode groups differently-cased/punctuated names',
   const complete = parseCompleteEvent(res.text);
   assert.equal(complete.domainRecords.length, 1,
     'Fuzzy name-only must group Acme Corp / ACME, CORP.');
-  assert.equal(complete.domainRecords[0].sfCompanyId,       ND_SF_ID);
+  assert.equal(complete.domainRecords[0].primaryId,       ND_PRIMARY_ID);
   assert.equal(complete.domainRecords[0].duplicates[0].id,  ND_HB_ID);
 });
 
-test('scan: name-only — companies with a domain are not grouped', async () => {
-  // Two companies share the same name but both have a domain — should be skipped in name-only mode
+test('scan: name-only — domain-having companies are included when noDomainOnly is false (default)', async () => {
+  // noDomainOnly defaults to false → all companies (with or without domain) enter the name pool.
+  // PRIMARY_ID and HB_ID share the name 'Acme Corp' and both have a domain, so they form a group.
   reset({
     v2Companies: [
-      company(SF_ID, 'acme.com', 'salesforce', 'Acme Corp'), // has domain → ignored
-      company(HB_ID, 'acme.com', 'hubspot',    'Acme Corp'), // has domain → ignored
-      noDomainCompany(ND_HB2_ID, 'hubspot', 'Solo Inc'),     // no domain but unique → no group
+      company(PRIMARY_ID, 'acme.com', 'salesforce', 'Acme Corp'), // has domain, included in name pool
+      company(HB_ID, 'acme.com', 'hubspot',    'Acme Corp'), // has domain, included in name pool
+      noDomainCompany(ND_HB2_ID, 'hubspot', 'Solo Inc'),     // no domain but unique name → no group
     ],
   });
 
@@ -713,14 +716,16 @@ test('scan: name-only — companies with a domain are not grouped', async () => 
     .send({ primaryOrigin: 'salesforce', matchCriteria: 'name' });
 
   const complete = parseCompleteEvent(res.text);
-  assert.equal(complete.domainRecords.length, 0,
-    'Domain-having companies must not appear in name-only results');
+  assert.equal(complete.domainRecords.length, 1,
+    'Domain-having companies are included in name-only matching when noDomainOnly is false');
+  assert.equal(complete.domainRecords[0].primaryId, PRIMARY_ID);
+  assert.equal(complete.domainRecords[0].duplicates[0].id, HB_ID);
 });
 
 test('scan: name-only — skips group with no primary origin', async () => {
   reset({
     v2Companies: [
-      noDomainCompany(ND_SF_ID, 'hubspot',  'Acme Corp'),
+      noDomainCompany(ND_PRIMARY_ID, 'hubspot',  'Acme Corp'),
       noDomainCompany(ND_HB_ID, 'intercom', 'Acme Corp'),
     ],
   });
@@ -741,7 +746,7 @@ test('scan: name-only — skips group with no primary origin', async () => {
 test('scan: name-only — manual mode returns all name groups with isManualMode: true', async () => {
   reset({
     v2Companies: [
-      noDomainCompany(ND_SF_ID, 'salesforce', 'Acme Corp'),
+      noDomainCompany(ND_PRIMARY_ID, 'salesforce', 'Acme Corp'),
       noDomainCompany(ND_HB_ID, 'hubspot',    'Acme Corp'),
     ],
   });
@@ -756,13 +761,13 @@ test('scan: name-only — manual mode returns all name groups with isManualMode:
   assert.equal(complete.domainRecords[0].isManualMode, true);
   assert.equal(complete.domainRecords[0].matchName,    'Acme Corp');
   // salesforce-sourced company preferred as default target
-  assert.equal(complete.domainRecords[0].sfCompanyId, ND_SF_ID);
+  assert.equal(complete.domainRecords[0].primaryId, ND_PRIMARY_ID);
 });
 
 test('scan: name-only — singleton no-domain companies are not grouped', async () => {
   reset({
     v2Companies: [
-      noDomainCompany(ND_SF_ID, 'salesforce', 'Acme Corp'),
+      noDomainCompany(ND_PRIMARY_ID, 'salesforce', 'Acme Corp'),
       noDomainCompany(ND_HB_ID, 'hubspot',    'Beta Inc'),  // different name
     ],
   });
@@ -795,7 +800,7 @@ test('run: no-domain (name-only) record — completes successfully with empty do
       domainRecords: [{
         domain:      '',
         matchName:   'Acme Corp',
-        sfCompanyId: SF_ID,
+        primaryId: PRIMARY_ID,
         duplicates:  [{ id: HB_ID }],
       }],
     });

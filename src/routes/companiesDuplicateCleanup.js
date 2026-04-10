@@ -299,11 +299,11 @@ router.post('/scan', pbAuth, async (req, res) => {
         const target = sorted[0];
         const rec = {
           domain,
-          sfCompanyId:             target.id,
-          sfCompanyName:           target.name || target.id,
-          sfCompanyDomain:         target.domain || null,
-          sfCompanyOrigin:         target.sourceOrigin,
-          sfCompanySourceRecordId: target.sourceRecordId || null,
+          primaryId:             target.id,
+          primaryName:           target.name || target.id,
+          primaryDomain:         target.domain || null,
+          primaryOrigin:         target.sourceOrigin,
+          primarySourceRecordId: target.sourceRecordId || null,
           duplicates:              sorted.slice(1).map(c => ({ id: c.id, name: c.name || c.id, domain: c.domain || null, sourceOrigin: c.sourceOrigin, sourceRecordId: c.sourceRecordId || null })),
           isManualMode:            true,
         };
@@ -316,11 +316,11 @@ router.post('/scan', pbAuth, async (req, res) => {
         if (primary.length === 1) {
           const rec = {
             domain,
-            sfCompanyId:             primary[0].id,
-            sfCompanyName:           primary[0].name || primary[0].id,
-            sfCompanyDomain:         primary[0].domain || null,
-            sfCompanyOrigin:         primary[0].sourceOrigin,
-            sfCompanySourceRecordId: primary[0].sourceRecordId || null,
+            primaryId:             primary[0].id,
+            primaryName:           primary[0].name || primary[0].id,
+            primaryDomain:         primary[0].domain || null,
+            primaryOrigin:         primary[0].sourceOrigin,
+            primarySourceRecordId: primary[0].sourceRecordId || null,
             duplicates:              others.map(c => ({ id: c.id, name: c.name || c.id, domain: c.domain || null, sourceOrigin: c.sourceOrigin, sourceRecordId: c.sourceRecordId || null })),
             isManualMode:            false,
           };
@@ -334,7 +334,7 @@ router.post('/scan', pbAuth, async (req, res) => {
         } else {
           const primaryIds = primary.map(c => c.id);
           const raw        = companies.map(c => `${c.id} (${c.sourceOrigin || 'unknown'})`).join(', ');
-          const row        = { domain, uuidWithOrigin: raw, reason: 'multiple_primary_origin', primaryOrigin, sfUuids: primaryIds };
+          const row        = { domain, uuidWithOrigin: raw, reason: 'multiple_primary_origin', primaryOrigin, primaryUuids: primaryIds };
           if (matchName) row.matchName = matchName;
           skippedRows.push(row);
         }
@@ -400,20 +400,20 @@ router.post('/scan', pbAuth, async (req, res) => {
       for (let i = 0; i < companiesToCount.length; i++) {
         if (sse.isAborted()) break;
         const { dr, obj, isTarget } = companiesToCount[i];
-        const id = isTarget ? dr.sfCompanyId : obj.id;
+        const id = isTarget ? dr.primaryId : obj.id;
         const pct = 80 + Math.round((i / companiesToCount.length) * 18);
         sse.progress(`Counting notes for ${dr.matchName || dr.domain || '(no domain)'} (${i + 1}/${companiesToCount.length})…`, pct);
         try {
           const counts = await fetchNoteCounts(pbFetch, withRetry, id);
           if (isTarget) {
-            dr.sfNotesCount = counts.notesCount;
-            dr.sfUsersCount = counts.usersCount;
+            dr.primaryNotesCount = counts.notesCount;
+            dr.primaryUsersCount = counts.usersCount;
           } else {
             obj.notesCount = counts.notesCount;
             obj.usersCount = counts.usersCount;
           }
         } catch {
-          if (isTarget) { dr.sfNotesCount = null; dr.sfUsersCount = null; }
+          if (isTarget) { dr.primaryNotesCount = null; dr.primaryUsersCount = null; }
           else          { obj.notesCount  = null; obj.usersCount  = null; }
         }
       }
@@ -565,7 +565,7 @@ router.post('/run', pbAuth, async (req, res) => {
         const entry = {
           domain:             dr.domain,
           duplicateCompanyId: dupId,
-          sfCompanyId:        dr.sfCompanyId,
+          primaryId:          dr.primaryId,
           notesFound:         0,
           notesRelinked:      0,
           usersRelinked:      0,
@@ -610,7 +610,7 @@ router.post('/run', pbAuth, async (req, res) => {
               if (targetType === 'user') {
                 await withRetry(
                   () => pbFetch('put', `/v2/entities/${targetId}/relationships/parent`, {
-                    data: { target: { id: dr.sfCompanyId }, type: 'company' },
+                    data: { target: { id: dr.primaryId }, type: 'company' },
                   }),
                   `relink user ${targetId} to target company`
                 );
@@ -622,7 +622,7 @@ router.post('/run', pbAuth, async (req, res) => {
               } else {
                 await withRetry(
                   () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
-                    data: { target: { type: 'company', id: dr.sfCompanyId } },
+                    data: { target: { type: 'company', id: dr.primaryId } },
                   }),
                   `relink note ${noteId} to target company`
                 );
@@ -668,7 +668,7 @@ router.post('/run', pbAuth, async (req, res) => {
                 try {
                   await withRetry(
                     () => pbFetch('put', `/v2/entities/${user.id}/relationships/parent`, {
-                      data: { target: { id: dr.sfCompanyId }, type: 'company' },
+                      data: { target: { id: dr.primaryId }, type: 'company' },
                     }),
                     `relink user ${user.id} to target company`
                   );
