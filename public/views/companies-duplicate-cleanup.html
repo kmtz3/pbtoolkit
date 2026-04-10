@@ -1,0 +1,539 @@
+        <!-- ══════════════════════════════════════════
+             MERGE DUPLICATE COMPANIES
+        ═══════════════════════════════════════════ -->
+        <div id="view-companies-duplicate-cleanup" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Merge Duplicate Companies <span class="badge badge-beta">Beta</span></div>
+              <div class="panel-subtitle">Find and merge duplicate company records — consolidating notes and user associations into the canonical record before deleting duplicates.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Export first</strong> — download a full companies export before running. This is your only rollback option — use <a href="/companies" style="color:inherit;text-decoration:underline;">Companies → Export</a>.</li>
+                  <li><strong>Select source</strong> — choose which source origin identifies the canonical (target) company, or pick <em>Let me choose per group</em> to manually select the target for each duplicate group.</li>
+                  <li><strong>Scan</strong> — click "Scan for duplicates" to detect duplicate company groups via the API. No changes are made during scan.</li>
+                  <li><strong>Preview</strong> — review the duplicate groups. Each group shows the target company and the duplicates that will be deleted. In manual mode, click any row to compare companies side-by-side and change the target. Select individual groups or process all.</li>
+                  <li><strong>Merge</strong> — for each duplicate company:
+                    <ol style="margin-top:6px;padding-left:20px;">
+                      <li>All notes linked to the duplicate are found and relinked to the target company.</li>
+                      <li>If a note's customer is a user, the user's parent company is updated to the target instead.</li>
+                      <li>Any remaining users directly parented to the duplicate (with no notes) are also relinked to the target.</li>
+                      <li>The duplicate company is deleted — only after every relink for that company succeeds.</li>
+                    </ol>
+                  </li>
+                  <li><strong>No rollback</strong> — deleted companies cannot be restored via the API. Export first.</li>
+                  <li><strong>Source detection</strong> — in automatic mode, the target company is identified by its source origin. Domains with zero or multiple matches for the selected origin are skipped. In manual mode, all domains with 2+ companies are included.</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ════════════════════════════════
+                   IDLE: safety gate + scan button
+              ════════════════════════════════ -->
+              <div id="dc-idle">
+
+                <div class="alert alert-warn" style="margin-bottom:16px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span>
+                    <strong>Before scanning, export your companies data from <a href="/companies" style="color:inherit;text-decoration:underline;">Companies → Export</a>.</strong>
+                    This is your only rollback option — deleted companies cannot be recovered via the API.
+                  </span>
+                </div>
+
+                <div class="field" style="margin-bottom:20px;">
+                  <label class="checkbox-label" id="dc-gate-label">
+                    <input type="checkbox" id="dc-gate-checkbox">
+                    I have exported my companies data and understand this action permanently deletes companies
+                  </label>
+                </div>
+
+                <div id="dc-scan-config" style="opacity:0.4;pointer-events:none;">
+
+                  <!-- Primary record origin / manual mode (unified select) -->
+                  <div class="field" style="margin-bottom:20px;">
+                    <label>Primary record origin
+                      <span class="info-icon" data-tip="The source origin that identifies the canonical (target) company. All other companies sharing the same domain will be treated as duplicates and deleted. Choose 'Let me choose per group' to manually pick the target for each duplicate group.">i</span>
+                    </label>
+                    <div id="dc-origins-loading" style="margin-top:8px;">
+                      <div class="progress-wrap" style="margin-top:0;">
+                        <div class="progress-bar progress-bar-loading" style="width:40%;"></div>
+                      </div>
+                      <div class="progress-label" style="margin-top:4px;">Loading sources…</div>
+                    </div>
+                    <div id="dc-origins-field" class="hidden" style="margin-top:6px;">
+                      <div id="dc-origin-list" style="display:flex;flex-direction:column;gap:8px;margin-top:4px;"></div>
+                    </div>
+                    <div id="dc-origins-error" class="hidden" style="font-size:12px;color:var(--c-danger,#ef4444);margin-top:6px;display:flex;align-items:center;gap:8px;">
+                      <span id="dc-origins-error-msg"></span>
+                      <button class="btn btn-ghost btn-sm" id="dc-origins-retry">Retry</button>
+                    </div>
+                  </div>
+
+                  <!-- Match criteria -->
+                  <div class="field" style="margin-bottom:20px;">
+                    <label>Match criteria</label>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+                      <label class="checkbox-label">
+                        <input type="radio" name="dc-match" value="domain" checked>
+                        Domain only
+                        <span class="info-icon" data-tip="Companies are duplicates if they share the same domain, regardless of their name.">i</span>
+                      </label>
+                      <div style="display:flex;flex-direction:column;gap:6px;">
+                        <label class="checkbox-label">
+                          <input type="radio" name="dc-match" value="domain+name">
+                          Domain + Name
+                          <span class="info-icon" data-tip="Stricter — companies are duplicates only if they share both the same domain and the same name. Useful when different brands or products share a domain.">i</span>
+                        </label>
+                        <label class="checkbox-label" id="dc-fuzzy-label" style="margin-left:20px;opacity:0.4;pointer-events:none;">
+                          <input type="checkbox" id="dc-fuzzy-checkbox">
+                          Fuzzy matching
+                          <span class="info-icon" data-tip="Case-insensitive, punctuation-ignored comparison. 'Acme Inc' and 'ACME, INC.' are treated as the same name. 'Acme Inc' and 'Acme' are not.">i</span>
+                        </label>
+                      </div>
+                      <div style="display:flex;flex-direction:column;gap:6px;">
+                        <label class="checkbox-label">
+                          <input type="radio" name="dc-match" value="name">
+                          Name only
+                          <span class="info-icon" data-tip="Match companies by name across your whole workspace, regardless of domain. Use the options below to narrow the scope or enable fuzzy matching.">i</span>
+                        </label>
+                        <label class="checkbox-label" id="dc-no-domain-only-label" style="margin-left:20px;opacity:0.4;pointer-events:none;">
+                          <input type="checkbox" id="dc-no-domain-only-checkbox">
+                          Only companies without a domain
+                          <span class="info-icon" data-tip="Restrict name matching to companies that have no domain set. Useful for cleaning up unlinked or unmapped records only.">i</span>
+                        </label>
+                        <label class="checkbox-label" id="dc-fuzzy-name-label" style="margin-left:20px;opacity:0.4;pointer-events:none;">
+                          <input type="checkbox" id="dc-fuzzy-name-checkbox">
+                          Fuzzy matching
+                          <span class="info-icon" data-tip="Case-insensitive, punctuation-ignored comparison. 'Acme Inc' and 'ACME, INC.' are treated as the same name. 'Acme Inc' and 'Acme' are not.">i</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button class="btn btn-primary" id="dc-scan-btn">Scan for duplicates</button>
+                </div>
+
+              </div><!-- /dc-idle -->
+
+              <!-- ════════════════════════════════
+                   SCANNING: progress bar
+              ════════════════════════════════ -->
+              <div id="dc-scanning" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="dc-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="dc-progress-msg">Starting scan…</span>
+                  <span id="dc-progress-pct" style="margin-left:auto;"></span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="dc-scan-stop">⏹ Cancel</button>
+              </div><!-- /dc-scanning -->
+
+              <!-- ════════════════════════════════
+                   PREVIEW: group cards
+              ════════════════════════════════ -->
+              <div id="dc-preview" class="hidden">
+
+                <div class="alert alert-info" id="dc-preview-summary" style="margin-bottom:16px;">
+                  <span class="alert-icon">🔍</span>
+                  <span id="dc-preview-summary-text"></span>
+                </div>
+
+                <!-- No duplicates found -->
+                <div id="dc-no-duplicates" class="hidden">
+                  <div class="alert alert-ok" style="margin-bottom:16px;">
+                    <span class="alert-icon">✅</span>
+                    <span>No duplicate groups found. Nothing to merge.</span>
+                  </div>
+                  <button class="btn btn-secondary" id="dc-no-dup-rescan">Adjust options</button>
+                </div>
+
+                <!-- Groups list -->
+                <div id="dc-groups-wrap">
+
+                  <!-- Toolbar -->
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                    <button class="btn btn-ghost btn-sm" id="dc-toggle-all-groups">Collapse all</button>
+                    <button class="btn btn-ghost btn-sm hidden" id="dc-unselect-all">Unselect all</button>
+                    <button class="btn btn-ghost btn-sm hidden" id="dc-invert-selection">Invert selection</button>
+                  </div>
+
+                  <!-- Domain group cards injected here by JS -->
+                  <div id="dc-groups-list" style="margin-bottom:8px;"></div>
+
+                  <!-- Skipped domains (collapsible) -->
+                  <div id="dc-skipped-wrap" class="hidden" style="margin-bottom:12px;">
+                    <details>
+                      <summary style="cursor:pointer;font-size:13px;color:var(--c-muted);user-select:none;">
+                        <span id="dc-skipped-count"></span> domain(s) skipped — <span id="dc-skipped-reason"></span>
+                        <span class="info-icon" data-tip="These groups couldn't be auto-resolved because the target company is ambiguous. To merge them yourself, go back and switch 'Primary record origin' to 'Let me choose per group' — you'll be able to pick the target for each group manually.">i</span>
+                      </summary>
+                      <div style="overflow-x:auto;margin-top:8px;">
+                        <table class="mapping-table" id="dc-skipped-table">
+                          <thead>
+                            <tr>
+                              <th>Domain</th>
+                              <th>Reason</th>
+                              <th>Primary origin UUIDs found</th>
+                            </tr>
+                          </thead>
+                          <tbody id="dc-skipped-tbody"></tbody>
+                        </table>
+                      </div>
+                    </details>
+                  </div>
+
+                  <!-- Merge action -->
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:20px;">
+                    <button class="btn btn-danger" id="dc-merge-btn">Merge &amp; delete duplicates</button>
+                    <button class="btn btn-secondary" id="dc-rescan-btn">Adjust options</button>
+                  </div>
+
+                </div><!-- /dc-groups-wrap -->
+              </div><!-- /dc-preview -->
+
+              <!-- ════════════════════════════════
+                   RUNNING: live log
+              ════════════════════════════════ -->
+              <div id="dc-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="dc-run-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="dc-run-progress-msg">Starting…</span>
+                  <span id="dc-run-progress-pct" style="margin-left:auto;"></span>
+                </div>
+
+                <button class="btn btn-danger btn-sm mt-8" id="dc-run-stop">⏹ Stop</button>
+
+                <div id="dc-run-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Live log</span>
+                    <span id="dc-run-log-counts" class="live-log-counts"></span>
+                  </div>
+                  <div id="dc-run-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div><!-- /dc-running -->
+
+              <!-- ════════════════════════════════
+                   RESULTS: summary + log
+              ════════════════════════════════ -->
+              <div id="dc-results" class="hidden">
+                <div id="dc-results-summary"></div>
+
+                <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                  <button class="btn btn-primary hidden" id="dc-continue-run">▶ Continue merge</button>
+                  <button class="btn btn-secondary" id="dc-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm" id="dc-download-audit">↓ Download audit log (JSON)</button>
+                  <button class="btn btn-ghost btn-sm" id="dc-start-over">Start over</button>
+                </div>
+
+                <div id="dc-results-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Log</span>
+                    <span id="dc-results-log-counts" class="live-log-counts"></span>
+                    <button class="btn btn-ghost btn-sm hidden" id="dc-results-download-log" style="margin-left:auto;">↓ Download log</button>
+                  </div>
+                  <div id="dc-results-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div><!-- /dc-results -->
+
+              <!-- ════════════════════════════════
+                   ERROR
+              ════════════════════════════════ -->
+              <div id="dc-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="dc-error-msg"></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                  <button class="btn btn-secondary hidden" id="dc-error-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="dc-error-download-log">↓ Download log</button>
+                  <button class="btn btn-ghost btn-sm" id="dc-error-retry">Start over</button>
+                </div>
+              </div><!-- /dc-error -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+
+          <!-- ════════════════════════════════
+               COMPARE OVERLAY (manual mode)
+          ════════════════════════════════ -->
+          <div id="dc-compare-overlay" class="ri-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dc-cmp-group-label">
+            <div class="ri-modal" style="width:94vw;max-width:860px;max-height:92vh;display:flex;flex-direction:column;">
+
+              <!-- Header -->
+              <div class="ri-header" style="flex-shrink:0;align-items:flex-start;">
+                <div style="display:flex;flex-direction:column;gap:6px;min-width:0;flex:1;">
+                  <!-- Group row -->
+                  <div class="nm-cmp-group-row" style="border-left:3px solid var(--c-ok,#22c55e);padding-left:8px;">
+                    <span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--c-ok,#22c55e);white-space:nowrap;">Group</span>
+                    <button class="btn btn-ghost btn-sm" id="dc-cmp-prev-group" title="Previous group (Shift ←)">←</button>
+                    <span id="dc-cmp-group-nav" style="font-size:12px;color:var(--c-muted);"></span>
+                    <button class="btn btn-ghost btn-sm" id="dc-cmp-next-group" title="Next group (Shift →)">→</button>
+                    <span id="dc-cmp-group-label" class="nm-cmp-group-label"></span>
+                  </div>
+                  <!-- Duplicates row -->
+                  <div class="nm-cmp-controls-row">
+                    <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;color:var(--c-muted);">
+                      <input type="checkbox" id="dc-cmp-group-select"> Select group for merge
+                    </label>
+                    <span class="nm-cmp-nav-controls">
+                      <span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--c-muted);white-space:nowrap;">Duplicates</span>
+                      <button class="btn btn-ghost btn-sm" id="dc-cmp-prev-dup" title="Previous duplicate (←)">←</button>
+                      <span id="dc-cmp-dup-nav" style="font-size:12px;color:var(--c-muted);"></span>
+                      <button class="btn btn-ghost btn-sm" id="dc-cmp-next-dup" title="Next duplicate (→)">→</button>
+                    </span>
+                  </div>
+                </div>
+                <button class="ri-close" id="dc-cmp-close" style="align-self:flex-start;">&times;</button>
+              </div>
+
+              <!-- Split body -->
+              <div class="nm-split-body">
+                <div id="dc-split-left"></div>
+                <div id="dc-split-right"></div>
+              </div>
+
+            </div>
+          </div><!-- /dc-compare-overlay -->
+
+        </div><!-- /view-companies-duplicate-cleanup -->
+
+        <!-- ══════════════════════════════════════════
+             MERGE COMPANIES FROM CSV
+        ═══════════════════════════════════════════ -->
+        <div id="view-companies-duplicate-cleanup-csv" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Merge companies from CSV <span class="badge badge-beta">Beta</span></div>
+              <div class="panel-subtitle">Upload a CSV with target and duplicate company UUIDs — merge specific groups without running a full scan.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Prepare a CSV</strong> — one row per merge group. Each row needs a target company UUID (kept) and one or more duplicate UUIDs (comma-separated, will be deleted).</li>
+                  <li><strong>Map columns</strong> — select which CSV column contains the target UUID and which contains the duplicates list.</li>
+                  <li><strong>Validate</strong> — target column must have exactly 1 UUID per row; duplicates column must have 1+ comma-separated UUIDs. Errors block the preview.</li>
+                  <li><strong>Preview</strong> — review the merge groups and note/user counts before committing.</li>
+                  <li><strong>Merge</strong> — relinks all notes and users from each duplicate to its target company, then deletes the duplicates.</li>
+                  <li><strong>No rollback</strong> — export your companies from <a href="/companies" style="color:inherit;text-decoration:underline;">Companies → Export</a> first.</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ════════════════════════════════
+                   IDLE: upload
+              ════════════════════════════════ -->
+              <div id="dcm-idle">
+                <div class="alert alert-warn" style="margin-bottom:16px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span>
+                    <strong>Before uploading, export your companies data from <a href="/companies" style="color:inherit;text-decoration:underline;">Companies → Export</a>.</strong>
+                    Deleted companies cannot be recovered via the API.
+                  </span>
+                </div>
+                <div class="dropzone" id="dcm-dropzone">
+                  <span class="dropzone-icon">📄</span>
+                  <div class="dropzone-label">Drop a CSV file here</div>
+                  <div class="dropzone-hint">or click to browse</div>
+                </div>
+                <input type="file" id="dcm-file-input" accept=".csv,text/csv" class="hidden" />
+              </div><!-- /dcm-idle -->
+
+              <!-- ════════════════════════════════
+                   MAPPING: column selection
+              ════════════════════════════════ -->
+              <div id="dcm-mapping" class="hidden">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                  <div class="panel-subtitle" id="dcm-map-subtitle"></div>
+                  <button class="btn btn-ghost btn-sm" id="dcm-reupload">↩ Re-upload</button>
+                </div>
+                <div class="text-sm text-muted mb-16">Select which CSV columns map to the target and duplicates.</div>
+                <table class="mapping-table" style="margin-bottom:16px;">
+                  <thead>
+                    <tr>
+                      <th>Field</th>
+                      <th>CSV column</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>
+                        <strong>Target company UUID</strong>
+                        <div style="font-size:12px;color:var(--c-muted);margin-top:2px;">Exactly one UUID per row — this company is kept</div>
+                      </td>
+                      <td>
+                        <select id="dcm-target-col" style="width:100%;max-width:260px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:13px;"></select>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <strong>Duplicate company UUIDs</strong>
+                        <div style="font-size:12px;color:var(--c-muted);margin-top:2px;">One or more UUIDs, comma-separated — these will be deleted</div>
+                      </td>
+                      <td>
+                        <select id="dcm-dupes-col" style="width:100%;max-width:260px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:13px;"></select>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <!-- Validation warning — duplicate target UUIDs (non-blocking) -->
+                <div id="dcm-validate-warn" class="hidden" style="margin-bottom:16px;">
+                  <div class="alert alert-warn">
+                    <span class="alert-icon">⚠️</span>
+                    <span id="dcm-validate-warn-msg"></span>
+                  </div>
+                  <div class="result-scroll mt-12">
+                    <table class="results-table">
+                      <thead><tr><th>Target UUID</th><th>Row(s)</th></tr></thead>
+                      <tbody id="dcm-validate-warn-rows"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- Validation error — shown inline when validation fails -->
+                <div id="dcm-validate-error" class="hidden" style="margin-bottom:16px;">
+                  <div class="alert alert-danger">
+                    <span class="alert-icon">⚠️</span>
+                    <span id="dcm-validate-error-summary"></span>
+                  </div>
+                  <div class="result-scroll mt-12">
+                    <table class="results-table">
+                      <thead><tr><th>Row</th><th>Column</th><th>Error</th></tr></thead>
+                      <tbody id="dcm-validate-error-rows"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <button class="btn btn-primary" id="dcm-preview-btn">🔍 Validate &amp; preview</button>
+              </div><!-- /dcm-mapping -->
+
+              <!-- ════════════════════════════════
+                   PREVIEWING: SSE progress
+              ════════════════════════════════ -->
+              <div id="dcm-previewing" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="dcm-preview-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="dcm-preview-progress-msg">Starting…</span>
+                  <span id="dcm-preview-progress-pct" style="margin-left:auto;"></span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="dcm-preview-stop">⏹ Cancel</button>
+              </div><!-- /dcm-previewing -->
+
+              <!-- ════════════════════════════════
+                   PREVIEW: group cards
+              ════════════════════════════════ -->
+              <div id="dcm-preview" class="hidden">
+
+                <div class="alert alert-info" id="dcm-preview-summary" style="margin-bottom:16px;">
+                  <span class="alert-icon">🔍</span>
+                  <span id="dcm-preview-summary-text"></span>
+                </div>
+
+                <!-- Toolbar -->
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                  <button class="btn btn-ghost btn-sm" id="dcm-toggle-all-groups">Collapse all</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="dcm-unselect-all">Unselect all</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="dcm-invert-selection">Invert selection</button>
+                </div>
+
+                <!-- Group cards injected by JS -->
+                <div id="dcm-groups-list" style="margin-bottom:8px;"></div>
+
+                <!-- Skipped groups: target not found -->
+                <div id="dcm-skipped-wrap" class="hidden" style="margin-bottom:12px;">
+                  <details>
+                    <summary style="cursor:pointer;font-size:13px;color:var(--c-muted);user-select:none;">
+                      <span id="dcm-skipped-count"></span> group(s) skipped — target company not found in this space
+                      <span class="info-icon" data-tip="These groups cannot be merged because the target company UUID does not exist in your Productboard space. Check the UUID in your CSV, correct it, and re-upload to include these groups.">i</span>
+                    </summary>
+                    <div style="overflow-x:auto;margin-top:8px;">
+                      <table class="mapping-table" id="dcm-skipped-table">
+                        <thead>
+                          <tr>
+                            <th>Target UUID</th>
+                            <th>Duplicates</th>
+                            <th>Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody id="dcm-skipped-tbody"></tbody>
+                      </table>
+                    </div>
+                  </details>
+                </div>
+
+                <!-- Actions -->
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:20px;">
+                  <button class="btn btn-danger" id="dcm-merge-btn">Merge &amp; delete duplicates</button>
+                  <button class="btn btn-secondary" id="dcm-back-to-map">← Back to map</button>
+                </div>
+
+              </div><!-- /dcm-preview -->
+
+              <!-- ════════════════════════════════
+                   RUNNING: live log
+              ════════════════════════════════ -->
+              <div id="dcm-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="dcm-run-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="dcm-run-progress-msg">Starting…</span>
+                  <span id="dcm-run-progress-pct" style="margin-left:auto;"></span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="dcm-run-stop">⏹ Stop</button>
+                <div id="dcm-run-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Live log</span>
+                    <span id="dcm-run-log-counts" class="live-log-counts"></span>
+                  </div>
+                  <div id="dcm-run-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div><!-- /dcm-running -->
+
+              <!-- ════════════════════════════════
+                   RESULTS: summary + log
+              ════════════════════════════════ -->
+              <div id="dcm-results" class="hidden">
+                <div id="dcm-results-summary"></div>
+                <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                  <button class="btn btn-primary hidden" id="dcm-continue-run">▶ Continue merge</button>
+                  <button class="btn btn-secondary hidden" id="dcm-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm" id="dcm-download-audit">↓ Download audit log (JSON)</button>
+                  <button class="btn btn-ghost btn-sm" id="dcm-start-over">Start over</button>
+                </div>
+                <div id="dcm-results-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Log</span>
+                    <span id="dcm-results-log-counts" class="live-log-counts"></span>
+                    <button class="btn btn-ghost btn-sm hidden" id="dcm-results-download-log" style="margin-left:auto;">↓ Download log</button>
+                  </div>
+                  <div id="dcm-results-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div><!-- /dcm-results -->
+
+              <!-- ════════════════════════════════
+                   ERROR
+              ════════════════════════════════ -->
+              <div id="dcm-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="dcm-error-msg"></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                  <button class="btn btn-secondary hidden" id="dcm-error-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="dcm-error-download-log">↓ Download log</button>
+                  <button class="btn btn-ghost btn-sm" id="dcm-error-retry">Start over</button>
+                </div>
+              </div><!-- /dcm-error -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-companies-duplicate-cleanup-csv -->

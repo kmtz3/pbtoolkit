@@ -1,6 +1,6 @@
 # PBToolkit
 
-A web-based toolkit for bulk operations on Productboard data. Supports exporting, importing, and managing **Companies**, **Notes**, **Entities**, and **Member Activity**.
+A web-based toolkit for bulk operations on Productboard data. Supports exporting, importing, and managing **Companies**, **Notes**, **Entities**, **Member Activity**, and more.
 
 ---
 
@@ -81,6 +81,7 @@ To disconnect, click **Disconnect** in the top-right corner. This clears the ses
 | Companies | ✅ Live | Export and import companies with custom fields |
 | Notes | ✅ Live | Export, import, delete, and migration-prep for notes |
 | Merge Duplicate Notes | ✅ Live | Scan for duplicate notes, preview groups, merge into one, and find/delete empty notes |
+| Merge Duplicate Companies | ✅ Live | Scan for duplicate companies, preview groups, merge — consolidating notes and user associations before deleting duplicates |
 | Entities | 🔄 Polish | Templates, export, and import for all entity types (QA in progress) |
 | Member Activity | ✅ Live | Export member activity and license utilization data |
 | Team Membership | ✅ Live | Export and bulk-import team assignments via CSV diff preview |
@@ -213,6 +214,39 @@ A **Stop** button is available during run. An **audit log** (downloadable) captu
 ### Find Empty Notes
 
 Scans for notes with no content. Same date-range filter as Merge Duplicates. Presents a list with owner, customer, state, and created date. Select all or individual notes to delete.
+
+---
+
+## Merge Duplicate Companies
+
+Finds and merges duplicate company records, consolidating notes and user associations into the canonical company before deleting the duplicates.
+
+> **Export first** — download a full companies export from **Companies → Export** before running. Deleted companies cannot be recovered via the API.
+
+### Scan options
+
+| Option | Description |
+|---|---|
+| Primary record origin | The source origin that identifies the canonical (target) company. All other companies sharing the same domain are treated as duplicates. Choose **Let me choose per group** to manually select the target for each group. |
+| Match criteria: Domain only | Companies are duplicates if they share the same domain (default). |
+| Match criteria: Domain + Name | Stricter — must share both domain and name. Optional fuzzy matching (case-insensitive, punctuation-ignored). |
+| Match criteria: Name only | Match by name across the workspace regardless of domain. Optional: restrict to companies with no domain set. Optional fuzzy matching. |
+
+### Flow
+
+A two-step flow: **Scan → Preview → Run**.
+
+**Scan** — fetches all companies and groups them by the selected match criteria. No changes are made.
+
+**Preview** — review each duplicate group. Shows the target company and the duplicates to be deleted. In manual mode, click any row to compare companies side-by-side and swap the target. Select individual groups or process all.
+
+**Merge steps per duplicate company (in order):**
+1. Find all notes linked to the duplicate
+2. Relink each note's customer to the target company (or update the user's parent company if the customer is a user)
+3. Find any remaining users parented to the duplicate (not caught via notes) and relink them to the target
+4. Delete the duplicate — only after every relink for that company succeeds
+
+A **Stop** button is available during the run. An **audit log** (downloadable) captures every operation.
 
 ---
 

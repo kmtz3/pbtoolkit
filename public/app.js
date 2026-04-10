@@ -275,7 +275,7 @@ function createViewState(prefix, states) {
 // ── Routing ─────────────────────────────────────────────────
 const VALID_TOOLS = new Set([
   'entities', 'notes', 'companies',
-  'member-activity', 'teams', 'notes-merge',
+  'member-activity', 'teams', 'notes-merge', 'companies-duplicate-cleanup',
 ]);
 
 const PAGE_META = {
@@ -283,7 +283,8 @@ const PAGE_META = {
   notes:             { title: 'Notes', desc: 'Export, import, delete, and migrate Productboard notes across workspaces.' },
   companies:         { title: 'Companies & Users', desc: 'Export and import Productboard companies and users, including custom fields, relationships, and UUID-based patching.' },
   'member-activity': { title: 'Member Activity', desc: 'Export Productboard member activity data for license auditing and enablement planning.' },
-  teams:             { title: 'Teams & Members', desc: 'Manage Productboard teams — edit names, handles, descriptions, and members. Import and export via CSV.' },
+  teams:                { title: 'Teams & Members', desc: 'Manage Productboard teams — edit names, handles, descriptions, and members. Import and export via CSV.' },
+  'companies-duplicate-cleanup':  { title: 'Merge Duplicate Companies', desc: 'Relink notes and user associations from duplicate Productboard companies to their Salesforce canonical record, then delete the duplicates.' },
 };
 
 const DEFAULT_TITLE = 'PBToolkit \u2014 Productboard Importer, Exporter & Migration Tool';
@@ -302,7 +303,8 @@ const DEFAULT_VIEWS = {
   entities:          'entities-templates',
   'member-activity': 'member-activity-export',
   teams:             'members-teams-mgmt-manage',
-  'notes-merge':     'notes-merge-view',
+  'notes-merge':        'notes-merge-view',
+  'companies-duplicate-cleanup':  'companies-duplicate-cleanup',
 };
 
 const TOOL_VIEWS = {
@@ -315,7 +317,8 @@ const TOOL_VIEWS = {
     'team-membership-export', 'team-membership-import',
     'members-teams-mgmt-manage',
   ],
-  'notes-merge': ['notes-merge-view', 'notes-merge-empty'],
+  'notes-merge':       ['notes-merge-view', 'notes-merge-empty'],
+  'companies-duplicate-cleanup': ['companies-duplicate-cleanup'],
 };
 
 let _currentTool = null;
@@ -512,7 +515,7 @@ document.querySelectorAll('.tool-card:not(.tool-card-soon)').forEach((card) => {
 });
 
 async function loadTool(toolName) {
-  const names = { companies: 'Companies & Users', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', teams: 'Teams', 'notes-merge': 'Merge Duplicate Notes' };
+  const names = { companies: 'Companies & Users', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', teams: 'Teams', 'notes-merge': 'Merge Duplicate Notes', 'companies-duplicate-cleanup': 'Merge Duplicate Companies' };
   setText('topbar-tool-name', names[toolName] || toolName);
   showScreen('tool');
   _currentTool = toolName;
@@ -524,6 +527,7 @@ async function loadTool(toolName) {
   $('sidebar-member-activity').classList.toggle('hidden', toolName !== 'member-activity');
   $('sidebar-teams').classList.toggle('hidden', toolName !== 'teams');
   $('sidebar-notes-merge').classList.toggle('hidden', toolName !== 'notes-merge');
+  $('sidebar-companies-duplicate-cleanup').classList.toggle('hidden', toolName !== 'companies-duplicate-cleanup');
 
   try {
     if (toolName === 'companies') {
@@ -551,8 +555,9 @@ async function loadTool(toolName) {
   if (toolName === 'companies')        { window.initCompaniesModule?.(); window.initUsersModule?.(); }
   if (toolName === 'notes')            window.initNotesModule?.();
   if (toolName === 'entities')         window.initEntitiesModule?.();
-  if (toolName === 'member-activity')  { if (typeof initMemberActivityModule === 'function') initMemberActivityModule(); }
-  if (toolName === 'notes-merge')      window.initNotesMergeModule?.();
+  if (toolName === 'member-activity')  window.initMemberActivityModule?.();
+  if (toolName === 'notes-merge')        window.initNotesMergeModule?.();
+  if (toolName === 'companies-duplicate-cleanup')  window.initCompaniesDuplicateCleanupModule?.();
   if (toolName === 'teams') {
     window.initTeamsCrudModule?.();
     window.initTeamMembershipModule?.();
@@ -692,6 +697,7 @@ function showView(view, { updateUrl = false } = {}) {
     'members-teams-mgmt-manage',
     'users-export', 'users-import', 'users-delete-csv', 'users-delete-all',
     'notes-merge-view', 'notes-merge-empty',
+    'companies-duplicate-cleanup', 'companies-duplicate-cleanup-csv',
   ].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', v !== view);
@@ -916,6 +922,21 @@ function makeLogAppender(logId, entriesId, countsId, defaultEntityType = '') {
     if (entriesEl) entriesEl.innerHTML = '';
     if (countsEl)  countsEl.innerHTML  = '';
     if (logEl)     logEl.classList.add('hidden');
+  };
+
+  // separator(label) — inserts a visual divider into the live log without clearing it.
+  // Used when continuing a stopped run so the full log stays intact across segments.
+  append.separator = (label) => {
+    const entriesEl = document.getElementById(entriesId);
+    const logEl     = document.getElementById(logId);
+    if (!entriesEl) return;
+    logEl?.classList.remove('hidden');
+    const div = document.createElement('div');
+    div.style.cssText = 'border-top:1px solid rgba(255,255,255,0.18);margin:6px 0;padding-top:6px;font-size:10px;text-align:center;letter-spacing:.06em;color:rgba(255,255,255,0.55);';
+    div.textContent = label || '── continuing ──';
+    entriesEl.appendChild(div);
+    entriesEl.scrollTop = entriesEl.scrollHeight;
+    _buffer.push({ timestamp: new Date().toISOString(), level: 'info', row_num: '', uuid: '', entity_type: defaultEntityType, message: label || '── continuing ──' });
   };
 
   return append;

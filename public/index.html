@@ -215,16 +215,16 @@
             <div class="tool-card-desc">Find and merge duplicate notes with smart data reconciliation — consolidate tags, sources, and linked entities into a single canonical note.</div>
             <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
           </div>
+          <div class="tool-card" data-tool="companies-duplicate-cleanup">
+            <span class="tool-card-icon">🏢</span>
+            <div class="tool-card-name">Merge Duplicate Companies</div>
+            <div class="tool-card-desc">Find and merge duplicate companies — relink notes and user associations to the canonical record, then delete the duplicates.</div>
+            <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
+          </div>
           <div class="tool-card tool-card-soon">
             <span class="tool-card-icon">📏</span>
             <div class="tool-card-name">Description Validator</div>
             <div class="tool-card-desc">Audit entity descriptions by type and status to flag empty or too-short fields — surface gaps in PM documentation before they reach stakeholders.</div>
-            <div class="tool-card-footer"><span class="badge badge-muted">Coming soon</span></div>
-          </div>
-          <div class="tool-card tool-card-soon">
-            <span class="tool-card-icon">🏢</span>
-            <div class="tool-card-name">Merge Duplicate Companies</div>
-            <div class="tool-card-desc">Consolidate duplicate companies by merging attached notes, insights, and user associations into a single selected record.</div>
             <div class="tool-card-footer"><span class="badge badge-muted">Coming soon</span></div>
           </div>
           <div class="tool-card tool-card-soon">
@@ -340,6 +340,16 @@
           </button>
         </div>
 
+        <!-- Duplicate Company Cleanup nav items -->
+        <div id="sidebar-companies-duplicate-cleanup" class="hidden">
+          <button class="nav-item active" data-view="companies-duplicate-cleanup" id="nav-companies-duplicate-cleanup">
+            <span class="icon">🏢</span> Merge by scan
+          </button>
+          <button class="nav-item" data-view="companies-duplicate-cleanup-csv" id="nav-companies-duplicate-cleanup-csv">
+            <span class="icon">📄</span> Merge from CSV
+          </button>
+        </div>
+
         <!-- Merge Duplicate Notes nav items -->
         <div id="sidebar-notes-merge" class="hidden">
           <button class="nav-item active" data-view="notes-merge-view" id="nav-notes-merge-view">
@@ -427,6 +437,7 @@
 <script src="teams-crud-app.js"></script>
 <script src="members-teams-mgmt-app.js"></script>
 <script src="notes-merge-app.js"></script>
+<script src="companies-duplicate-cleanup-app.js"></script>
 
 <!-- ── REPORT ISSUE MODAL ── -->
 <div class="ri-overlay hidden" id="ri-overlay">

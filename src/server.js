@@ -26,7 +26,8 @@ const membersTeamsMgmtRouter = require('./routes/membersTeamsMgmt');
 const usersRouter          = require('./routes/users');
 const authRouter           = require('./routes/auth');
 const feedbackRouter       = require('./routes/feedback');
-const notesMergeRouter     = require('./routes/notesMerge');
+const notesMergeRouter          = require('./routes/notesMerge');
+const companiesDuplicateCleanupRouter = require('./routes/companiesDuplicateCleanup');
 
 const shouldCompress = (req, res) => {
   if (req.headers.accept && req.headers.accept.includes('text/event-stream')) {
@@ -78,6 +79,11 @@ app.use(session({
     maxAge: 24 * 60 * 60 * 1000, // 24 h — matches PB OAuth access token lifetime
   },
 }));
+
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  console.error('[startup] FATAL: SESSION_SECRET env var is not set. Refusing to start with insecure default.');
+  process.exit(1);
+}
 
 // Health, config, and auth status are exempt from rate limiting
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
@@ -140,6 +146,7 @@ app.use('/api/teams-crud', teamsCrudRouter);
 app.use('/api/members-teams-mgmt', membersTeamsMgmtRouter);
 app.use('/api/feedback', feedbackRouter);
 app.use('/api/notes-merge', notesMergeRouter);
+app.use('/api/companies-duplicate-cleanup', companiesDuplicateCleanupRouter);
 
 // Static pages
 app.get('/privacy', (_req, res) => {

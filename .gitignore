@@ -3,8 +3,12 @@ node_modules/
 claude.env
 *.log
 .DS_Store
-.claude/
-CLAUDE.md
+.claude/*
+!.claude/agents/
+!.claude/agents/**
+!.claude/commands/
+!.claude/commands/**
 implementation_notes/
 openapi v2 public API/
 plan*
+test/*.json

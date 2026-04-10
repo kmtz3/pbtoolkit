@@ -86,7 +86,7 @@ function syntheticColumns(entityType) {
     cols.push('timeframe_start (YYYY-MM-DD)', 'timeframe_end (YYYY-MM-DD)');
   }
   if (HEALTH_TYPES.has(entityType)) {
-    cols.push('health_status', 'health_comment', 'health_updated_by (email)');
+    cols.push('health_status', 'health_comment', 'health_updated_by (email)', 'health_last_updated', 'health_previous_status');
   }
   return cols;
 }

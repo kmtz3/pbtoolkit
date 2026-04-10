@@ -162,6 +162,8 @@ function entityToRow(entity, entityType, entityConfig) {
     row['health_status'] = fields.health?.status || '';
     row['health_comment'] = fields.health?.comment || '';
     row['health_updated_by (email)'] = fields.health?.createdBy?.email || '';
+    row['health_last_updated'] = fields.health?.lastUpdatedAt || '';
+    row['health_previous_status'] = fields.health?.previousStatus || '';
   }
 
   // 5. Custom UUID fields
