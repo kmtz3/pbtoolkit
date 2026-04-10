@@ -257,6 +257,12 @@
     details.open = true;
     details.dataset.di = di;
     details.style.cssText = 'border:1px solid var(--c-border,#e2e8f0);border-radius:6px;margin-bottom:8px;overflow:hidden;';
+    details.addEventListener('toggle', () => {
+      const allDetails = dc$('dc-groups-list')?.querySelectorAll('details[data-di]') || [];
+      const anyOpen = [...allDetails].some(d => d.open);
+      const btn = dc$('dc-toggle-all-groups');
+      if (btn) btn.textContent = anyOpen ? 'Collapse all' : 'Expand all';
+    });
     _groupCardEls.set(dr, { el: details, di });
 
     // ── Summary / header ──────────────────────────────────
@@ -769,6 +775,762 @@
     );
   }
 
+  // ==========================================================
+  // ── MERGE FROM CSV submodule (prefix: dcm) ──────────────
+  // ==========================================================
+
+  // ── Module state ──────────────────────────────────────────
+  let _dcmCsvRows       = null;   // parsed CSV data (array of row objects)
+  let _dcmHeaders       = null;   // CSV column headers
+  let _dcmPreviewData   = null;   // { domainRecords, totalDomains, totalDuplicates }
+  let _dcmSkippedGroups = [];     // domainRecords where primaryNotFound === true (not merged)
+  let _dcmPreviewCtrl  = null;   // AbortController for preview SSE
+  let _dcmRunCtrl      = null;   // AbortController for run SSE
+  let _dcmDropzoneClear = null;  // wireDropzone clear fn
+  let _dcmLogAppender  = null;
+  let _dcmAuditLog     = null;
+  let _dcmPendingRun   = null;
+  let _dcmSelectedDomains = new Set();
+  let _dcmGroupCardEls    = new Map();  // domainRecord → { el, di }
+  let _dcmFromRun      = false;
+  let _dcmVs           = null;
+
+  const DCM_STATES = ['idle', 'mapping', 'previewing', 'preview', 'running', 'results', 'error'];
+
+  // ── DOM helpers ────────────────────────────────────────────
+  function dcm$(id)        { return document.getElementById(id); }
+  function dcmShow(id)     { dcm$(id)?.classList.remove('hidden'); }
+  function dcmHide(id)     { dcm$(id)?.classList.add('hidden'); }
+  function dcmText(id, t)  { const el = dcm$(id); if (el) el.textContent = t; }
+  function dcmGo(state)    { _dcmVs?.go(state); }
+
+  // ── Reset ──────────────────────────────────────────────────
+  function dcmReset() {
+    if (_dcmPreviewCtrl) { _dcmPreviewCtrl.abort(); _dcmPreviewCtrl = null; }
+    if (_dcmRunCtrl)     { _dcmRunCtrl.abort();     _dcmRunCtrl     = null; }
+    _dcmCsvRows         = null;
+    _dcmHeaders         = null;
+    _dcmPreviewData     = null;
+    _dcmSkippedGroups   = [];
+    _dcmAuditLog        = null;
+    _dcmPendingRun      = null;
+    _dcmSelectedDomains = new Set();
+    _dcmGroupCardEls    = new Map();
+    _dcmFromRun         = false;
+    if (_dcmDropzoneClear) _dcmDropzoneClear();
+    if (_dcmLogAppender)   _dcmLogAppender.reset();
+    dcmHide('dcm-validate-error');
+    dcmHide('dcm-validate-warn');
+    dcmHide('dcm-results-download-log');
+    dcmHide('dcm-error-download-log');
+    dcmGo('idle');
+  }
+
+  // ── Client-side validation ─────────────────────────────────
+  const DCM_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  function dcmValidate() {
+    const targetCol = dcm$('dcm-target-col')?.value;
+    const dupesCol  = dcm$('dcm-dupes-col')?.value;
+    const errors    = [];
+
+    if (!targetCol || !dupesCol) {
+      return { ok: false, errors: [{ row: '—', col: '—', msg: 'Select both column mappings.' }], warnings: [] };
+    }
+    if (targetCol === dupesCol) {
+      return { ok: false, errors: [{ row: '—', col: '—', msg: 'Target and duplicates columns must be different.' }], warnings: [] };
+    }
+
+    // targetRows: targetId → [rowNums] — used to detect duplicate target UUIDs across rows
+    const targetRows = {};
+
+    for (let i = 0; i < _dcmCsvRows.length; i++) {
+      const row    = _dcmCsvRows[i];
+      const rowNum = i + 2; // +1 for header, +1 for 1-index
+
+      // Validate target
+      const targetVal   = (row[targetCol] || '').trim();
+      const targetParts = targetVal.split(',').map(s => s.trim()).filter(Boolean);
+      let   targetId    = null;
+
+      if (targetParts.length === 0) {
+        errors.push({ row: rowNum, col: 'Target', msg: 'Cell is empty.' });
+      } else if (targetParts.length > 1) {
+        errors.push({ row: rowNum, col: 'Target', msg: `Expected exactly 1 UUID, found ${targetParts.length}.` });
+      } else if (!DCM_UUID_RE.test(targetParts[0])) {
+        errors.push({ row: rowNum, col: 'Target', msg: `"${targetParts[0]}" is not a valid UUID.` });
+      } else {
+        targetId = targetParts[0];
+        if (!targetRows[targetId]) targetRows[targetId] = [];
+        targetRows[targetId].push(rowNum);
+      }
+
+      // Validate duplicates
+      const dupesVal   = (row[dupesCol] || '').trim();
+      const dupesParts = dupesVal.split(',').map(s => s.trim()).filter(Boolean);
+
+      if (dupesParts.length === 0) {
+        errors.push({ row: rowNum, col: 'Duplicates', msg: 'Cell is empty.' });
+      } else {
+        for (const id of dupesParts) {
+          if (!DCM_UUID_RE.test(id)) {
+            errors.push({ row: rowNum, col: 'Duplicates', msg: `"${id}" is not a valid UUID.` });
+          } else if (targetId && id === targetId) {
+            errors.push({ row: rowNum, col: 'Duplicates', msg: 'Target UUID cannot appear in its own duplicates list.' });
+          }
+        }
+      }
+    }
+
+    // Warn about target UUIDs that appear on multiple rows — they will be merged into one group
+    const warnings = Object.entries(targetRows)
+      .filter(([, rows]) => rows.length > 1)
+      .map(([targetId, rows]) => ({ targetId, rows }));
+
+    return { ok: errors.length === 0, errors, warnings };
+  }
+
+  function dcmShowValidationError(errors) {
+    const summary = dcm$('dcm-validate-error-summary');
+    const tbody   = dcm$('dcm-validate-error-rows');
+    if (summary) summary.textContent = `${errors.length} validation error${errors.length !== 1 ? 's' : ''} — fix your CSV before previewing.`;
+    if (tbody) {
+      tbody.innerHTML = '';
+      for (const e of errors) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${esc(String(e.row))}</td><td>${esc(e.col)}</td><td>${esc(e.msg)}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+    dcmShow('dcm-validate-error');
+  }
+
+  function dcmShowValidationWarning(warnings) {
+    const msg   = dcm$('dcm-validate-warn-msg');
+    const tbody = dcm$('dcm-validate-warn-rows');
+    if (msg) {
+      const n = warnings.length;
+      msg.textContent = `${n} target UUID${n !== 1 ? 's appear' : ' appears'} on multiple rows. These rows will be combined into ${n === 1 ? 'a single group' : 'single groups'} during preview — duplicates across rows are merged automatically.`;
+    }
+    if (tbody) {
+      tbody.innerHTML = '';
+      for (const { targetId, rows } of warnings) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="font-family:monospace;font-size:11px;">${esc(targetId)}</td>
+          <td>${esc(rows.join(', '))}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+    dcmShow('dcm-validate-warn');
+  }
+
+  // ── Build rows payload from CSV data ───────────────────────
+  function dcmBuildRows() {
+    const targetCol = dcm$('dcm-target-col')?.value;
+    const dupesCol  = dcm$('dcm-dupes-col')?.value;
+    return (_dcmCsvRows || []).map(row => ({
+      primaryId:    (row[targetCol] || '').trim(),
+      duplicateIds: (row[dupesCol] || '').split(',').map(s => s.trim()).filter(Boolean),
+    }));
+  }
+
+  // ── Run preview via SSE ────────────────────────────────────
+  function dcmRunPreview() {
+    if (!token) { requireToken(dcmRunPreview); return; }
+
+    const { ok, errors, warnings } = dcmValidate();
+    if (!ok) { dcmShowValidationError(errors); return; }
+
+    dcmHide('dcm-validate-error');
+    if (warnings.length > 0) dcmShowValidationWarning(warnings);
+    else dcmHide('dcm-validate-warn');
+    dcmGo('previewing');
+    setProgress('dcm-preview', 'Starting preview…', 0);
+
+    _dcmPreviewCtrl = subscribeSSE(
+      '/api/companies-duplicate-cleanup/preview-csv',
+      { rows: dcmBuildRows() },
+      {
+        onProgress({ message, percent }) { setProgress('dcm-preview', message, percent ?? 0); },
+        onLog() {},
+        onComplete(data) {
+          _dcmPreviewCtrl = null;
+          _dcmPreviewData = data;
+          dcmRenderPreview(data);
+          dcmGo('preview');
+        },
+        onError(msg) {
+          _dcmPreviewCtrl = null;
+          dcmText('dcm-error-msg', msg);
+          dcmGo('error');
+        },
+        onAbort() { dcmGo('mapping'); },
+      }
+    );
+  }
+
+  // ── Render preview group cards ─────────────────────────────
+  function dcmRenderPreview(data) {
+    const { domainRecords } = data;
+
+    // Split into actionable (target found) and skipped (target not found in space)
+    const actionable  = domainRecords.filter(dr => !dr.primaryNotFound);
+    _dcmSkippedGroups = domainRecords.filter(dr =>  dr.primaryNotFound);
+
+    // Count only active (non-skipped) duplicates for the summary
+    const actionableDups = actionable.reduce(
+      (n, dr) => n + (dr.duplicates || []).filter(d => !d.notFound).length, 0
+    );
+
+    const summaryText = dcm$('dcm-preview-summary-text');
+    if (summaryText) {
+      let text = `${actionable.length} group${actionable.length !== 1 ? 's' : ''} · ` +
+        `${actionableDups} duplicate compan${actionableDups !== 1 ? 'ies' : 'y'} to delete`;
+      if (_dcmSkippedGroups.length > 0)
+        text += ` · ${_dcmSkippedGroups.length} skipped (target not found)`;
+      summaryText.textContent = text;
+    }
+
+    const listEl = dcm$('dcm-groups-list');
+    if (listEl) {
+      listEl.innerHTML = '';
+      _dcmGroupCardEls.clear();
+      _dcmSelectedDomains.clear();
+      actionable.forEach((dr, di) => { listEl.appendChild(dcmBuildGroupCard(dr, di)); });
+    }
+
+    // Skipped groups collapsible section
+    const skippedWrap  = dcm$('dcm-skipped-wrap');
+    const skippedTbody = dcm$('dcm-skipped-tbody');
+    if (skippedWrap && skippedTbody) {
+      if (_dcmSkippedGroups.length > 0) {
+        skippedWrap.classList.remove('hidden');
+        dcmText('dcm-skipped-count', String(_dcmSkippedGroups.length));
+        skippedTbody.innerHTML = '';
+        for (const dr of _dcmSkippedGroups) {
+          const dupList = (dr.duplicates || []).map(d => d.id).join(', ');
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td style="font-family:monospace;font-size:11px;">${esc(dr.primaryId)}</td>
+            <td style="font-family:monospace;font-size:11px;">${esc(dupList || '—')}</td>
+            <td style="font-size:12px;color:var(--c-muted);">Target company not found in this space</td>
+          `;
+          skippedTbody.appendChild(tr);
+        }
+      } else {
+        skippedWrap.classList.add('hidden');
+      }
+    }
+
+    dcmUpdateSelectionUI();
+  }
+
+  // ── Build a collapsible group card (non-manual mode only) ──
+  function dcmBuildGroupCard(dr, di) {
+    const duplicates = dr.duplicates || [];
+    const total      = duplicates.length + 1; // +1 for the target
+
+    const details = document.createElement('details');
+    details.open = true;
+    details.dataset.di = di;
+    details.style.cssText = 'border:1px solid var(--c-border,#e2e8f0);border-radius:6px;margin-bottom:8px;overflow:hidden;';
+    details.addEventListener('toggle', () => {
+      const allDetails = dcm$('dcm-groups-list')?.querySelectorAll('details[data-di]') || [];
+      const anyOpen = [...allDetails].some(d => d.open);
+      const btn = dcm$('dcm-toggle-all-groups');
+      if (btn) btn.textContent = anyOpen ? 'Collapse all' : 'Expand all';
+    });
+
+    _dcmGroupCardEls.set(dr, { el: details, di });
+
+    // Summary / header
+    const summary = document.createElement('summary');
+    summary.style.cssText = [
+      'cursor:pointer;list-style:none;padding:10px 14px;',
+      'display:flex;align-items:center;gap:10px;min-width:0;',
+      'background:var(--c-bg-alt,#f8f9fa);font-size:13px;font-weight:500;user-select:none;',
+    ].join('');
+
+    const checkbox = document.createElement('input');
+    checkbox.type    = 'checkbox';
+    checkbox.checked = _dcmSelectedDomains.has(dr);
+    checkbox.style.cssText = 'cursor:pointer;flex-shrink:0;';
+    checkbox.title   = 'Select group for bulk merge';
+    checkbox.addEventListener('click',  (e) => e.stopPropagation());
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) _dcmSelectedDomains.add(dr);
+      else                  _dcmSelectedDomains.delete(dr);
+      dcmUpdateSelectionUI();
+    });
+
+    const groupLabel = document.createElement('span');
+    groupLabel.className   = 'nm-group-label';
+    groupLabel.textContent = `Group ${di + 1}`;
+
+    const activeDups   = duplicates.filter(d => !d.notFound);
+    const skippedDups  = duplicates.filter(d =>  d.notFound);
+    const hasCounts    = activeDups.some(d => d.notesCount != null);
+    const totalNotes   = activeDups.reduce((n, d) => n + (d.notesCount ?? 0), 0);
+    const totalUsers   = activeDups.reduce((n, d) => n + (d.usersCount ?? 0), 0);
+
+    const countLabel = document.createElement('span');
+    countLabel.className   = 'nm-group-count';
+    let countText = `${total} compan${total !== 1 ? 'ies' : 'y'} · ${activeDups.length} to delete`;
+    if (skippedDups.length > 0) countText += ` · ${skippedDups.length} not found (skipped)`;
+    if (hasCounts) countText += ` (${totalNotes} note${totalNotes !== 1 ? 's' : ''} + ${totalUsers} user${totalUsers !== 1 ? 's' : ''} to move)`;
+    countLabel.textContent = countText;
+
+    // Label: use domain if set, otherwise fall back to target UUID (truncated)
+    const groupTitle = document.createElement('span');
+    groupTitle.className   = 'nm-group-title';
+    groupTitle.textContent = dr.primaryDomain || `${dr.primaryId.slice(0, 8)}…`;
+
+    const spacer = document.createElement('span');
+    spacer.className = 'nm-group-spacer';
+
+    const mergeOneBtn = document.createElement('button');
+    mergeOneBtn.className   = 'btn btn-danger btn-sm';
+    mergeOneBtn.textContent = 'Merge this group';
+    mergeOneBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dcmStartSingleGroupMerge(dr, di + 1);
+    });
+
+    // If every duplicate is not found there is nothing to merge — hide the controls
+    if (activeDups.length === 0) {
+      checkbox.style.display    = 'none';
+      mergeOneBtn.style.display = 'none';
+    }
+
+    summary.append(checkbox, groupLabel, countLabel, groupTitle, spacer, mergeOneBtn);
+    details.appendChild(summary);
+
+    // Compact table
+    const allCompanies = [
+      {
+        id:            dr.primaryId,
+        name:          dr.primaryName,
+        domain:        dr.primaryDomain        || null,
+        sourceOrigin:  dr.primaryOrigin        || null,
+        sourceRecordId:dr.primarySourceRecordId|| null,
+        notFound:      dr.primaryNotFound      || false,
+        isTarget:      true,
+      },
+      ...duplicates.map(d => ({ ...d, isTarget: false })),
+    ];
+
+    const incomingNotes = activeDups.every(d => d.notesCount != null)
+      ? activeDups.reduce((n, d) => n + d.notesCount, 0) : null;
+    const incomingUsers = activeDups.every(d => d.usersCount != null)
+      ? activeDups.reduce((n, d) => n + (d.usersCount ?? 0), 0) : null;
+
+    const table = document.createElement('table');
+    table.className = 'mapping-table';
+    table.style.marginBottom = '0';
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th style="width:80px;">Role</th>
+          <th>UUID</th>
+          <th>Name</th>
+          <th>Domain</th>
+          <th>Source</th>
+          ${hasCounts ? '<th style="text-align:right;width:60px;">Notes</th><th style="text-align:right;width:60px;">Users</th>' : ''}
+        </tr>
+      </thead>
+    `;
+    const tbody = document.createElement('tbody');
+
+    for (const c of allCompanies) {
+      const tr = document.createElement('tr');
+      tr.style.height = '38px';
+      const badge = c.isTarget
+        ? `<span class="badge badge-ok" style="font-size:10px;">Target</span>`
+        : c.notFound
+          ? `<span class="badge badge-warn" style="font-size:10px;">Skip</span>`
+          : `<span class="badge badge-danger" style="font-size:10px;">Delete</span>`;
+      let noteCell = '', userCell = '';
+      if (hasCounts) {
+        if (c.isTarget) {
+          noteCell = incomingNotes != null
+            ? `<td style="text-align:right;font-size:12px;color:var(--c-ok,#22c55e);font-weight:600;">+${incomingNotes}</td>`
+            : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+          userCell = incomingUsers != null
+            ? `<td style="text-align:right;font-size:12px;color:var(--c-ok,#22c55e);font-weight:600;">+${incomingUsers}</td>`
+            : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+        } else if (c.notFound) {
+          noteCell = `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+          userCell = `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+        } else {
+          noteCell = c.notesCount != null
+            ? `<td style="text-align:right;font-size:12px;">${c.notesCount}</td>`
+            : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+          userCell = c.usersCount != null
+            ? `<td style="text-align:right;font-size:12px;">${c.usersCount}</td>`
+            : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+        }
+      }
+      const nameCell = c.notFound
+        ? `<span style="color:var(--c-danger,#ef4444);font-size:12px;">Company does not exist</span>`
+        : esc(c.name || '—');
+      tr.innerHTML = `
+        <td>${badge}</td>
+        <td style="font-family:monospace;font-size:11px;color:var(--c-muted);">${esc(c.id.slice(0, 18))}…</td>
+        <td>${nameCell}</td>
+        <td style="font-size:12px;color:var(--c-muted);">${esc(c.domain || '—')}</td>
+        <td style="font-size:12px;">${esc(c.sourceOrigin || '—')}</td>
+        ${hasCounts ? noteCell + userCell : ''}
+      `;
+      tbody.appendChild(tr);
+    }
+
+    table.appendChild(tbody);
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'nm-group-table-wrap';
+    tableWrap.appendChild(table);
+    details.appendChild(tableWrap);
+    return details;
+  }
+
+  // ── Selection toolbar UI ───────────────────────────────────
+  function dcmUpdateSelectionUI() {
+    const anySelected = _dcmSelectedDomains.size > 0;
+    const mergeBtn = dcm$('dcm-merge-btn');
+    if (mergeBtn) {
+      mergeBtn.textContent = anySelected
+        ? `Merge & delete selected (${_dcmSelectedDomains.size})`
+        : 'Merge & delete duplicates';
+    }
+    if (anySelected) { dcmShow('dcm-unselect-all'); dcmShow('dcm-invert-selection'); }
+    else             { dcmHide('dcm-unselect-all'); dcmHide('dcm-invert-selection'); }
+  }
+
+  // ── Merge confirmation wrappers ────────────────────────────
+  function dcmStartMerge() {
+    if (!_dcmPreviewData?.domainRecords?.length) return;
+    // Only actionable groups (target found), with not-found duplicates stripped out
+    const actionable = (_dcmPreviewData.domainRecords || []).filter(dr => !dr.primaryNotFound);
+    const base       = _dcmSelectedDomains.size > 0 ? [..._dcmSelectedDomains] : actionable;
+    const records    = base
+      .map(dr => ({ ...dr, duplicates: (dr.duplicates || []).filter(d => !d.notFound) }))
+      .filter(dr => dr.duplicates.length > 0);
+    if (!records.length) return;
+    const dupCount = records.reduce((n, dr) => n + dr.duplicates.length, 0);
+    const intro    = _dcmSelectedDomains.size > 0
+      ? `Merge ${records.length} selected group(s)?`
+      : `Merge all ${records.length} group(s)?`;
+    showConfirm(
+      `${intro}\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to their target company, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone. Export your companies data first if you need a backup.`,
+      { confirmText: 'Merge & delete', danger: true }
+    ).then(confirmed => { if (confirmed) dcmRunMerge(records); });
+  }
+
+  function dcmStartSingleGroupMerge(dr, groupNum) {
+    const activeDups = (dr.duplicates || []).filter(d => !d.notFound);
+    if (!activeDups.length) return;
+    const dupCount = activeDups.length;
+    showConfirm(
+      `Merge group ${groupNum}?\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${dr.primaryName || dr.primaryId}, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone.`,
+      { confirmText: 'Merge this group', danger: true }
+    ).then(confirmed => {
+      if (confirmed) dcmRunMerge([{ ...dr, duplicates: activeDups }]);
+    });
+  }
+
+  // ── Run merge via SSE ──────────────────────────────────────
+  function dcmRunMerge(records, isContinuation = false) {
+    if (!token) { requireToken(() => dcmRunMerge(records, isContinuation)); return; }
+    // Defensive strip: never send not-found targets or not-found duplicates to /run
+    const toProcess = (records || [])
+      .filter(dr => !dr.primaryNotFound)
+      .map(dr => ({ ...dr, duplicates: (dr.duplicates || []).filter(d => !d.notFound) }))
+      .filter(dr => dr.duplicates.length > 0);
+    if (!toProcess.length) return;
+
+    if (!isContinuation) _dcmPendingRun = toProcess;
+
+    _dcmFromRun = true;
+    dcmGo('running');
+    setProgress('dcm-run', 'Starting merge…', 0);
+    if (_dcmLogAppender) {
+      if (isContinuation) _dcmLogAppender.separator('▶ Continuing merge');
+      else                _dcmLogAppender.reset();
+    }
+
+    _dcmRunCtrl = subscribeSSE(
+      '/api/companies-duplicate-cleanup/run',
+      { domainRecords: toProcess },
+      {
+        onProgress({ message, percent }) { setProgress('dcm-run', message, percent ?? 0); },
+        onLog(entry) { if (_dcmLogAppender) _dcmLogAppender(entry); },
+        onComplete(data) {
+          _dcmRunCtrl = null;
+          _dcmAuditLog = isContinuation && _dcmAuditLog
+            ? [..._dcmAuditLog, ...(data.actionLog || [])]
+            : (data.actionLog || []);
+          dcmRenderResults(data);
+          dcmGo('results');
+        },
+        onError(msg) {
+          _dcmRunCtrl = null;
+          dcmText('dcm-error-msg', msg);
+          if (_dcmFromRun) dcmShow('dcm-error-back-to-preview');
+          if (_dcmLogAppender?.getRows().length > 0) dcmShow('dcm-error-download-log');
+          dcmGo('error');
+        },
+        onAbort() {
+          _dcmRunCtrl = null;
+          dcmGo('preview');
+        },
+      }
+    );
+  }
+
+  // ── Continue a stopped run ─────────────────────────────────
+  function dcmContinueRun() {
+    if (!_dcmPendingRun || !_dcmAuditLog) return;
+    const processedDupIds = new Set(_dcmAuditLog.map(e => e.duplicateCompanyId));
+    const remaining = _dcmPendingRun
+      .map(dr => ({ ...dr, duplicates: (dr.duplicates || []).filter(d => !processedDupIds.has(d.id)) }))
+      .filter(dr => dr.duplicates.length > 0);
+    if (!remaining.length) return;
+    dcmRunMerge(remaining, true);
+  }
+
+  // ── Prune completed groups before back-to-preview ─────────
+  function dcmPruneCompleted() {
+    if (!_dcmPreviewData || !_dcmAuditLog?.length) return;
+    const deletedIds = new Set(_dcmAuditLog.filter(e => e.deleted).map(e => e.duplicateCompanyId));
+    if (!deletedIds.size) return;
+
+    const kept = [];
+    for (const dr of _dcmPreviewData.domainRecords) {
+      const remainingDups = (dr.duplicates || []).filter(d => !deletedIds.has(d.id));
+      if (remainingDups.length === 0) { _dcmSelectedDomains.delete(dr); continue; }
+      if (remainingDups.length !== (dr.duplicates || []).length) dr.duplicates = remainingDups;
+      kept.push(dr);
+    }
+    _dcmPreviewData.domainRecords   = kept;
+    _dcmPreviewData.totalDomains    = kept.length;
+    _dcmPreviewData.totalDuplicates = kept.reduce((n, dr) => n + (dr.duplicates || []).length, 0);
+  }
+
+  // ── Render results summary ─────────────────────────────────
+  function dcmRenderResults(data) {
+    const { notesRelinked = 0, usersRelinked = 0, deleted = 0, errors = 0, stopped = false } = data;
+    const summaryEl = dcm$('dcm-results-summary');
+    if (!summaryEl) return;
+
+    let remainingCount = 0;
+    if (stopped && _dcmPendingRun && _dcmAuditLog) {
+      const processedDupIds = new Set(_dcmAuditLog.map(e => e.duplicateCompanyId));
+      remainingCount = _dcmPendingRun.reduce(
+        (n, dr) => n + (dr.duplicates || []).filter(d => !processedDupIds.has(d.id)).length, 0
+      );
+    }
+
+    const hasErrors  = errors > 0;
+    const alertClass = (stopped || hasErrors) ? 'alert-warn' : 'alert-ok';
+    const icon       = stopped ? '⏹' : hasErrors ? '⚠️' : '✅';
+    const status     = stopped ? 'Merge stopped' : 'Merge complete';
+
+    const parts = [];
+    if (notesRelinked) parts.push(`${notesRelinked} note${notesRelinked !== 1 ? 's' : ''} relinked`);
+    if (usersRelinked) parts.push(`${usersRelinked} user${usersRelinked !== 1 ? 's' : ''} updated`);
+    if (deleted)       parts.push(`${deleted} compan${deleted !== 1 ? 'ies' : 'y'} deleted`);
+    if (errors)        parts.push(`${errors} error${errors !== 1 ? 's' : ''}`);
+    if (remainingCount) parts.push(`${remainingCount} left undone`);
+
+    summaryEl.innerHTML = `
+      <div class="alert ${alertClass}" style="margin-bottom:0;">
+        <span class="alert-icon">${icon}</span>
+        <span><strong>${status}.</strong> ${parts.join(' · ') || 'Nothing done.'}</span>
+      </div>
+    `;
+
+    if (stopped && remainingCount > 0) dcmShow('dcm-continue-run');
+    else                               dcmHide('dcm-continue-run');
+
+    const deletedIds = new Set((_dcmAuditLog || []).filter(e => e.deleted).map(e => e.duplicateCompanyId));
+    const remaining  = (_dcmPreviewData?.domainRecords || []).filter(dr =>
+      (dr.duplicates || []).some(d => !deletedIds.has(d.id))
+    ).length;
+    if (remaining > 0) dcmShow('dcm-back-to-preview');
+    else               dcmHide('dcm-back-to-preview');
+
+    // Transfer live log to results panel
+    const runEntries = dcm$('dcm-run-log-entries');
+    const resEntries = dcm$('dcm-results-log-entries');
+    const runCounts  = dcm$('dcm-run-log-counts');
+    const resCounts  = dcm$('dcm-results-log-counts');
+    if (runEntries && resEntries) resEntries.innerHTML = runEntries.innerHTML;
+    if (runCounts  && resCounts)  resCounts.innerHTML  = runCounts.innerHTML;
+    const runLogEl = dcm$('dcm-run-log');
+    const resLogEl = dcm$('dcm-results-log');
+    if (resLogEl && runLogEl && !runLogEl.classList.contains('hidden')) resLogEl.classList.remove('hidden');
+    if (_dcmLogAppender?.getRows().length > 0) dcmShow('dcm-results-download-log');
+  }
+
+  // ── Download audit log ─────────────────────────────────────
+  function dcmDownloadAuditLog() {
+    if (!_dcmAuditLog) return;
+    const json = JSON.stringify({ actions: _dcmAuditLog }, null, 2);
+    const date = new Date().toISOString().slice(0, 10);
+    triggerDownload(
+      new Blob([json], { type: 'application/json;charset=utf-8;' }),
+      `companies-merge-csv-log-${date}.json`
+    );
+  }
+
+  // ── Init (called by initCompaniesDuplicateCleanupModule) ───
+  function initDcmSubmodule() {
+    _dcmVs         = createViewState('dcm', DCM_STATES);
+    _dcmLogAppender = makeLogAppender('dcm-run-log', 'dcm-run-log-entries', 'dcm-run-log-counts');
+
+    // Dropzone
+    const dropzoneEl  = dcm$('dcm-dropzone');
+    const fileInputEl = dcm$('dcm-file-input');
+    if (dropzoneEl && fileInputEl) {
+      const { clear } = wireDropzone(dropzoneEl, fileInputEl, (file) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const text = cleanCSVText(e.target.result);
+          _dcmHeaders = parseCSVHeaders(text);
+          // Parse all data rows into objects keyed by header
+          const SPLIT_RE = /,(?=(?:[^"]*"[^"]*")*[^"]*$)/;
+          _dcmCsvRows = text.trim().split('\n').slice(1)
+            .filter(l => l.trim())
+            .map(l => {
+              const cols = l.split(SPLIT_RE).map(c => c.replace(/^"|"$/g, '').trim());
+              const obj  = {};
+              _dcmHeaders.forEach((h, i) => { obj[h] = cols[i] ?? ''; });
+              return obj;
+            });
+
+          if (_dcmCsvRows.length === 0) {
+            showAlert('CSV file appears empty or has no data rows.');
+            _dcmDropzoneClear?.();
+            return;
+          }
+
+          // Populate column selects
+          const targetSel = dcm$('dcm-target-col');
+          const dupesSel  = dcm$('dcm-dupes-col');
+          if (targetSel && dupesSel) {
+            const opts = _dcmHeaders.map(h => `<option value="${esc(h)}">${esc(h)}</option>`).join('');
+            targetSel.innerHTML = opts;
+            dupesSel.innerHTML  = opts;
+            if (_dcmHeaders.length > 1) dupesSel.value = _dcmHeaders[1];
+          }
+
+          dcmText('dcm-map-subtitle', `${_dcmCsvRows.length} row${_dcmCsvRows.length !== 1 ? 's' : ''} · ${_dcmHeaders.length} column${_dcmHeaders.length !== 1 ? 's' : ''}`);
+          dcmHide('dcm-validate-error');
+          dcmGo('mapping');
+        };
+        reader.readAsText(file);
+      });
+      _dcmDropzoneClear = clear;
+    }
+
+    // Re-upload
+    dcm$('dcm-reupload')?.addEventListener('click', () => {
+      _dcmDropzoneClear?.();
+      _dcmCsvRows = null;
+      _dcmHeaders = null;
+      dcmHide('dcm-validate-error');
+      dcmGo('idle');
+    });
+
+    // Validate & preview
+    dcm$('dcm-preview-btn')?.addEventListener('click', dcmRunPreview);
+
+    // Cancel preview SSE
+    dcm$('dcm-preview-stop')?.addEventListener('click', () => {
+      if (_dcmPreviewCtrl) { _dcmPreviewCtrl.abort(); _dcmPreviewCtrl = null; }
+    });
+
+    // Collapse / expand all groups
+    dcm$('dcm-toggle-all-groups')?.addEventListener('click', () => {
+      const allDetails = dcm$('dcm-groups-list')?.querySelectorAll('details[data-di]') || [];
+      const anyOpen = [...allDetails].some(d => d.open);
+      allDetails.forEach(d => { d.open = !anyOpen; });
+      const btn = dcm$('dcm-toggle-all-groups');
+      if (btn) btn.textContent = anyOpen ? 'Expand all' : 'Collapse all';
+    });
+
+    // Unselect all
+    dcm$('dcm-unselect-all')?.addEventListener('click', () => {
+      _dcmSelectedDomains.clear();
+      dcm$('dcm-groups-list')?.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+      dcmUpdateSelectionUI();
+    });
+
+    // Invert selection
+    dcm$('dcm-invert-selection')?.addEventListener('click', () => {
+      dcm$('dcm-groups-list')?.querySelectorAll('details[data-di]').forEach(detailsEl => {
+        const di = parseInt(detailsEl.dataset.di, 10);
+        const dr = _dcmPreviewData?.domainRecords?.[di];
+        if (!dr) return;
+        const cb = detailsEl.querySelector('summary > input[type=checkbox]');
+        if (!cb) return;
+        cb.checked = !cb.checked;
+        if (cb.checked) _dcmSelectedDomains.add(dr);
+        else            _dcmSelectedDomains.delete(dr);
+      });
+      dcmUpdateSelectionUI();
+    });
+
+    // Back to map (from preview)
+    dcm$('dcm-back-to-map')?.addEventListener('click', () => dcmGo('mapping'));
+
+    // Merge button
+    dcm$('dcm-merge-btn')?.addEventListener('click', dcmStartMerge);
+
+    // Run stop — graceful server-side stop
+    dcm$('dcm-run-stop')?.addEventListener('click', async () => {
+      const btn = dcm$('dcm-run-stop');
+      if (btn) { btn.disabled = true; btn.textContent = '⏹ Stopping…'; }
+      try {
+        await fetch('/api/companies-duplicate-cleanup/run/stop', {
+          method: 'POST', headers: buildHeaders(),
+        });
+      } catch (_e) {
+        if (_dcmRunCtrl) { _dcmRunCtrl.abort(); _dcmRunCtrl = null; }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '⏹ Stop'; }
+      }
+    });
+
+    // Results actions
+    dcm$('dcm-continue-run')?.addEventListener('click', dcmContinueRun);
+    dcm$('dcm-back-to-preview')?.addEventListener('click', () => {
+      dcmPruneCompleted();
+      dcmRenderPreview(_dcmPreviewData);
+      dcmGo('preview');
+    });
+    dcm$('dcm-results-download-log')?.addEventListener('click', () => {
+      if (_dcmLogAppender) downloadLogCsv(_dcmLogAppender, 'companies-merge-csv');
+    });
+    dcm$('dcm-download-audit')?.addEventListener('click', dcmDownloadAuditLog);
+    dcm$('dcm-start-over')?.addEventListener('click', dcmReset);
+
+    // Error actions
+    dcm$('dcm-error-back-to-preview')?.addEventListener('click', () => {
+      dcmPruneCompleted();
+      dcmRenderPreview(_dcmPreviewData);
+      dcmGo('preview');
+    });
+    dcm$('dcm-error-download-log')?.addEventListener('click', () => {
+      if (_dcmLogAppender) downloadLogCsv(_dcmLogAppender, 'companies-merge-csv');
+    });
+    dcm$('dcm-error-retry')?.addEventListener('click', dcmReset);
+
+    // Disconnect → reset
+    window.addEventListener('pb:disconnect', dcmReset);
+  }
+
   // ── Init ──────────────────────────────────────────────────
   function initCompaniesDuplicateCleanupModule() {
     if (_inited) return;
@@ -776,6 +1538,8 @@
 
     _vs = createViewState('dc', DC_STATES);
     _logAppender = makeLogAppender('dc-run-log', 'dc-run-log-entries', 'dc-run-log-counts');
+
+    initDcmSubmodule();
 
     // Gate checkbox unlocks scan config
     dc$('dc-gate-checkbox')?.addEventListener('change', (e) => {
@@ -827,10 +1591,10 @@
     // Collapse / expand all groups
     dc$('dc-toggle-all-groups')?.addEventListener('click', () => {
       const allDetails = dc$('dc-groups-list')?.querySelectorAll('details[data-di]') || [];
-      const allOpen = [...allDetails].every(d => d.open);
-      allDetails.forEach(d => { d.open = !allOpen; });
+      const anyOpen = [...allDetails].some(d => d.open);
+      allDetails.forEach(d => { d.open = !anyOpen; });
       const btn = dc$('dc-toggle-all-groups');
-      if (btn) btn.textContent = allOpen ? 'Expand all' : 'Collapse all';
+      if (btn) btn.textContent = anyOpen ? 'Expand all' : 'Collapse all';
     });
 
     // Unselect all

@@ -301,3 +301,239 @@
           </div><!-- /dc-compare-overlay -->
 
         </div><!-- /view-companies-duplicate-cleanup -->
+
+        <!-- ══════════════════════════════════════════
+             MERGE COMPANIES FROM CSV
+        ═══════════════════════════════════════════ -->
+        <div id="view-companies-duplicate-cleanup-csv" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Merge companies from CSV <span class="badge badge-beta">Beta</span></div>
+              <div class="panel-subtitle">Upload a CSV with target and duplicate company UUIDs — merge specific groups without running a full scan.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Prepare a CSV</strong> — one row per merge group. Each row needs a target company UUID (kept) and one or more duplicate UUIDs (comma-separated, will be deleted).</li>
+                  <li><strong>Map columns</strong> — select which CSV column contains the target UUID and which contains the duplicates list.</li>
+                  <li><strong>Validate</strong> — target column must have exactly 1 UUID per row; duplicates column must have 1+ comma-separated UUIDs. Errors block the preview.</li>
+                  <li><strong>Preview</strong> — review the merge groups and note/user counts before committing.</li>
+                  <li><strong>Merge</strong> — relinks all notes and users from each duplicate to its target company, then deletes the duplicates.</li>
+                  <li><strong>No rollback</strong> — export your companies from <a href="/companies" style="color:inherit;text-decoration:underline;">Companies → Export</a> first.</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ════════════════════════════════
+                   IDLE: upload
+              ════════════════════════════════ -->
+              <div id="dcm-idle">
+                <div class="alert alert-warn" style="margin-bottom:16px;">
+                  <span class="alert-icon">⚠️</span>
+                  <span>
+                    <strong>Before uploading, export your companies data from <a href="/companies" style="color:inherit;text-decoration:underline;">Companies → Export</a>.</strong>
+                    Deleted companies cannot be recovered via the API.
+                  </span>
+                </div>
+                <div class="dropzone" id="dcm-dropzone">
+                  <span class="dropzone-icon">📄</span>
+                  <div class="dropzone-label">Drop a CSV file here</div>
+                  <div class="dropzone-hint">or click to browse</div>
+                </div>
+                <input type="file" id="dcm-file-input" accept=".csv,text/csv" class="hidden" />
+              </div><!-- /dcm-idle -->
+
+              <!-- ════════════════════════════════
+                   MAPPING: column selection
+              ════════════════════════════════ -->
+              <div id="dcm-mapping" class="hidden">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                  <div class="panel-subtitle" id="dcm-map-subtitle"></div>
+                  <button class="btn btn-ghost btn-sm" id="dcm-reupload">↩ Re-upload</button>
+                </div>
+                <div class="text-sm text-muted mb-16">Select which CSV columns map to the target and duplicates.</div>
+                <table class="mapping-table" style="margin-bottom:16px;">
+                  <thead>
+                    <tr>
+                      <th>Field</th>
+                      <th>CSV column</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>
+                        <strong>Target company UUID</strong>
+                        <div style="font-size:12px;color:var(--c-muted);margin-top:2px;">Exactly one UUID per row — this company is kept</div>
+                      </td>
+                      <td>
+                        <select id="dcm-target-col" style="width:100%;max-width:260px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:13px;"></select>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <strong>Duplicate company UUIDs</strong>
+                        <div style="font-size:12px;color:var(--c-muted);margin-top:2px;">One or more UUIDs, comma-separated — these will be deleted</div>
+                      </td>
+                      <td>
+                        <select id="dcm-dupes-col" style="width:100%;max-width:260px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:13px;"></select>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <!-- Validation warning — duplicate target UUIDs (non-blocking) -->
+                <div id="dcm-validate-warn" class="hidden" style="margin-bottom:16px;">
+                  <div class="alert alert-warn">
+                    <span class="alert-icon">⚠️</span>
+                    <span id="dcm-validate-warn-msg"></span>
+                  </div>
+                  <div class="result-scroll mt-12">
+                    <table class="results-table">
+                      <thead><tr><th>Target UUID</th><th>Row(s)</th></tr></thead>
+                      <tbody id="dcm-validate-warn-rows"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- Validation error — shown inline when validation fails -->
+                <div id="dcm-validate-error" class="hidden" style="margin-bottom:16px;">
+                  <div class="alert alert-danger">
+                    <span class="alert-icon">⚠️</span>
+                    <span id="dcm-validate-error-summary"></span>
+                  </div>
+                  <div class="result-scroll mt-12">
+                    <table class="results-table">
+                      <thead><tr><th>Row</th><th>Column</th><th>Error</th></tr></thead>
+                      <tbody id="dcm-validate-error-rows"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <button class="btn btn-primary" id="dcm-preview-btn">🔍 Validate &amp; preview</button>
+              </div><!-- /dcm-mapping -->
+
+              <!-- ════════════════════════════════
+                   PREVIEWING: SSE progress
+              ════════════════════════════════ -->
+              <div id="dcm-previewing" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="dcm-preview-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="dcm-preview-progress-msg">Starting…</span>
+                  <span id="dcm-preview-progress-pct" style="margin-left:auto;"></span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="dcm-preview-stop">⏹ Cancel</button>
+              </div><!-- /dcm-previewing -->
+
+              <!-- ════════════════════════════════
+                   PREVIEW: group cards
+              ════════════════════════════════ -->
+              <div id="dcm-preview" class="hidden">
+
+                <div class="alert alert-info" id="dcm-preview-summary" style="margin-bottom:16px;">
+                  <span class="alert-icon">🔍</span>
+                  <span id="dcm-preview-summary-text"></span>
+                </div>
+
+                <!-- Toolbar -->
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                  <button class="btn btn-ghost btn-sm" id="dcm-toggle-all-groups">Collapse all</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="dcm-unselect-all">Unselect all</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="dcm-invert-selection">Invert selection</button>
+                </div>
+
+                <!-- Group cards injected by JS -->
+                <div id="dcm-groups-list" style="margin-bottom:8px;"></div>
+
+                <!-- Skipped groups: target not found -->
+                <div id="dcm-skipped-wrap" class="hidden" style="margin-bottom:12px;">
+                  <details>
+                    <summary style="cursor:pointer;font-size:13px;color:var(--c-muted);user-select:none;">
+                      <span id="dcm-skipped-count"></span> group(s) skipped — target company not found in this space
+                      <span class="info-icon" data-tip="These groups cannot be merged because the target company UUID does not exist in your Productboard space. Check the UUID in your CSV, correct it, and re-upload to include these groups.">i</span>
+                    </summary>
+                    <div style="overflow-x:auto;margin-top:8px;">
+                      <table class="mapping-table" id="dcm-skipped-table">
+                        <thead>
+                          <tr>
+                            <th>Target UUID</th>
+                            <th>Duplicates</th>
+                            <th>Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody id="dcm-skipped-tbody"></tbody>
+                      </table>
+                    </div>
+                  </details>
+                </div>
+
+                <!-- Actions -->
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:20px;">
+                  <button class="btn btn-danger" id="dcm-merge-btn">Merge &amp; delete duplicates</button>
+                  <button class="btn btn-secondary" id="dcm-back-to-map">← Back to map</button>
+                </div>
+
+              </div><!-- /dcm-preview -->
+
+              <!-- ════════════════════════════════
+                   RUNNING: live log
+              ════════════════════════════════ -->
+              <div id="dcm-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="dcm-run-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="dcm-run-progress-msg">Starting…</span>
+                  <span id="dcm-run-progress-pct" style="margin-left:auto;"></span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="dcm-run-stop">⏹ Stop</button>
+                <div id="dcm-run-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Live log</span>
+                    <span id="dcm-run-log-counts" class="live-log-counts"></span>
+                  </div>
+                  <div id="dcm-run-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div><!-- /dcm-running -->
+
+              <!-- ════════════════════════════════
+                   RESULTS: summary + log
+              ════════════════════════════════ -->
+              <div id="dcm-results" class="hidden">
+                <div id="dcm-results-summary"></div>
+                <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                  <button class="btn btn-primary hidden" id="dcm-continue-run">▶ Continue merge</button>
+                  <button class="btn btn-secondary hidden" id="dcm-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm" id="dcm-download-audit">↓ Download audit log (JSON)</button>
+                  <button class="btn btn-ghost btn-sm" id="dcm-start-over">Start over</button>
+                </div>
+                <div id="dcm-results-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Log</span>
+                    <span id="dcm-results-log-counts" class="live-log-counts"></span>
+                    <button class="btn btn-ghost btn-sm hidden" id="dcm-results-download-log" style="margin-left:auto;">↓ Download log</button>
+                  </div>
+                  <div id="dcm-results-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div><!-- /dcm-results -->
+
+              <!-- ════════════════════════════════
+                   ERROR
+              ════════════════════════════════ -->
+              <div id="dcm-error" class="hidden">
+                <div class="alert alert-danger">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="dcm-error-msg"></span>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                  <button class="btn btn-secondary hidden" id="dcm-error-back-to-preview">← Back to preview</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="dcm-error-download-log">↓ Download log</button>
+                  <button class="btn btn-ghost btn-sm" id="dcm-error-retry">Start over</button>
+                </div>
+              </div><!-- /dcm-error -->
+
+            </div><!-- /panel-body -->
+          </div><!-- /panel -->
+        </div><!-- /view-companies-duplicate-cleanup-csv -->
