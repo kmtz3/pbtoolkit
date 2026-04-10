@@ -3,7 +3,7 @@
 This file exists to orient Claude at the start of every session.
 Read it before making any file writes or path assumptions.
 
-Last audited: 2026-04-05. Updated for Merge Duplicate Notes module (notes-merge), collapsible sidebar, and resolved domain cache quirk.
+Last audited: 2026-04-10. Updated for Merge Duplicate Companies module (companies-duplicate-cleanup).
 
 ---
 
@@ -123,7 +123,8 @@ PBToolkit/                         ← project root (git repo)
 │   │   ├── membersTeamsMgmt.js    ← GET /api/members-teams-mgmt/load + PATCH/POST/DELETE team & member ops (live editor)
 │   │   ├── users.js               ← GET/POST /api/users/* (export, import/preview, import/run, delete)
 │   │   ├── feedback.js            ← POST /api/feedback (bug report → PB note or Brevo email fallback)
-│   │   └── notesMerge.js          ← POST /api/notes-merge/scan + /run + /scan-empty + /delete-empty (SSE)
+│   │   ├── notesMerge.js          ← POST /api/notes-merge/scan + /run + /scan-empty + /delete-empty (SSE)
+│   │   └── companiesDuplicateCleanup.js ← GET /api/companies-duplicate-cleanup/origins + POST /scan + /run (SSE)
 │   └── services/
 │       ├── teamCache.js           ← shared team+member session cache (used by teamMembership + membersTeamsMgmt)
 │       └── entities/
@@ -149,6 +150,7 @@ PBToolkit/                         ← project root (git repo)
     ├── teams-crud-app.js          ← teams CRUD module frontend JS; exposes initTeamsCrudModule() (~872 lines)
     ├── members-teams-mgmt-app.js  ← live team editor frontend JS; exposes initMembersTeamsMgmtModule() (~696 lines)
     ├── users-app.js               ← users module frontend JS; exposes initUsersModule() (~768 lines)
+    ├── companies-duplicate-cleanup-app.js ← merge duplicate companies frontend JS; exposes initCompaniesDuplicateCleanupModule()
     ├── views/                     ← HTML partials, one per submodule group (lazy-loaded into #view-area on first navigation)
     │   ├── companies.html
     │   ├── notes.html
@@ -158,7 +160,8 @@ PBToolkit/                         ← project root (git repo)
     │   ├── team-membership.html
     │   ├── teams-crud.html
     │   ├── members-teams-mgmt.html
-    │   └── users.html
+    │   ├── users.html
+    │   └── companies-duplicate-cleanup.html
     ├── csv-utils.js               ← frontend CSV utilities (papaparse wrappers for browser)
     ├── privacy.html               ← GDPR privacy policy page (served at /privacy)
     └── style.css                  ← CSS custom properties design system
@@ -168,7 +171,7 @@ PBToolkit/                         ← project root (git repo)
 
 ## UI terminology
 
-- **Module** — a top-level tool card on the home screen (Entities, Notes, Merge Duplicate Notes, Companies & Users, Member Activity, Teams). Each module has its own page with a sidebar.
+- **Module** — a top-level tool card on the home screen (Entities, Notes, Merge Duplicate Notes, Merge Duplicate Companies, Companies & Users, Member Activity, Teams). Each module has its own page with a sidebar.
 - **Submodule** — a sidebar tab within a module (e.g. Export, Import, Delete by CSV). Each submodule has its own view panel loaded as an HTML partial.
 - **Submodule category** — an optional grouping label in the sidebar that visually separates related submodules. Uses `.nav-group-label` CSS class. Example: the Teams module has three categories — "Team Management", "Team Membership", and "Live Editor".
 
@@ -190,6 +193,7 @@ A single module may combine multiple backend route files and frontend JS files u
 | Companies (fields/export/import/delete) | `/api/fields`, `/api/export`, `/api/import/*`, `/api/companies/*` | `routes/companies.js` (unified) |
 | Notes | `/api/notes` | `routes/notes.js` |
 | Merge Duplicate Notes | `/api/notes-merge` | `routes/notesMerge.js` + `public/notes-merge-app.js` |
+| Merge Duplicate Companies | `/api/companies-duplicate-cleanup` | `routes/companiesDuplicateCleanup.js` + `public/companies-duplicate-cleanup-app.js` |
 | Entities | `/api/entities` | `routes/entities.js` + `services/entities/*` |
 | Member Activity | `/api/member-activity` | `routes/memberActivity.js` + `public/member-activity-app.js` |
 | Teams | `/api/teams-crud`, `/api/team-membership`, `/api/members-teams-mgmt` | `routes/teamsCrud.js` + `routes/teamMembership.js` + `routes/membersTeamsMgmt.js` + `services/teamCache.js` |

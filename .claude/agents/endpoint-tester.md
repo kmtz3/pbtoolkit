@@ -31,6 +31,7 @@ Build curl headers from those values for all authenticated requests.
 | GET | `/api/member-activity/metadata` | token | Returns `{ teams, memberCount, fetchedAt, obfuscated }` |
 | GET | `/api/team-membership/metadata` | token | Returns `{ teams, memberCount, fetchedAt }` |
 | GET | `/api/users/fields` | token | Returns custom field definitions for user entity type |
+| GET | `/api/companies-duplicate-cleanup/origins` | token | Returns distinct source origin values for company records |
 
 ### Destructive (confirm before running)
 
@@ -58,6 +59,8 @@ Build curl headers from those values for all authenticated requests.
 | POST | `/api/notes-merge/run` | SSE — merges and deletes notes, confirm first |
 | POST | `/api/notes-merge/scan-empty` | SSE — scans for empty notes (read-only, but can be slow) |
 | POST | `/api/notes-merge/delete-empty` | SSE — deletes empty notes, confirm first |
+| POST | `/api/companies-duplicate-cleanup/scan` | SSE — scans all companies for duplicates (read-only, but can be slow) |
+| POST | `/api/companies-duplicate-cleanup/run` | SSE — merges and deletes duplicate companies, confirm first |
 
 ## Testing approach
 

@@ -59,7 +59,8 @@ pbtoolkit/
 │       ├── users.js           # GET/POST /api/users/* (export, import/preview, import/run, delete)
 │       ├── validate.js        # GET /api/validate (token validation)
 │       ├── feedback.js        # POST /api/feedback (bug report → PB note or Brevo email fallback)
-│       └── notesMerge.js      # POST /api/notes-merge/scan + /run + /scan-empty + /delete-empty (SSE)
+│       ├── notesMerge.js      # POST /api/notes-merge/scan + /run + /scan-empty + /delete-empty (SSE)
+│       └── companiesDuplicateCleanup.js # GET /api/companies-duplicate-cleanup/origins + POST /scan + /run (SSE)
 ├── src/services/
 │   ├── teamCache.js           # shared team+member session cache (used by teamMembership + membersTeamsMgmt)
 │   └── entities/
@@ -85,6 +86,7 @@ pbtoolkit/
 │   ├── members-teams-mgmt-app.js # Live team editor frontend JS
 │   ├── users-app.js           # Users module frontend JS
 │   ├── notes-merge-app.js     # Merge Duplicate Notes module frontend JS
+│   ├── companies-duplicate-cleanup-app.js # Merge Duplicate Companies module frontend JS
 │   ├── views/                 # HTML partials, one per module (lazy-loaded into #view-area)
 │   │   ├── companies.html
 │   │   ├── notes.html
@@ -94,7 +96,8 @@ pbtoolkit/
 │   │   ├── teams-crud.html
 │   │   ├── members-teams-mgmt.html
 │   │   ├── notes-merge.html
-│   │   └── users.html
+│   │   ├── users.html
+│   │   └── companies-duplicate-cleanup.html
 │   ├── csv-utils.js           # Frontend CSV utilities (papaparse wrappers for browser)
 │   └── style.css              # CSS custom properties design system
 ├── Dockerfile
