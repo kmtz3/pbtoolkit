@@ -99,6 +99,8 @@ describe('buildExportHeaders — column structure', () => {
     assert.ok(headers.includes('health_status'));
     assert.ok(headers.includes('health_comment'));
     assert.ok(headers.includes('health_updated_by (email)'));
+    assert.ok(headers.includes('health_last_updated'));
+    assert.ok(headers.includes('health_previous_status'));
   });
 
   test('product: no timeframe, no health synthetic cols', () => {
@@ -350,7 +352,7 @@ describe('entityToRow — timeframe (feature)', () => {
 });
 
 describe('entityToRow — health columns (feature)', () => {
-  test('extracts health status, comment, email', () => {
+  test('extracts health status, comment, email, lastUpdatedAt, previousStatus', () => {
     const config = makeConfig();
     const row = entityToRow(
       makeEntity('id', {
@@ -358,6 +360,8 @@ describe('entityToRow — health columns (feature)', () => {
           status: 'on_track',
           comment: 'Looking good',
           createdBy: { email: 'pm@x.com' },
+          lastUpdatedAt: '2026-03-15T10:30:00Z',
+          previousStatus: 'at_risk',
         },
       }),
       'feature', config
@@ -365,6 +369,8 @@ describe('entityToRow — health columns (feature)', () => {
     assert.equal(row['health_status'], 'on_track');
     assert.equal(row['health_comment'], 'Looking good');
     assert.equal(row['health_updated_by (email)'], 'pm@x.com');
+    assert.equal(row['health_last_updated'], '2026-03-15T10:30:00Z');
+    assert.equal(row['health_previous_status'], 'at_risk');
   });
 
   test('missing health → empty strings', () => {
@@ -373,6 +379,8 @@ describe('entityToRow — health columns (feature)', () => {
     assert.equal(row['health_status'], '');
     assert.equal(row['health_comment'], '');
     assert.equal(row['health_updated_by (email)'], '');
+    assert.equal(row['health_last_updated'], '');
+    assert.equal(row['health_previous_status'], '');
   });
 
   test('product has no health columns', () => {
