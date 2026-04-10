@@ -3,11 +3,11 @@
 // Depends on: app.js globals — $(), show(), hide(), setText(), buildHeaders(),
 //             subscribeSSE(), requireToken(), triggerDownload()
 // show()/hide() are used directly (no module-scoped wrappers needed).
-let _maInitDone = false;
 // ══════════════════════════════════════════════════════════════════════════════
 
 (function () {
   // Module state
+  let _maInitDone    = false;
   let maLastCsv      = null;
   let maExportCtrl   = null;
   let maLastFilename = 'member-activity.csv';
@@ -303,20 +303,20 @@ let _maInitDone = false;
 
     // Load metadata (cache init)
     loadMaMetadata(false);
+
+    window.addEventListener('pb:disconnect', () => {
+      maLastCsv      = null;
+      maLastFilename = 'member-activity.csv';
+      maCacheReady   = false;
+      maCacheLoading = false;
+      maTeamData     = [];
+      resetMaExport();
+    });
+
+    window.addEventListener('pb:connected', () => {
+      if (!maCacheReady && !maCacheLoading) loadMaMetadata(false);
+    });
   }
-
-  window.addEventListener('pb:disconnect', () => {
-    maLastCsv      = null;
-    maLastFilename = 'member-activity.csv';
-    maCacheReady   = false;
-    maCacheLoading = false;
-    maTeamData     = [];
-    resetMaExport();
-  });
-
-  window.addEventListener('pb:connected', () => {
-    if (!maCacheReady && !maCacheLoading) loadMaMetadata(false);
-  });
 
   window.initMemberActivityModule = initMemberActivityModule;
 })();

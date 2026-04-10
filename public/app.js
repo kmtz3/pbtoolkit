@@ -555,7 +555,7 @@ async function loadTool(toolName) {
   if (toolName === 'companies')        { window.initCompaniesModule?.(); window.initUsersModule?.(); }
   if (toolName === 'notes')            window.initNotesModule?.();
   if (toolName === 'entities')         window.initEntitiesModule?.();
-  if (toolName === 'member-activity')  { if (typeof initMemberActivityModule === 'function') initMemberActivityModule(); }
+  if (toolName === 'member-activity')  window.initMemberActivityModule?.();
   if (toolName === 'notes-merge')        window.initNotesMergeModule?.();
   if (toolName === 'companies-duplicate-cleanup')  window.initCompaniesDuplicateCleanupModule?.();
   if (toolName === 'teams') {

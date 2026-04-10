@@ -80,6 +80,11 @@ app.use(session({
   },
 }));
 
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  console.error('[startup] FATAL: SESSION_SECRET env var is not set. Refusing to start with insecure default.');
+  process.exit(1);
+}
+
 // Health, config, and auth status are exempt from rate limiting
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/auth/status', (req, res) => {
