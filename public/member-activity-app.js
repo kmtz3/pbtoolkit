@@ -3,11 +3,11 @@
 // Depends on: app.js globals — $(), show(), hide(), setText(), buildHeaders(),
 //             subscribeSSE(), requireToken(), triggerDownload()
 // show()/hide() are used directly (no module-scoped wrappers needed).
-let _maInitDone = false;
 // ══════════════════════════════════════════════════════════════════════════════
 
 (function () {
   // Module state
+  let _maInitDone    = false;
   let maLastCsv      = null;
   let maExportCtrl   = null;
   let maLastFilename = 'member-activity.csv';
@@ -118,7 +118,7 @@ let _maInitDone = false;
     maCacheReady   = false;
 
     // Show loading state in team section
-    ma$('ma-team-list').innerHTML = '<span class="text-muted" style="padding:8px 12px;display:block;font-size:12px;">Loading teams…</span>';
+    ma$('ma-team-list').innerHTML = '<div style="padding:8px 12px;"><div class="progress-wrap" style="margin-top:0;"><div class="progress-bar progress-bar-loading" style="width:40%;"></div></div><div class="progress-label" style="margin-top:4px;">Loading teams…</div></div>';
     hide('ma-team-error');
     hide('ma-obfuscated-warn');
     ma$('btn-ma-export').disabled = true;
@@ -303,20 +303,20 @@ let _maInitDone = false;
 
     // Load metadata (cache init)
     loadMaMetadata(false);
+
+    window.addEventListener('pb:disconnect', () => {
+      maLastCsv      = null;
+      maLastFilename = 'member-activity.csv';
+      maCacheReady   = false;
+      maCacheLoading = false;
+      maTeamData     = [];
+      resetMaExport();
+    });
+
+    window.addEventListener('pb:connected', () => {
+      if (!maCacheReady && !maCacheLoading) loadMaMetadata(false);
+    });
   }
-
-  window.addEventListener('pb:disconnect', () => {
-    maLastCsv      = null;
-    maLastFilename = 'member-activity.csv';
-    maCacheReady   = false;
-    maCacheLoading = false;
-    maTeamData     = [];
-    resetMaExport();
-  });
-
-  window.addEventListener('pb:connected', () => {
-    if (!maCacheReady && !maCacheLoading) loadMaMetadata(false);
-  });
 
   window.initMemberActivityModule = initMemberActivityModule;
 })();

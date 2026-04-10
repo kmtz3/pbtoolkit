@@ -28,19 +28,12 @@
   // Dropzone clear function (set in initTeamMembershipModule)
   let tmClearDropzone = null;
 
+  // Init guard
+  let _tmInitDone = false;
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   function tm$(id) { return document.getElementById(id); }
-
-  /**
-   * GET request headers — omits Content-Type (invalid on GET, no body).
-   * token and useEu are declared at page scope in app.js.
-   */
-  function tmGetHeaders() {
-    const h = { 'x-pb-token': token };
-    if (useEu) h['x-pb-eu'] = 'true';
-    return h;
-  }
 
   function tmShow(id) { const el = tm$(id); if (el) el.classList.remove('hidden'); }
   function tmHide(id) { const el = tm$(id); if (el) el.classList.add('hidden'); }
@@ -129,12 +122,12 @@
     tmCacheReady   = false;
 
     tm$('tm-export-team-filter').innerHTML =
-      '<span class="text-muted" style="padding:8px 12px;display:block;font-size:12px;">Loading teams…</span>';
+      '<div style="padding:8px 12px;"><div class="progress-wrap" style="margin-top:0;"><div class="progress-bar progress-bar-loading" style="width:40%;"></div></div><div class="progress-label" style="margin-top:4px;">Loading teams…</div></div>';
     tmHide('tm-export-team-error');
     tm$('tm-export-btn').disabled = true;
 
     const url = '/api/team-membership/metadata' + (refresh ? '?refresh=true' : '');
-    fetch(url, { headers: tmGetHeaders() })
+    fetch(url, { headers: buildHeaders() })
       .then((res) => res.json().then((data) => ({ ok: res.ok, status: res.status, data })))
       .then(({ ok, status, data }) => {
         tmCacheLoading = false;
@@ -176,7 +169,7 @@
     let url = `/api/team-membership/export?format=${fmt}`;
     if (teamIds && teamIds.length > 0) url += `&teamIds=${teamIds.join(',')}`;
 
-    fetch(url, { headers: tmGetHeaders() })
+    fetch(url, { headers: buildHeaders() })
       .then(async (res) => {
         if (!res.ok) {
           const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -537,8 +530,8 @@
 
   function initTeamMembershipModule() {
     // Wire up listeners once only
-    if (tm$('tm-export-btn').__tmInit) return;
-    tm$('tm-export-btn').__tmInit = true;
+    if (_tmInitDone) return;
+    _tmInitDone = true;
 
     // Format toggle
     document.querySelectorAll('input[name="tm-export-format"]').forEach((r) => {
@@ -619,27 +612,25 @@
 
     // Load metadata
     loadTmMetadata(false);
+
+    window.addEventListener('pb:disconnect', () => {
+      tmCacheReady   = false;
+      tmCacheLoading = false;
+      tmTeamData     = [];
+      tmLastBlob     = null;
+      tmLastFilename = 'pb-team-assignments.csv';
+      tmCsvBuffer    = null;
+      tmCurrentDiffs = null;
+      tmImportCtrl   = null;
+      if (tmLogAppender) tmLogAppender.reset();
+      resetExportState();
+      resetImportState();
+    });
+
+    window.addEventListener('pb:connected', () => {
+      if (!tmCacheReady && !tmCacheLoading && tm$('tm-export-team-filter')) loadTmMetadata(false);
+    });
   }
-
-  // ── pb:disconnect / pb:connected ──────────────────────────────────────────
-
-  window.addEventListener('pb:disconnect', () => {
-    tmCacheReady   = false;
-    tmCacheLoading = false;
-    tmTeamData     = [];
-    tmLastBlob     = null;
-    tmLastFilename = 'pb-team-assignments.csv';
-    tmCsvBuffer    = null;
-    tmCurrentDiffs = null;
-    tmImportCtrl   = null;
-    if (tmLogAppender) tmLogAppender.reset();
-    resetExportState();
-    resetImportState();
-  });
-
-  window.addEventListener('pb:connected', () => {
-    if (!tmCacheReady && !tmCacheLoading && tm$('tm-export-team-filter')) loadTmMetadata(false);
-  });
 
   // ── Expose to global scope ────────────────────────────────────────────────
 
