@@ -608,7 +608,7 @@
   function startSingleGroupMerge(dr, groupNum) {
     const dupCount = dr.duplicates?.length ?? 0;
     showConfirm(
-      `Merge group ${groupNum} (${dr.domain || dr.matchName || 'no domain'})?\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${esc(dr.sfCompanyName || dr.sfCompanyId)}, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone.`,
+      `Merge group ${groupNum} (${dr.domain || dr.matchName || 'no domain'})?\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${dr.sfCompanyName || dr.sfCompanyId}, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone.`,
       { confirmText: 'Merge this group', danger: true }
     ).then((confirmed) => { if (confirmed) runMerge([dr]); });
   }
@@ -827,10 +827,10 @@
     // Collapse / expand all groups
     dc$('dc-toggle-all-groups')?.addEventListener('click', () => {
       const allDetails = dc$('dc-groups-list')?.querySelectorAll('details[data-di]') || [];
-      const anyOpen = [...allDetails].some(d => d.open);
-      allDetails.forEach(d => { d.open = !anyOpen; });
+      const allOpen = [...allDetails].every(d => d.open);
+      allDetails.forEach(d => { d.open = !allOpen; });
       const btn = dc$('dc-toggle-all-groups');
-      if (btn) btn.textContent = anyOpen ? 'Expand all' : 'Collapse all';
+      if (btn) btn.textContent = allOpen ? 'Expand all' : 'Collapse all';
     });
 
     // Unselect all
@@ -840,11 +840,15 @@
       updateSelectionUI();
     });
 
-    // Invert selection
+    // Invert selection — iterate details[data-di] (one per group) rather than
+    // raw checkboxes by index, so extra checkboxes inside a card never drift the mapping.
     dc$('dc-invert-selection')?.addEventListener('click', () => {
-      dc$('dc-groups-list')?.querySelectorAll('input[type=checkbox]').forEach((cb, i) => {
-        const dr = _previewData?.domainRecords?.[i];
+      dc$('dc-groups-list')?.querySelectorAll('details[data-di]').forEach(detailsEl => {
+        const di = parseInt(detailsEl.dataset.di, 10);
+        const dr = _previewData?.domainRecords?.[di];
         if (!dr) return;
+        const cb = detailsEl.querySelector('summary > input[type=checkbox]');
+        if (!cb) return;
         cb.checked = !cb.checked;
         if (cb.checked) _selectedDomains.add(dr);
         else _selectedDomains.delete(dr);

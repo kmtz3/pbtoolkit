@@ -26,13 +26,13 @@ const { parseApiError } = require('../lib/errorUtils');
 
 const router = express.Router();
 
-// Stop flag — set by POST /run/stop so the run loop can exit gracefully without
-// the client aborting the SSE connection (which would prevent the complete event arriving).
-let _stopRequested = false;
+// Stop flags — keyed by token so concurrent runs from different users don't interfere.
+// POST /run clears the flag on entry; POST /run/stop sets it; finally block cleans up.
+const _stopRequests = new Map();
 
 // POST /run/stop  — signal a running merge to stop after the current duplicate
 router.post('/run/stop', pbAuth, (_req, res) => {
-  _stopRequested = true;
+  _stopRequests.set(res.locals.pbToken, true);
   res.sendStatus(204);
 });
 
@@ -82,7 +82,8 @@ router.get('/origins', pbAuth, async (req, res) => {
 
   const { pbFetch, withRetry } = res.locals.pbClient;
   try {
-    const originsSet = new Set();
+    const originsSet    = new Set();
+    const missingV2Ids  = new Set(); // company IDs where v2 source is null — need v1 fallback
 
     // v2: metadata.source.system
     let cursor = null;
@@ -94,25 +95,33 @@ router.get('/origins', pbAuth, async (req, res) => {
       for (const c of (r.data || [])) {
         const sys = c.metadata?.source?.system;
         if (sys) originsSet.add(sys);
+        else if (c.id) missingV2Ids.add(c.id);
       }
       const next = r.links?.next || null;
       cursor = next ? (next.match(/[?&]pageCursor=([^&]+)/)?.[1] ?? null) : null;
     } while (cursor);
 
-    // v1 fallback: sourceOrigin (covers companies not yet migrated to v2 source)
-    let offset = 0;
-    const PAGE = 100;
-    while (true) {
-      const r = await withRetry(
-        () => pbFetch('get', `/companies?pageLimit=${PAGE}&pageOffset=${offset}`),
-        `fetch v1 companies for origins offset=${offset}`
-      );
-      const batch = r.data || [];
-      for (const c of batch) {
-        if (c.sourceOrigin) originsSet.add(c.sourceOrigin);
+    // v1 fallback: sourceOrigin for companies whose v2 source was null.
+    // Stops as soon as all missing IDs have been back-filled (mirrors /scan behaviour).
+    if (missingV2Ids.size > 0) {
+      let offset = 0;
+      let filled = 0;
+      const PAGE = 100;
+      while (filled < missingV2Ids.size) {
+        const r = await withRetry(
+          () => pbFetch('get', `/companies?pageLimit=${PAGE}&pageOffset=${offset}`),
+          `fetch v1 companies for origins offset=${offset}`
+        );
+        const batch = r.data || [];
+        for (const c of batch) {
+          if (c.id && missingV2Ids.has(c.id) && c.sourceOrigin) {
+            originsSet.add(c.sourceOrigin);
+            filled++;
+          }
+        }
+        if (batch.length < PAGE) break;
+        offset += PAGE;
       }
-      if (batch.length < PAGE) break;
-      offset += PAGE;
     }
 
     const origins = [...originsSet].sort();
@@ -522,9 +531,10 @@ function resolveTarget(note) {
 // ---------------------------------------------------------------------------
 
 router.post('/run', pbAuth, async (req, res) => {
-  _stopRequested = false;
+  const token = res.locals.pbToken;
+  _stopRequests.delete(token);
   const sse = startSSE(res);
-  const shouldStop = () => sse.isAborted() || _stopRequested;
+  const shouldStop = () => sse.isAborted() || _stopRequests.get(token) === true;
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { domainRecords = [] } = req.body || {};
 
@@ -714,6 +724,7 @@ router.post('/run', pbAuth, async (req, res) => {
     console.error('[companiesDuplicateCleanup/run]', err);
     sse.error(parseApiError(err));
   } finally {
+    _stopRequests.delete(token);
     sse.done();
   }
 });
