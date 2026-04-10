@@ -1,9 +1,10 @@
 /**
  * Duplicate Company Cleanup routes
  *
- * GET  /api/companies-duplicate-cleanup/origins  — return distinct source origin values
- * POST /api/companies-duplicate-cleanup/scan     — discover duplicate groups via API (SSE)
- * POST /api/companies-duplicate-cleanup/run      — merge duplicates into their target company (SSE)
+ * GET  /api/companies-duplicate-cleanup/origins     — return distinct source origin values
+ * POST /api/companies-duplicate-cleanup/scan        — discover duplicate groups via API (SSE)
+ * POST /api/companies-duplicate-cleanup/preview-csv — fetch company details + counts for CSV-supplied groups (SSE)
+ * POST /api/companies-duplicate-cleanup/run         — merge duplicates into their target company (SSE)
  *
  * /run processing — for each duplicate company:
  *   1. POST /v2/notes/search  — find all notes linked to the duplicate
@@ -23,6 +24,7 @@ const express = require('express');
 const { pbAuth } = require('../middleware/pbAuth');
 const { startSSE } = require('../lib/sse');
 const { parseApiError } = require('../lib/errorUtils');
+const { UUID_RE } = require('../lib/constants');
 
 const router = express.Router();
 
@@ -431,7 +433,163 @@ router.post('/scan', pbAuth, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Note + user count helper (used by /scan)
+// POST /preview-csv  (SSE)
+//
+// Body: { rows: [{ primaryId: string, duplicateIds: [string] }] }
+//
+// For each group supplied in rows:
+//   1. Validate UUID format of primaryId and each duplicateId.
+//   2. Merge rows with the same primaryId (union their duplicateIds).
+//   3. Fetch company details (name, domain, source) for every unique ID via
+//      GET /v2/entities/{id}.
+//   4. Fetch note + user counts for each duplicate (same as /scan).
+//   5. Complete with { domainRecords, totalDomains, totalDuplicates } in the
+//      same format expected by /run.
+// ---------------------------------------------------------------------------
+
+router.post('/preview-csv', pbAuth, async (req, res) => {
+  const sse = startSSE(res);
+  const { pbFetch, withRetry } = res.locals.pbClient;
+  const { rows = [] } = req.body || {};
+
+  try {
+    // ── Step 1: Validate input ────────────────────────────────────────────
+    if (!Array.isArray(rows) || rows.length === 0) {
+      sse.error('No rows provided.');
+      return;
+    }
+
+    for (let i = 0; i < rows.length; i++) {
+      const { primaryId, duplicateIds } = rows[i];
+      const rowLabel = `Row ${i + 1}`;
+      if (!primaryId || !UUID_RE.test(primaryId)) {
+        sse.error(`${rowLabel}: invalid target UUID "${primaryId}".`);
+        return;
+      }
+      if (!Array.isArray(duplicateIds) || duplicateIds.length === 0) {
+        sse.error(`${rowLabel}: no duplicate IDs provided.`);
+        return;
+      }
+      for (const id of duplicateIds) {
+        if (!UUID_RE.test(id)) {
+          sse.error(`${rowLabel}: invalid duplicate UUID "${id}".`);
+          return;
+        }
+        if (id === primaryId) {
+          sse.error(`${rowLabel}: target UUID "${primaryId}" appears in its own duplicates list.`);
+          return;
+        }
+      }
+    }
+
+    // ── Step 2: Merge rows with the same primaryId ────────────────────────
+    const grouped = new Map(); // primaryId → Set<duplicateId>
+    for (const { primaryId, duplicateIds } of rows) {
+      if (!grouped.has(primaryId)) grouped.set(primaryId, new Set());
+      for (const id of duplicateIds) grouped.get(primaryId).add(id);
+    }
+
+    // ── Step 3: Fetch company details for all unique IDs ──────────────────
+    const allIds = new Set(grouped.keys());
+    for (const dupeSet of grouped.values()) {
+      for (const id of dupeSet) allIds.add(id);
+    }
+
+    sse.progress(`Fetching details for ${allIds.size} compan${allIds.size !== 1 ? 'ies' : 'y'}…`, 5);
+
+    const companyDetails = {}; // id → { id, name, domain, sourceOrigin, sourceRecordId, notFound? }
+    let fetched = 0;
+    for (const id of allIds) {
+      if (sse.isAborted()) break;
+      fetched++;
+      const pct = 5 + Math.round((fetched / allIds.size) * 40);
+      sse.progress(`Fetching company ${fetched}/${allIds.size}…`, pct);
+      try {
+        const r = await withRetry(() => pbFetch('get', `/v2/entities/${id}`), `fetch company ${id}`);
+        const c = r.data || {};
+        companyDetails[id] = {
+          id,
+          name:            c.fields?.name  || null,
+          domain:          (c.fields?.domain || '').trim().toLowerCase() || null,
+          sourceOrigin:    c.metadata?.source?.system    || null,
+          sourceRecordId:  c.metadata?.source?.recordId  || null,
+        };
+      } catch {
+        companyDetails[id] = { id, name: null, domain: null, sourceOrigin: null, sourceRecordId: null, notFound: true };
+      }
+    }
+
+    if (sse.isAborted()) { sse.complete({ domainRecords: [], totalDomains: 0, totalDuplicates: 0 }); return; }
+
+    // ── Step 4: Fetch note + user counts for duplicates ───────────────────
+    const primaryIds    = [...grouped.keys()];
+    const domainRecords = [];
+    let   drIdx         = 0;
+
+    for (const primaryId of primaryIds) {
+      if (sse.isAborted()) break;
+      drIdx++;
+
+      const primary = companyDetails[primaryId] || { id: primaryId };
+      const dupeIds = [...grouped.get(primaryId)];
+
+      const dr = {
+        domain:                primary.domain || '',
+        primaryId,
+        primaryName:           primary.name           || primaryId,
+        primaryDomain:         primary.domain          || null,
+        primaryOrigin:         primary.sourceOrigin    || null,
+        primarySourceRecordId: primary.sourceRecordId  || null,
+        primaryNotFound:       primary.notFound        || false,
+        primaryNotesCount:     null,
+        primaryUsersCount:     null,
+        duplicates: dupeIds.map(id => {
+          const c = companyDetails[id] || { id };
+          return {
+            id,
+            name:            c.name           || id,
+            domain:          c.domain          || null,
+            sourceOrigin:    c.sourceOrigin    || null,
+            sourceRecordId:  c.sourceRecordId  || null,
+            notFound:        c.notFound        || false,
+            notesCount:      null,
+            usersCount:      null,
+          };
+        }),
+        isManualMode: false,
+      };
+
+      for (let di = 0; di < dr.duplicates.length; di++) {
+        if (sse.isAborted()) break;
+        const dup = dr.duplicates[di];
+        const pct = 45 + Math.round(((drIdx - 1 + (di + 1) / dr.duplicates.length) / primaryIds.length) * 50);
+        sse.progress(`Counting notes for group ${drIdx}/${primaryIds.length}…`, pct);
+        try {
+          const counts = await fetchNoteCounts(pbFetch, withRetry, dup.id);
+          dup.notesCount = counts.notesCount;
+          dup.usersCount = counts.usersCount;
+        } catch {
+          // leave as null
+        }
+      }
+
+      domainRecords.push(dr);
+    }
+
+    const totalDuplicates = domainRecords.reduce((n, dr) => n + dr.duplicates.length, 0);
+    sse.progress('Preview ready.', 100);
+    sse.complete({ domainRecords, totalDomains: domainRecords.length, totalDuplicates });
+
+  } catch (err) {
+    console.error('[companiesDuplicateCleanup/preview-csv]', err);
+    sse.error(parseApiError(err));
+  } finally {
+    sse.done();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Note + user count helper (used by /scan and /preview-csv)
 // ---------------------------------------------------------------------------
 
 /**

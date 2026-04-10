@@ -697,7 +697,7 @@ function showView(view, { updateUrl = false } = {}) {
     'members-teams-mgmt-manage',
     'users-export', 'users-import', 'users-delete-csv', 'users-delete-all',
     'notes-merge-view', 'notes-merge-empty',
-    'companies-duplicate-cleanup',
+    'companies-duplicate-cleanup', 'companies-duplicate-cleanup-csv',
   ].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', v !== view);
