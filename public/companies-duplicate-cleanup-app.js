@@ -975,9 +975,14 @@
   function dcmRenderPreview(data) {
     const { domainRecords } = data;
 
-    // Split into actionable (target found) and skipped (target not found in space)
-    const actionable  = domainRecords.filter(dr => !dr.primaryNotFound);
-    _dcmSkippedGroups = domainRecords.filter(dr =>  dr.primaryNotFound);
+    // Split into actionable and skipped.
+    // Skipped = target not found OR all duplicates not found (nothing can be merged).
+    const actionable  = domainRecords.filter(dr =>
+      !dr.primaryNotFound && (dr.duplicates || []).some(d => !d.notFound)
+    );
+    _dcmSkippedGroups = domainRecords.filter(dr =>
+      dr.primaryNotFound || (dr.duplicates || []).every(d => d.notFound)
+    );
 
     // Count only active (non-skipped) duplicates for the summary
     const actionableDups = actionable.reduce(
@@ -989,7 +994,7 @@
       let text = `${actionable.length} group${actionable.length !== 1 ? 's' : ''} · ` +
         `${actionableDups} duplicate compan${actionableDups !== 1 ? 'ies' : 'y'} to delete`;
       if (_dcmSkippedGroups.length > 0)
-        text += ` · ${_dcmSkippedGroups.length} skipped (target not found)`;
+        text += ` · ${_dcmSkippedGroups.length} skipped`;
       summaryText.textContent = text;
     }
 
@@ -1011,11 +1016,14 @@
         skippedTbody.innerHTML = '';
         for (const dr of _dcmSkippedGroups) {
           const dupList = (dr.duplicates || []).map(d => d.id).join(', ');
+          const reason  = dr.primaryNotFound
+            ? 'Target company not found in this space'
+            : 'All duplicate companies not found in this space';
           const tr = document.createElement('tr');
           tr.innerHTML = `
             <td style="font-family:monospace;font-size:11px;">${esc(dr.primaryId)}</td>
             <td style="font-family:monospace;font-size:11px;">${esc(dupList || '—')}</td>
-            <td style="font-size:12px;color:var(--c-muted);">Target company not found in this space</td>
+            <td style="font-size:12px;color:var(--c-muted);">${esc(reason)}</td>
           `;
           skippedTbody.appendChild(tr);
         }
@@ -1097,12 +1105,6 @@
       e.stopPropagation();
       dcmStartSingleGroupMerge(dr, di + 1);
     });
-
-    // If every duplicate is not found there is nothing to merge — hide the controls
-    if (activeDups.length === 0) {
-      checkbox.style.display    = 'none';
-      mergeOneBtn.style.display = 'none';
-    }
 
     summary.append(checkbox, groupLabel, countLabel, groupTitle, spacer, mergeOneBtn);
     details.appendChild(summary);
@@ -1353,12 +1355,15 @@
     if (stopped && remainingCount > 0) dcmShow('dcm-continue-run');
     else                               dcmHide('dcm-continue-run');
 
+    // Only show "Back to preview" if actionable groups remain — skipped groups
+    // (target not found / all dups not found) don't warrant returning to preview.
     const deletedIds = new Set((_dcmAuditLog || []).filter(e => e.deleted).map(e => e.duplicateCompanyId));
-    const remaining  = (_dcmPreviewData?.domainRecords || []).filter(dr =>
-      (dr.duplicates || []).some(d => !deletedIds.has(d.id))
-    ).length;
-    if (remaining > 0) dcmShow('dcm-back-to-preview');
-    else               dcmHide('dcm-back-to-preview');
+    const remainingActionable = (_dcmPreviewData?.domainRecords || [])
+      .filter(dr => !dr.primaryNotFound)
+      .filter(dr => (dr.duplicates || []).some(d => !d.notFound && !deletedIds.has(d.id)))
+      .length;
+    if (remainingActionable > 0) dcmShow('dcm-back-to-preview');
+    else                         dcmHide('dcm-back-to-preview');
 
     // Transfer live log to results panel
     const runEntries = dcm$('dcm-run-log-entries');
