@@ -21,6 +21,9 @@ const ENT_LABELS = {
   release:      'Releases',
 };
 
+// Types that never have a parent — hierarchy_path not applicable for these alone
+const ENT_ROOT_TYPES = new Set(['product', 'releaseGroup', 'initiative']);
+
 // ── Utilities ──────────────────────────────────────────────
 
 function nowStamp() {
@@ -886,6 +889,10 @@ function entExportMigrationMode() {
   return document.getElementById('ent-export-migration-mode')?.checked || false;
 }
 
+function entExportBreadcrumb() {
+  return document.getElementById('ent-export-breadcrumb')?.checked || false;
+}
+
 function entExportWorkspaceCode() {
   return (document.getElementById('ent-export-workspace-code')?.value || '').trim().toUpperCase();
 }
@@ -982,7 +989,7 @@ function runEntityExportSelected(types) {
 
   entExportCtrl = subscribeSSE(
     '/api/entities/export-all',
-    { migrationMode: migMode, workspaceCode: wsCode, types },
+    { migrationMode: migMode, workspaceCode: wsCode, breadcrumb: entExportBreadcrumb(), types },
     {
       onProgress: ({ message, percent }) => entExportSetProgress(percent || 0, message),
       onLog: (entry) => entExportAppendLog(entry.level, entry.message),
@@ -1049,7 +1056,17 @@ function initEntitiesExportView() {
     });
 
     const updateExportBtn = () => {
-      if (btnSelected) btnSelected.disabled = entExportGetSelected().length === 0;
+      const selected = entExportGetSelected();
+      if (btnSelected) btnSelected.disabled = selected.length === 0;
+
+      // Disable the breadcrumb checkbox when every selected type is a root type
+      // (no hierarchy path is possible). Re-enable as soon as any non-root type is selected.
+      const bcCb = document.getElementById('ent-export-breadcrumb');
+      if (bcCb) {
+        const allRoot = selected.length > 0 && selected.every((t) => ENT_ROOT_TYPES.has(t));
+        bcCb.disabled = allRoot;
+        if (allRoot) bcCb.checked = false;
+      }
     };
 
     document.getElementById('btn-ent-export-select-all')?.addEventListener('click', () => {
