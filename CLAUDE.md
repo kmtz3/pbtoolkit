@@ -314,22 +314,25 @@ Test endpoints with the built-in skills:
 
 ## Versioning
 
-The app version lives in `package.json` and is served dynamically via `GET /api/config` → displayed in the footer. **Bump the version in `package.json` when merging to `main` or `staging`.**
+The app version lives in `package.json` and is served dynamically via `GET /api/config` → displayed in the footer.
 
 Follow [semver](https://semver.org/) — `MAJOR.MINOR.PATCH`:
 
-| Change type | Bump | Example | When |
-|---|---|---|---|
-| **Breaking change** — removes or renames a route, changes API contract, drops backward compatibility | MAJOR | `3.0.0` → `4.0.0` | Rare; requires user action or deployment config changes |
-| **New feature** — new module, new route, new UI capability, new integration | MINOR | `3.0.0` → `3.1.0` | Each feature branch merged to staging/main |
-| **Bug fix, polish, docs, tests, refactor** — no new user-facing capability | PATCH | `3.1.0` → `3.1.1` | Fix branches, test updates, style tweaks |
+| Change type | Bump | Example |
+|---|---|---|
+| **Breaking change** — removes or renames a route, changes API contract, drops backward compatibility | MAJOR | `3.0.0` → `4.0.0` |
+| **New feature** — new module, new route, new UI capability, new integration | MINOR | `3.0.0` → `3.1.0` |
+| **Bug fix, polish, docs, tests, refactor** — no new user-facing capability | PATCH | `3.1.0` → `3.1.1` |
+
+**When to bump:**
+- **Bump on `staging`** — include the version change in the same commit as the work. The `/commit` skill handles this automatically.
+- **Do not bump on `main`** — `main` only receives merges from `staging`, so the bumped version is already present. No second bump needed.
 
 **Rules:**
-- A single merge can only bump one level. If a merge includes both a new feature and bug fixes, bump MINOR (the higher level wins).
-- Multiple features merged in the same session bump MINOR once, not once per feature.
+- A single commit can only bump one level. If it includes both a new feature and bug fixes, bump MINOR (the higher level wins).
+- Multiple features committed in the same session bump MINOR once, not once per feature.
 - PATCH resets to 0 on every MINOR bump. MINOR and PATCH reset to 0 on every MAJOR bump.
 - Never skip versions — increment by 1 only.
-- Bump the version in the same commit as the merge or as a dedicated `chore: bump version to X.Y.Z` commit immediately after.
 
 ---
 
