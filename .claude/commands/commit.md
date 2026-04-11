@@ -15,7 +15,17 @@ git log --oneline -5
 
 Review the diff to understand what changed: new feature, bug fix, refactor, chore, etc.
 
-## Step 2 — Determine the semver bump
+## Step 2 — Check the current branch
+
+```bash
+git branch --show-current
+```
+
+**If the current branch is `main`:** do NOT bump the version. The version was already bumped when the work was committed to `staging`. Skip Steps 3 and proceed directly to Step 4 (staging only). Simply merge or commit without touching `package.json`.
+
+**If the current branch is `staging` or any feature branch:** continue to Step 3.
+
+## Step 3 — Determine the semver bump (staging / feature branches only)
 
 Use the rules from CLAUDE.md:
 
@@ -34,11 +44,11 @@ Read the current version:
 node -p "require('./package.json').version"
 ```
 
-## Step 3 — Bump the version in package.json
+## Step 4 — Bump the version in package.json (staging / feature branches only)
 
 Edit `package.json` with the new version using the Edit tool. Do not use sed or shell substitution.
 
-## Step 4 — Stage files and commit
+## Step 5 — Stage files and commit
 
 Stage the changed source files plus `package.json`:
 ```bash
@@ -48,28 +58,28 @@ git add <files> package.json
 Never use `git add -A` or `git add .` — add files by name only.
 Never stage files in `implementation_notes/`, `*.md` audit/plan docs, or `.claude/.env`.
 
-Write the commit message using a HEREDOC:
+Write the commit message using a HEREDOC. On `staging`, include the version bump in the body:
 ```bash
 git commit -m "$(cat <<'EOF'
 <type>: <description>
 
-chore: bump version to X.Y.Z
+Bumps version to X.Y.Z.
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
 )"
 ```
 
-If the version bump is the only change (e.g. after a merge), use a single-line message:
+On `main` (no version bump), use a plain merge message:
 ```bash
 git commit -m "$(cat <<'EOF'
-chore: bump version to X.Y.Z
+<type>: <description>
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
 )"
 ```
 
-## Step 5 — Confirm
+## Step 6 — Confirm
 
 Run `git status` to confirm the working tree is clean, then report what was committed and the new version.
