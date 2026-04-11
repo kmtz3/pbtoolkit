@@ -1,6 +1,6 @@
 {
   "name": "pbtoolkit",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "description": "Productboard toolkit — import, export, migrate entities, notes, and companies",
   "main": "src/server.js",
   "scripts": {
