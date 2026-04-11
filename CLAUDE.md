@@ -321,7 +321,7 @@ Follow [semver](https://semver.org/) — `MAJOR.MINOR.PATCH`:
 | Change type | Bump | Example | When |
 |---|---|---|---|
 | **Breaking change** — removes or renames a route, changes API contract, drops backward compatibility | MAJOR | `3.0.0` → `4.0.0` | Rare; requires user action or deployment config changes |
-| **New feature** — new module, new route, new UI capability, new integration | MINOR | `3.0.0` → `3.1.0` | Each feature branch merged to main |
+| **New feature** — new module, new route, new UI capability, new integration | MINOR | `3.0.0` → `3.1.0` | Each feature branch merged to staging/main |
 | **Bug fix, polish, docs, tests, refactor** — no new user-facing capability | PATCH | `3.1.0` → `3.1.1` | Fix branches, test updates, style tweaks |
 
 **Rules:**

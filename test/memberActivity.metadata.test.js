@@ -277,30 +277,40 @@ describe('buildFilename — 200-char cap', () => {
 
 describe('buildCache — member and team population', () => {
   /**
-   * Build mock fetchAllPages that returns different data based on path prefix.
-   * - /v2/members → array of member objects
-   * - /v2/teams and no subpath → array of team objects
+   * Build mock fetchAllPages for teams only.
+   * Members are now fetched via pbFetch POST /v2/members/search, not fetchAllPages.
    * - /v2/teams/{id}/members → array of team member objects ({ id, fields })
+   * - /v2/teams              → array of team objects
    */
-  function makeMockFetchAllPages({ members, teams, teamMembers }) {
+  function makeMockFetchAllPages({ teams, teamMembers }) {
     return async function fetchAllPages(path) {
-      if (path.startsWith('/v2/members')) return members;
       if (/\/v2\/teams\/[^/]+\/members/.test(path)) return teamMembers;
       if (path.startsWith('/v2/teams')) return teams;
       return [];
     };
   }
 
-  const mockPbFetch = async () => ({ data: [] }); // pre-flight only
+  /**
+   * Build mock pbFetch.
+   * - POST /v2/members/search → returns { data: members } (new members endpoint)
+   * - Everything else (GET pre-flight, etc.) → { data: [] }
+   */
+  function makeMockPbFetch(members = []) {
+    return async (method, path) => {
+      if (method === 'post' && path === '/v2/members/search') {
+        return { data: members };
+      }
+      return { data: [] };
+    };
+  }
 
   test('members map populated from memberRecords', async () => {
-    const fetchAllPages = makeMockFetchAllPages({
-      members: [{ id: 'm1', fields: { name: 'Alice', email: 'alice@x.com', role: 'maker' } }],
-      teams: [],
-      teamMembers: [],
-    });
+    const fetchAllPages = makeMockFetchAllPages({ teams: [], teamMembers: [] });
+    const pbFetch = makeMockPbFetch([
+      { id: 'm1', fields: { name: 'Alice', email: 'alice@x.com', role: 'maker' } },
+    ]);
 
-    const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
+    const entry = await buildCache('tok', fetchAllPages, pbFetch);
     assert.equal(entry.members.size, 1);
     const m = entry.members.get('m1');
     assert.equal(m.name, 'Alice');
@@ -310,12 +320,12 @@ describe('buildCache — member and team population', () => {
 
   test('teams map populated from teamRecords', async () => {
     const fetchAllPages = makeMockFetchAllPages({
-      members: [],
       teams: [{ id: 't1', fields: { name: 'Eng', handle: 'eng' } }],
       teamMembers: [],
     });
+    const pbFetch = makeMockPbFetch([]);
 
-    const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
+    const entry = await buildCache('tok', fetchAllPages, pbFetch);
     assert.equal(entry.teams.size, 1);
     const t = entry.teams.get('t1');
     assert.equal(t.name, 'Eng');
@@ -324,12 +334,14 @@ describe('buildCache — member and team population', () => {
 
   test('memberTeams built from team members list', async () => {
     const fetchAllPages = makeMockFetchAllPages({
-      members: [{ id: 'm1', fields: { name: 'Alice', email: 'a@x.com', role: 'maker' } }],
       teams: [{ id: 't1', fields: { name: 'Engineering', handle: 'eng' } }],
       teamMembers: [{ id: 'm1', fields: { name: 'Alice', email: 'a@x.com' } }],
     });
+    const pbFetch = makeMockPbFetch([
+      { id: 'm1', fields: { name: 'Alice', email: 'a@x.com', role: 'maker' } },
+    ]);
 
-    const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
+    const entry = await buildCache('tok', fetchAllPages, pbFetch);
     const memberTeams = entry.memberTeams.get('m1');
     assert.ok(Array.isArray(memberTeams));
     assert.ok(memberTeams.includes('Engineering'));
@@ -337,53 +349,74 @@ describe('buildCache — member and team population', () => {
 
   test('member with no team → memberTeams has no entry for them', async () => {
     const fetchAllPages = makeMockFetchAllPages({
-      members: [{ id: 'm2', fields: { name: 'Bob', email: 'b@x.com', role: 'viewer' } }],
       teams: [{ id: 't1', fields: { name: 'Eng', handle: 'eng' } }],
       teamMembers: [], // t1 has no members
     });
+    const pbFetch = makeMockPbFetch([
+      { id: 'm2', fields: { name: 'Bob', email: 'b@x.com', role: 'viewer' } },
+    ]);
 
-    const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
+    const entry = await buildCache('tok', fetchAllPages, pbFetch);
     assert.equal(entry.memberTeams.has('m2'), false);
   });
 
   test('fetchedAt is set to a recent timestamp', async () => {
     const before = Date.now();
-    const fetchAllPages = makeMockFetchAllPages({ members: [], teams: [], teamMembers: [] });
-    const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
+    const fetchAllPages = makeMockFetchAllPages({ teams: [], teamMembers: [] });
+    const pbFetch = makeMockPbFetch([]);
+    const entry = await buildCache('tok', fetchAllPages, pbFetch);
     const after = Date.now();
     assert.ok(entry.fetchedAt >= before && entry.fetchedAt <= after);
   });
 
   test('obfuscated=false when first member name is not "[obfuscated]"', async () => {
-    const fetchAllPages = makeMockFetchAllPages({
-      members: [{ id: 'm1', fields: { name: 'Alice', email: 'a@x.com', role: 'maker' } }],
-      teams: [],
-      teamMembers: [],
-    });
-    const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
+    const fetchAllPages = makeMockFetchAllPages({ teams: [], teamMembers: [] });
+    const pbFetch = makeMockPbFetch([
+      { id: 'm1', fields: { name: 'Alice', email: 'a@x.com', role: 'maker' } },
+    ]);
+    const entry = await buildCache('tok', fetchAllPages, pbFetch);
     assert.equal(entry.obfuscated, false);
   });
 
   test('obfuscated=true when first member name is "[obfuscated]"', async () => {
-    const fetchAllPages = makeMockFetchAllPages({
-      members: [{ id: 'm1', fields: { name: '[obfuscated]', email: '[obfuscated]', role: 'viewer' } }],
-      teams: [],
-      teamMembers: [],
-    });
-    const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
+    const fetchAllPages = makeMockFetchAllPages({ teams: [], teamMembers: [] });
+    const pbFetch = makeMockPbFetch([
+      { id: 'm1', fields: { name: '[obfuscated]', email: '[obfuscated]', role: 'viewer' } },
+    ]);
+    const entry = await buildCache('tok', fetchAllPages, pbFetch);
     assert.equal(entry.obfuscated, true);
   });
 
   test('member with missing fields → defaults used', async () => {
-    const fetchAllPages = makeMockFetchAllPages({
-      members: [{ id: 'm1', fields: {} }], // all fields missing
-      teams: [],
-      teamMembers: [],
-    });
-    const entry = await buildCache('tok', fetchAllPages, mockPbFetch);
+    const fetchAllPages = makeMockFetchAllPages({ teams: [], teamMembers: [] });
+    const pbFetch = makeMockPbFetch([
+      { id: 'm1', fields: {} }, // all fields missing
+    ]);
+    const entry = await buildCache('tok', fetchAllPages, pbFetch);
     const m = entry.members.get('m1');
     assert.equal(m.name, '[unknown]');
     assert.equal(m.email, '[unknown]');
     assert.equal(m.role, 'viewer');
+  });
+
+  test('POST /v2/members/search paginated — follows links.next via GET', async () => {
+    const fetchAllPages = makeMockFetchAllPages({ teams: [], teamMembers: [] });
+    // Simulate two pages: first POST returns page 1 + links.next, GET returns page 2
+    const page1 = [{ id: 'm1', fields: { name: 'Alice', email: 'a@x.com', role: 'maker' } }];
+    const page2 = [{ id: 'm2', fields: { name: 'Bob',   email: 'b@x.com', role: 'viewer' } }];
+    const pbFetch = async (method, path) => {
+      if (method === 'post' && path === '/v2/members/search') {
+        return { data: page1, links: { next: 'https://api.productboard.com/v2/members/search?pageCursor=cur1' } };
+      }
+      if (method === 'get' && path.includes('pageCursor=cur1')) {
+        return { data: page2, links: {} };
+      }
+      return { data: [] };
+    };
+
+    const entry = await buildCache('tok', fetchAllPages, pbFetch);
+    assert.equal(entry.members.size, 2);
+    assert.ok(entry.members.has('m1'));
+    assert.ok(entry.members.has('m2'));
   });
 });

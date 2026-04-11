@@ -579,6 +579,13 @@ function startNotesDeleteAll() {
         show('notes-delete-all-results');
         $('notes-delete-all-summary-alert').innerHTML = `<div class="alert alert-danger"><span class="alert-icon">⚠️</span><span>${esc(msg)}</span></div>`;
       },
+
+      onAbort: () => {
+        hide('notes-delete-all-running');
+        show('notes-delete-all-results');
+        $('notes-delete-all-summary-alert').innerHTML = `<div class="alert alert-warn"><span class="alert-icon">⏹</span><span>Deletion stopped by user.</span></div>`;
+        notesDeleteAllController = null;
+      },
     }
   );
 }
@@ -729,6 +736,9 @@ function initNotesModule() {
     if ($('notes-delete-all-confirm-input').value.trim() !== 'DELETE') return;
     startNotesDeleteAll();
   }));
+  $('btn-stop-notes-delete-all').addEventListener('click', () => {
+    if (notesDeleteAllController) { notesDeleteAllController.abort(); notesDeleteAllController = null; }
+  });
   $('btn-notes-delete-all-again').addEventListener('click', () => {
     $('notes-delete-all-confirm-input').value = '';
     $('btn-notes-delete-all-run').disabled = true;

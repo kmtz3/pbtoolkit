@@ -53,13 +53,34 @@ async function sleep(ms) {
 }
 
 /**
+ * Fetch all members (including disabled) via POST /v2/members/search.
+ * Paginates using links.next cursor until exhausted.
+ *
+ * @param {Function} pbFetch - from createClient()
+ * @returns {object[]} array of member records
+ */
+async function fetchAllMembers(pbFetch) {
+  const members = [];
+  const payload = { data: { filter: {}, return: { includeDisabled: true } } };
+  let r = await pbFetch('post', '/v2/members/search', payload);
+  if (r.data?.length) members.push(...r.data);
+  let cursor = extractCursor(r.links?.next);
+  while (cursor) {
+    r = await pbFetch('get', `/v2/members/search?pageCursor=${encodeURIComponent(cursor)}`);
+    if (r.data?.length) members.push(...r.data);
+    cursor = extractCursor(r.links?.next);
+  }
+  return members;
+}
+
+/**
  * Build and store the session cache for a given token.
  * Fetches members and teams concurrently, then fans out team member list
  * calls in batches of 5 to stay within rate limits.
  *
  * @param {string} token
  * @param {Function} fetchAllPages - from createClient()
- * @param {Function} pbFetch      - from createClient() (used for pre-flight)
+ * @param {Function} pbFetch      - from createClient()
  * @param {Function} [onProgress] - optional callback(message)
  * @returns {CacheEntry}
  */
@@ -71,7 +92,7 @@ async function buildCache(token, fetchAllPages, pbFetch, onProgress = () => {}) 
   // Fetch members + teams concurrently
   onProgress('Fetching members and teams…');
   const [memberRecords, teamRecords] = await Promise.all([
-    fetchAllPages('/v2/members?includeDisabled=true', 'fetch members'),
+    fetchAllMembers(pbFetch),
     fetchAllPages('/v2/teams', 'fetch teams'),
   ]);
 
