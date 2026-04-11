@@ -644,6 +644,12 @@ function startUsersDeleteAll() {
         show('users-delete-all-results');
         $('users-delete-all-summary-alert').innerHTML = `<div class="alert alert-danger"><span class="alert-icon">⚠️</span><span>${esc(msg)}</span></div>`;
       },
+      onAbort: () => {
+        hide('users-delete-all-running');
+        show('users-delete-all-results');
+        $('users-delete-all-summary-alert').innerHTML = `<div class="alert alert-warn"><span class="alert-icon">⏹</span><span>Deletion stopped by user.</span></div>`;
+        usersDeleteAllController = null;
+      },
     }
   );
 }
@@ -749,6 +755,9 @@ function initUsersModule() {
     if ($('users-delete-all-confirm-input').value.trim() !== 'DELETE') return;
     startUsersDeleteAll();
   }));
+  $('btn-stop-users-delete-all').addEventListener('click', () => {
+    if (usersDeleteAllController) { usersDeleteAllController.abort(); usersDeleteAllController = null; }
+  });
   $('btn-users-delete-all-again').addEventListener('click', () => {
     $('users-delete-all-confirm-input').value = '';
     $('btn-users-delete-all-run').disabled = true;

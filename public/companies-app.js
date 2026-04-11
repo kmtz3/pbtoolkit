@@ -736,6 +736,13 @@ function startCompaniesDeleteAll() {
         show('companies-delete-all-results');
         $('companies-delete-all-summary-alert').innerHTML = `<div class="alert alert-danger"><span class="alert-icon">⚠️</span><span>${esc(msg)}</span></div>`;
       },
+
+      onAbort: () => {
+        hide('companies-delete-all-running');
+        show('companies-delete-all-results');
+        $('companies-delete-all-summary-alert').innerHTML = `<div class="alert alert-warn"><span class="alert-icon">⏹</span><span>Deletion stopped by user.</span></div>`;
+        companiesDeleteAllController = null;
+      },
     }
   );
 }
@@ -861,6 +868,9 @@ function initCompaniesModule() {
     if ($('companies-delete-all-confirm-input').value.trim() !== 'DELETE') return;
     startCompaniesDeleteAll();
   }));
+  $('btn-stop-companies-delete-all').addEventListener('click', () => {
+    if (companiesDeleteAllController) { companiesDeleteAllController.abort(); companiesDeleteAllController = null; }
+  });
   $('btn-companies-delete-all-again').addEventListener('click', () => {
     $('companies-delete-all-confirm-input').value = '';
     $('btn-companies-delete-all-run').disabled = true;
