@@ -546,8 +546,8 @@ router.post('/import/preview', pbAuth, async (req, res) => {
     if (companyDomain && !DOMAIN_RE.test(companyDomain)) err('company_domain', 'Invalid domain format');
 
     // Note type
-    if (noteType && !['simple', 'conversation', 'opportunity'].includes(noteType)) {
-      err('type', 'Type must be "simple", "conversation", or "opportunity"');
+    if (noteType && !['textNote', 'conversationNote', 'opportunityNote'].includes(noteType)) {
+      err('type', 'Type must be "textNote", "conversationNote", or "opportunityNote"');
     }
 
     // Source consistency
