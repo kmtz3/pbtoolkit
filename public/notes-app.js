@@ -163,7 +163,7 @@ function loadNotesCSV(file) {
 
 const NOTES_FIELDS = [
   { id: 'notes-map-pb-id',          label: 'pb_id',              key: 'pbIdColumn',          required: false, hint: 'Present → update existing · empty → create new' },
-  { id: 'notes-map-type',           label: 'Note Type',          key: 'typeColumn',           required: false, hint: 'simple, conversation, or opportunity' },
+  { id: 'notes-map-type',           label: 'Note Type',          key: 'typeColumn',           required: false, hint: 'textNote, conversationNote, or opportunityNote' },
   { id: 'notes-map-title',          label: 'Title',              key: 'titleColumn',          required: false, hint: 'Required when creating new notes (rows without a valid pb_id)' },
   { id: 'notes-map-content',        label: 'Content',            key: 'contentColumn',        required: false },
   { id: 'notes-map-display-url',    label: 'Display URL',        key: 'displayUrlColumn',     required: false },
