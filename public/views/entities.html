@@ -90,6 +90,15 @@
                   </div>
                 </div>
 
+                <!-- Hierarchy path option -->
+                <div class="mb-16">
+                  <label class="flex gap-8 items-center" style="cursor:pointer">
+                    <input type="checkbox" id="ent-export-breadcrumb" />
+                    <span><strong>Include hierarchy path</strong> — adds a <code>hierarchy_path</code> column with the full ancestor chain (e.g. <em>Product &gt; Component</em>)</span>
+                    <span class="info-icon" data-tip="Supported for: Components, Features, Subfeatures, Objectives, Key Results, Releases. Not added for Products, Initiatives, or Release Groups (top-level types with no parent). Takes longer for large workspaces.">i</span>
+                  </label>
+                </div>
+
                 <!-- Entity type checkboxes -->
                 <div class="mb-8">
                   <div class="text-sm text-muted mb-16 flex items-center" style="font-weight:600">

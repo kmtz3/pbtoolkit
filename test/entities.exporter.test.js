@@ -13,6 +13,9 @@ const {
   buildExportHeaders,
   formatFieldValue,
   entityToRow,
+  buildNameMapFromEntities,
+  resolveBreadcrumb,
+  ROOT_ENTITY_TYPES,
 } = require('../src/services/entities/exporter');
 
 // ---------------------------------------------------------------------------
@@ -510,5 +513,273 @@ describe('entityToRow — connected-link relationships', () => {
     const rels = [{ type: 'isBlocking', target: { id: 'blocking-1' } }];
     const row = entityToRow(makeEntity('id', {}, rels), 'feature', config);
     assert.equal(row['blocking_ext_key'], 'blocking-1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildNameMapFromEntities
+// ---------------------------------------------------------------------------
+
+describe('buildNameMapFromEntities', () => {
+  test('basic entity with a parent rel → maps id to {name, parentId}', () => {
+    const entities = [
+      makeEntity('child-id', { name: 'Child' }, [{ type: 'parent', target: { id: 'parent-id' } }]),
+    ];
+    const map = buildNameMapFromEntities(entities);
+    assert.deepEqual(map['child-id'], { name: 'Child', parentId: 'parent-id' });
+  });
+
+  test('entity with no parent rel → parentId is null', () => {
+    const entities = [makeEntity('root-id', { name: 'Root' }, [])];
+    const map = buildNameMapFromEntities(entities);
+    assert.deepEqual(map['root-id'], { name: 'Root', parentId: null });
+  });
+
+  test('multiple entities → all mapped', () => {
+    const entities = [
+      makeEntity('a', { name: 'A' }, []),
+      makeEntity('b', { name: 'B' }, [{ type: 'parent', target: { id: 'a' } }]),
+      makeEntity('c', { name: 'C' }, [{ type: 'parent', target: { id: 'b' } }]),
+    ];
+    const map = buildNameMapFromEntities(entities);
+    assert.equal(Object.keys(map).length, 3);
+    assert.equal(map['c'].parentId, 'b');
+    assert.equal(map['b'].parentId, 'a');
+    assert.equal(map['a'].parentId, null);
+  });
+
+  test('entity with no fields.name → falls back to entity id', () => {
+    const entities = [makeEntity('orphan-id', {}, [])];
+    const map = buildNameMapFromEntities(entities);
+    assert.equal(map['orphan-id'].name, 'orphan-id');
+  });
+
+  test('ignores non-parent relationship types when determining parentId', () => {
+    const entities = [
+      makeEntity('feat-id', { name: 'Feat' }, [
+        { type: 'link', target: { id: 'some-obj' } },
+        { type: 'parent', target: { id: 'comp-id' } },
+      ]),
+    ];
+    const map = buildNameMapFromEntities(entities);
+    assert.equal(map['feat-id'].parentId, 'comp-id');
+  });
+
+  test('empty array → empty map', () => {
+    assert.deepEqual(buildNameMapFromEntities([]), {});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveBreadcrumb
+// ---------------------------------------------------------------------------
+
+describe('resolveBreadcrumb', () => {
+  test('root entity (no parent) → empty string', () => {
+    const map = { 'root': { name: 'Root', parentId: null } };
+    assert.equal(resolveBreadcrumb('root', map), '');
+  });
+
+  test('entity with one parent → parent name', () => {
+    const map = {
+      'root':  { name: 'Root',    parentId: null   },
+      'child': { name: 'Child',   parentId: 'root' },
+    };
+    assert.equal(resolveBreadcrumb('child', map), 'Root');
+  });
+
+  test('three-level chain → grandparent > parent (entity itself excluded)', () => {
+    const map = {
+      'prod': { name: 'MyProduct',   parentId: null     },
+      'comp': { name: 'MyComponent', parentId: 'prod'   },
+      'feat': { name: 'MyFeature',   parentId: 'comp'   },
+    };
+    assert.equal(resolveBreadcrumb('feat', map), 'MyProduct > MyComponent');
+  });
+
+  test('four-level chain → all ancestors included in order', () => {
+    const map = {
+      'p':  { name: 'Product',    parentId: null  },
+      'c':  { name: 'Component',  parentId: 'p'   },
+      'f':  { name: 'Feature',    parentId: 'c'   },
+      'sf': { name: 'Subfeature', parentId: 'f'   },
+    };
+    assert.equal(resolveBreadcrumb('sf', map), 'Product > Component > Feature');
+  });
+
+  test('entity not in map → empty string', () => {
+    const map = {};
+    assert.equal(resolveBreadcrumb('missing-id', map), '');
+  });
+
+  test('parent id not in map (deleted ancestor) → partial path up to last known', () => {
+    const map = {
+      'feat': { name: 'Feature', parentId: 'missing-comp' },
+      // missing-comp is not in the map
+    };
+    assert.equal(resolveBreadcrumb('feat', map), '');
+  });
+
+  test('known parent points to unknown grandparent → shows known parent only', () => {
+    const map = {
+      'comp': { name: 'Component', parentId: 'missing-prod' },
+      'feat': { name: 'Feature',   parentId: 'comp' },
+    };
+    assert.equal(resolveBreadcrumb('feat', map), 'Component');
+  });
+
+  test('cycle guard — circular reference breaks loop, returns partial path', () => {
+    const map = {
+      'a': { name: 'A', parentId: 'b' },
+      'b': { name: 'B', parentId: 'a' }, // cycle: a→b→a
+    };
+    // Should not throw or loop forever; 'b' is visited first
+    const result = resolveBreadcrumb('a', map);
+    assert.equal(typeof result, 'string');
+    // 'b' is the immediate parent of 'a'; then 'a' is seen → stop
+    assert.equal(result, 'B');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ROOT_ENTITY_TYPES
+// ---------------------------------------------------------------------------
+
+describe('ROOT_ENTITY_TYPES — correct membership', () => {
+  test('product, releaseGroup, initiative are root types', () => {
+    assert.ok(ROOT_ENTITY_TYPES.has('product'));
+    assert.ok(ROOT_ENTITY_TYPES.has('releaseGroup'));
+    assert.ok(ROOT_ENTITY_TYPES.has('initiative'));
+  });
+
+  test('component, feature, subfeature, objective, keyResult, release are NOT root types', () => {
+    for (const t of ['component', 'feature', 'subfeature', 'objective', 'keyResult', 'release']) {
+      assert.ok(!ROOT_ENTITY_TYPES.has(t), `${t} should not be a root type`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildExportHeaders — breadcrumb option
+// ---------------------------------------------------------------------------
+
+describe('buildExportHeaders — breadcrumb option', () => {
+  test('breadcrumb: true → hierarchy_path appears after updated_at at position 4', () => {
+    const config = makeConfig([makeSystemField('name', 'Name')]);
+    const headers = buildExportHeaders('feature', config, { breadcrumb: true });
+    assert.equal(headers[4], 'hierarchy_path');
+  });
+
+  test('breadcrumb: true → prefix is pb_id, ext_key, created_at, updated_at, hierarchy_path', () => {
+    const config = makeConfig();
+    const headers = buildExportHeaders('component', config, { breadcrumb: true });
+    assert.deepEqual(headers.slice(0, 5), ['pb_id', 'ext_key', 'created_at', 'updated_at', 'hierarchy_path']);
+  });
+
+  test('breadcrumb: false → no hierarchy_path column', () => {
+    const config = makeConfig();
+    const headers = buildExportHeaders('feature', config, { breadcrumb: false });
+    assert.ok(!headers.includes('hierarchy_path'));
+  });
+
+  test('no options arg → no hierarchy_path column', () => {
+    const config = makeConfig();
+    const headers = buildExportHeaders('feature', config);
+    assert.ok(!headers.includes('hierarchy_path'));
+  });
+
+  test('breadcrumb: true → all other columns still present', () => {
+    const config = makeConfig(
+      [makeSystemField('name', 'Name')],
+      [makeCustomField('cf-1', 'Score', 'Number', 'NumberFieldValue')]
+    );
+    const headers = buildExportHeaders('feature', config, { breadcrumb: true });
+    assert.ok(headers.includes('pb_id'));
+    assert.ok(headers.includes('Name'));
+    assert.ok(headers.includes('Score [Number] [cf-1]'));
+    assert.ok(headers.includes('parent_ext_key'));
+  });
+
+  test('breadcrumb: true on product → no hierarchy_path (root type)', () => {
+    const headers = buildExportHeaders('product', makeConfig(), { breadcrumb: true });
+    assert.ok(!headers.includes('hierarchy_path'));
+  });
+
+  test('breadcrumb: true on releaseGroup → no hierarchy_path (root type)', () => {
+    const headers = buildExportHeaders('releaseGroup', makeConfig(), { breadcrumb: true });
+    assert.ok(!headers.includes('hierarchy_path'));
+  });
+
+  test('breadcrumb: true on initiative → no hierarchy_path (root type)', () => {
+    const headers = buildExportHeaders('initiative', makeConfig(), { breadcrumb: true });
+    assert.ok(!headers.includes('hierarchy_path'));
+  });
+
+  test('breadcrumb: true on component → hierarchy_path IS included (not a root type)', () => {
+    const headers = buildExportHeaders('component', makeConfig(), { breadcrumb: true });
+    assert.ok(headers.includes('hierarchy_path'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// entityToRow — hierarchy_path column (nameMap option)
+// ---------------------------------------------------------------------------
+
+describe('entityToRow — hierarchy_path via nameMap option', () => {
+  test('nameMap provided, entity has ancestors → hierarchy_path populated', () => {
+    const nameMap = {
+      'prod':  { name: 'MyProduct',   parentId: null   },
+      'comp':  { name: 'MyComponent', parentId: 'prod' },
+      'feat':  { name: 'MyFeature',   parentId: 'comp' },
+    };
+    const config = makeConfig();
+    const row = entityToRow(makeEntity('feat', { name: 'MyFeature' }), 'feature', config, { nameMap });
+    assert.equal(row['hierarchy_path'], 'MyProduct > MyComponent');
+  });
+
+  test('nameMap provided, top-level component (no parent) → hierarchy_path is empty string', () => {
+    const nameMap = {
+      'comp': { name: 'Top Component', parentId: null },
+    };
+    const config = makeConfig();
+    const row = entityToRow(makeEntity('comp', { name: 'Top Component' }), 'component', config, { nameMap });
+    assert.equal(row['hierarchy_path'], '');
+  });
+
+  test('no nameMap (default) → hierarchy_path not present in row', () => {
+    const config = makeConfig();
+    const row = entityToRow(makeEntity('feat', { name: 'Feat' }), 'feature', config);
+    assert.equal(row['hierarchy_path'], undefined);
+  });
+
+  test('nameMap null explicitly → hierarchy_path not present in row', () => {
+    const config = makeConfig();
+    const row = entityToRow(makeEntity('feat', { name: 'Feat' }), 'feature', config, { nameMap: null });
+    assert.equal(row['hierarchy_path'], undefined);
+  });
+
+  test('entity id missing from nameMap → hierarchy_path is empty string', () => {
+    const nameMap = {}; // entity not in map
+    const config = makeConfig();
+    const row = entityToRow(makeEntity('feat', { name: 'Feat' }), 'feature', config, { nameMap });
+    assert.equal(row['hierarchy_path'], '');
+  });
+
+  test('nameMap provided but entity is product → hierarchy_path NOT added (root type)', () => {
+    const nameMap = { 'prod': { name: 'MyProduct', parentId: null } };
+    const row = entityToRow(makeEntity('prod', { name: 'MyProduct' }), 'product', makeConfig(), { nameMap });
+    assert.equal(row['hierarchy_path'], undefined);
+  });
+
+  test('nameMap provided but entity is releaseGroup → hierarchy_path NOT added (root type)', () => {
+    const nameMap = { 'rg': { name: 'Q1', parentId: null } };
+    const row = entityToRow(makeEntity('rg', { name: 'Q1' }), 'releaseGroup', makeConfig(), { nameMap });
+    assert.equal(row['hierarchy_path'], undefined);
+  });
+
+  test('nameMap provided but entity is initiative → hierarchy_path NOT added (root type)', () => {
+    const nameMap = { 'ini': { name: 'Growth', parentId: null } };
+    const row = entityToRow(makeEntity('ini', { name: 'Growth' }), 'initiative', makeConfig(), { nameMap });
+    assert.equal(row['hierarchy_path'], undefined);
   });
 });

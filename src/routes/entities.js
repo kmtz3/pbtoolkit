@@ -36,7 +36,16 @@ const { fetchEntityConfigs } = require('../services/entities/configCache');
 const { ENTITY_ORDER, ENTITY_LABELS, SYSTEM_FIELD_ORDER, TYPE_CODE, syntheticColumns, relationshipColumns } = require('../services/entities/meta');
 const { parseEntityCsv } = require('../services/entities/csvParser');
 const { validateEntityRows } = require('../services/entities/validator');
-const { exportEntityType, rowsToCsv } = require('../services/entities/exporter');
+const {
+  exportEntityType,
+  rowsToCsv,
+  buildNameMapFromEntities,
+  entityToRow,
+  buildExportHeaders,
+  fetchNameMapForTypes,
+  BREADCRUMB_EXTRA_TYPES,
+  ROOT_ENTITY_TYPES,
+} = require('../services/entities/exporter');
 const { applyMigrationMode } = require('../services/entities/migrationHelper');
 const { runImport } = require('../services/entities/importCoordinator');
 
@@ -323,7 +332,7 @@ router.post('/export/:type', pbAuth, async (req, res) => {
     return res.status(400).json({ error: `Unknown entity type: ${type}` });
   }
 
-  const { migrationMode = false, workspaceCode = '' } = req.body || {};
+  const { migrationMode = false, workspaceCode = '', breadcrumb = false } = req.body || {};
 
   if (migrationMode && !workspaceCode) {
     return res.status(400).json({ error: 'workspaceCode is required when migrationMode is enabled' });
@@ -335,6 +344,18 @@ router.post('/export/:type', pbAuth, async (req, res) => {
     sse.progress(`Fetching ${ENTITY_LABELS[type] || type} configuration…`, 5);
     const configs = await fetchEntityConfigs(pbFetch, withRetry);
 
+    let nameMap = null;
+    if (breadcrumb && !ROOT_ENTITY_TYPES.has(type)) {
+      sse.progress('Building hierarchy map…', 12);
+      const extraTypes = BREADCRUMB_EXTRA_TYPES[type] || [];
+      nameMap = await fetchNameMapForTypes(
+        [type, ...extraTypes],
+        pbFetch,
+        withRetry,
+        (n) => sse.progress(`Building hierarchy map… (${n})`, 12)
+      );
+    }
+
     sse.progress(`Fetching ${ENTITY_LABELS[type] || type}…`, 15);
 
     const { headers, rows, count } = await exportEntityType(
@@ -342,7 +363,8 @@ router.post('/export/:type', pbAuth, async (req, res) => {
       configs,
       pbFetch,
       withRetry,
-      (fetched) => sse.progress(`Fetching ${ENTITY_LABELS[type] || type}… (${fetched} so far)`, 15 + Math.min(60, Math.floor(fetched / 10)))
+      (fetched) => sse.progress(`Fetching ${ENTITY_LABELS[type] || type}… (${fetched} so far)`, 15 + Math.min(60, Math.floor(fetched / 10))),
+      { breadcrumb, nameMap }
     );
 
     if (count >= 50000) {
@@ -378,7 +400,7 @@ router.post('/export/:type', pbAuth, async (req, res) => {
 router.post('/export-all', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
 
-  const { migrationMode = false, workspaceCode = '', types: selectedTypes } = req.body || {};
+  const { migrationMode = false, workspaceCode = '', types: selectedTypes, breadcrumb = false } = req.body || {};
 
   if (migrationMode && !workspaceCode) {
     return res.status(400).json({ error: 'workspaceCode is required when migrationMode is enabled' });
@@ -397,6 +419,7 @@ router.post('/export-all', pbAuth, async (req, res) => {
 
     const rowsByType = {};
     const headersByType = {};
+    const rawEntitiesByType = {};
     const perEntity = [];
     const total = typesToExport.length;
 
@@ -408,7 +431,7 @@ router.post('/export-all', pbAuth, async (req, res) => {
       sse.progress(`Exporting ${label}…`, basePercent);
 
       try {
-        const { headers, rows, count } = await exportEntityType(
+        const { headers, rows, count, rawEntities } = await exportEntityType(
           entityType,
           configs,
           pbFetch,
@@ -418,6 +441,7 @@ router.post('/export-all', pbAuth, async (req, res) => {
 
         rowsByType[entityType] = rows;
         headersByType[entityType] = headers;
+        rawEntitiesByType[entityType] = rawEntities;
         perEntity.push({ entityType, label, count });
 
         if (count >= 50000) {
@@ -430,6 +454,37 @@ router.post('/export-all', pbAuth, async (req, res) => {
         perEntity.push({ entityType, label, count: 0, error: err.message });
         rowsByType[entityType] = [];
         headersByType[entityType] = [];
+      }
+    }
+
+    if (breadcrumb) {
+      sse.progress('Building hierarchy map…', 85);
+
+      const allRaw = Object.values(rawEntitiesByType).flat();
+
+      // Check if any ancestor types were not exported — prefetch them silently for the name map
+      const exportedTypeSet = new Set(typesToExport);
+      const missingAncestors = new Set();
+      for (const type of typesToExport) {
+        for (const ancestor of (BREADCRUMB_EXTRA_TYPES[type] || [])) {
+          if (!exportedTypeSet.has(ancestor)) missingAncestors.add(ancestor);
+        }
+      }
+
+      let nameMap;
+      if (missingAncestors.size > 0) {
+        const extraMap = await fetchNameMapForTypes([...missingAncestors], pbFetch, withRetry);
+        nameMap = { ...buildNameMapFromEntities(allRaw), ...extraMap };
+      } else {
+        nameMap = buildNameMapFromEntities(allRaw);
+      }
+
+      // Re-build rows with hierarchy_path for each exported type
+      for (const entityType of typesToExport) {
+        const entityConfig = configs[entityType] || { systemFields: [], customFields: [] };
+        rowsByType[entityType] = (rawEntitiesByType[entityType] || [])
+          .map((e) => entityToRow(e, entityType, entityConfig, { nameMap }));
+        headersByType[entityType] = buildExportHeaders(entityType, entityConfig, { breadcrumb: true });
       }
     }
 

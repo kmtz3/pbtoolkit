@@ -67,12 +67,89 @@ function formatFieldValue(val, schema) {
 }
 
 /**
+ * Entity types that are always top-level (no parent) — hierarchy_path column is omitted for these
+ * even when breadcrumb is requested. Initiatives are also excluded because they can have multiple
+ * connected objectives (not a single parent chain).
+ */
+const ROOT_ENTITY_TYPES = new Set(['product', 'releaseGroup', 'initiative']);
+
+/**
+ * Types whose ancestors must be prefetched when they are the only type being exported,
+ * so the name map can resolve the full hierarchy path.
+ * Products, initiatives, and release groups are always root nodes — no extra fetches needed.
+ */
+const BREADCRUMB_EXTRA_TYPES = {
+  product:      [],
+  component:    ['product'],
+  feature:      ['component', 'product'],
+  subfeature:   ['feature', 'component', 'product'],
+  objective:    [],
+  keyResult:    ['objective'],
+  initiative:   [],
+  releaseGroup: [],
+  release:      ['releaseGroup'],
+};
+
+/**
+ * Build an id→{name, parentId} map from an array of raw entity objects.
+ */
+function buildNameMapFromEntities(entities) {
+  const map = {};
+  for (const entity of entities) {
+    const parentRel = (entity.relationships?.data || []).find(r => r.type === 'parent');
+    map[entity.id] = {
+      name: entity.fields?.name || entity.id,
+      parentId: parentRel?.target?.id || null,
+    };
+  }
+  return map;
+}
+
+/**
+ * Walk up the name map from entityId's parent to the root.
+ * Returns the ancestor chain joined by ' > ', or '' if no ancestors.
+ * Ancestors only — entity's own name is excluded.
+ */
+function resolveBreadcrumb(entityId, nameMap) {
+  const parts = [];
+  const seen = new Set([entityId]);
+  let currentId = nameMap[entityId]?.parentId;
+
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId);
+    const entry = nameMap[currentId];
+    if (!entry) break;
+    parts.unshift(entry.name);
+    currentId = entry.parentId;
+  }
+
+  return parts.join(' > ');
+}
+
+/**
+ * Fetch all entities of the given types and return a combined name map.
+ * Reuses fetchAllEntities internally (handles rel pagination).
+ */
+async function fetchNameMapForTypes(types, pbFetch, withRetry, onProgress) {
+  const allEntities = [];
+  for (const type of types) {
+    const entities = await fetchAllEntities(type, pbFetch, withRetry, onProgress);
+    allEntities.push(...entities);
+  }
+  return buildNameMapFromEntities(allEntities);
+}
+
+/**
  * Build the ordered header array for a given entity type.
  * Identical column order to buildTemplateCsv() in routes/entities.js to ensure
  * export output can be re-imported without remapping.
  */
-function buildExportHeaders(entityType, entityConfig) {
-  const prefixCols = ['pb_id', 'ext_key', 'created_at', 'updated_at'];
+function buildExportHeaders(entityType, entityConfig, options = {}) {
+  const { breadcrumb = false } = options;
+  const addBreadcrumb = breadcrumb && !ROOT_ENTITY_TYPES.has(entityType);
+  const prefixCols = addBreadcrumb
+    ? ['pb_id', 'ext_key', 'created_at', 'updated_at', 'hierarchy_path']
+    : ['pb_id', 'ext_key', 'created_at', 'updated_at'];
 
   const systemHeaders = [...entityConfig.systemFields]
     .sort((a, b) => {
@@ -95,8 +172,10 @@ function buildExportHeaders(entityType, entityConfig) {
 
 /**
  * Transform a single entity API object to a plain row object keyed by column header.
+ * @param {object} [options]          Optional. Pass { nameMap } to include hierarchy_path.
  */
-function entityToRow(entity, entityType, entityConfig) {
+function entityToRow(entity, entityType, entityConfig, options = {}) {
+  const { nameMap = null } = options;
   const fields = entity.fields || {};
   const rels = (entity.relationships && entity.relationships.data) || [];
   const row = {};
@@ -106,6 +185,9 @@ function entityToRow(entity, entityType, entityConfig) {
   row['ext_key'] = fields.externalKey || '';
   row['created_at'] = entity.createdAt || '';
   row['updated_at'] = entity.updatedAt || '';
+  if (nameMap && !ROOT_ENTITY_TYPES.has(entityType)) {
+    row['hierarchy_path'] = resolveBreadcrumb(entity.id, nameMap);
+  }
 
   // 2. System fields (identified by f.id; use f.name as column header)
   for (const f of entityConfig.systemFields) {
@@ -294,16 +376,18 @@ async function fetchAllEntities(entityType, pbFetch, withRetry, onProgress) {
  * @param {Function} pbFetch
  * @param {Function} withRetry
  * @param {Function} [onProgress]  called with (fetched) after each page
- * @returns {Promise<{ headers: string[], rows: object[], count: number }>}
+ * @param {object}   [options]     { breadcrumb: false, nameMap: null }
+ * @returns {Promise<{ headers: string[], rows: object[], count: number, rawEntities: Array }>}
  */
-async function exportEntityType(entityType, configs, pbFetch, withRetry, onProgress) {
+async function exportEntityType(entityType, configs, pbFetch, withRetry, onProgress, options = {}) {
+  const { breadcrumb = false, nameMap = null } = options;
   const entityConfig = configs[entityType] || { systemFields: [], customFields: [] };
-  const headers = buildExportHeaders(entityType, entityConfig);
+  const headers = buildExportHeaders(entityType, entityConfig, { breadcrumb });
 
   const entities = await fetchAllEntities(entityType, pbFetch, withRetry, onProgress);
-  const rows = entities.map((e) => entityToRow(e, entityType, entityConfig));
+  const rows = entities.map((e) => entityToRow(e, entityType, entityConfig, nameMap ? { nameMap } : {}));
 
-  return { headers, rows, count: entities.length };
+  return { headers, rows, count: entities.length, rawEntities: entities };
 }
 
 /**
@@ -320,4 +404,15 @@ function rowsToCsv(headers, rows) {
   return '\uFEFF' + Papa.unparse({ fields: headers, data });
 }
 
-module.exports = { exportEntityType, buildExportHeaders, rowsToCsv, formatFieldValue, entityToRow };
+module.exports = {
+  exportEntityType,
+  buildExportHeaders,
+  rowsToCsv,
+  formatFieldValue,
+  entityToRow,
+  buildNameMapFromEntities,
+  resolveBreadcrumb,
+  fetchNameMapForTypes,
+  BREADCRUMB_EXTRA_TYPES,
+  ROOT_ENTITY_TYPES,
+};
