@@ -255,9 +255,8 @@ test('import/run update-by-UUID: uses PATCH /v2/entities/{id} with metadata.sour
 
 test('import/run update-by-domain: looks up ID from domain cache, patches correct company', async () => {
   clearCalls(); clearOverrides();
-  // buildDomainCache: list returns UUID-keyed domain, individual GET returns 'domain' key
-  mockListCompanies = [{ id: COMPANY_UUID_1, fields: { 'mock-domain-uuid': 'acme.com' } }];
-  mockSingleFields  = { domain: 'acme.com' };
+  // buildDomainCache: list now returns 'domain' as a standard key (PB API fixed 2026-04-03)
+  mockListCompanies = [{ id: COMPANY_UUID_1, fields: { domain: 'acme.com' } }];
 
   const csvText = `Company Name,Domain\nAcme Updated,acme.com`;
   const mapping = { nameColumn: 'Company Name', domainColumn: 'Domain', customFields: [] };
