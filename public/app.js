@@ -589,6 +589,17 @@ function requireToken(callback) {
   else { _pendingTokenCallback = callback; openConnectModal(); }
 }
 
+// Called when the server reports a missing token — the OAuth session has expired.
+// Clears local auth state and re-opens the connect modal without a server round-trip.
+function handleSessionExpired() {
+  authMethod = null;
+  token = '';
+  useEu = false;
+  updateConnectionStatus();
+  window.dispatchEvent(new CustomEvent('pb:disconnect'));
+  openConnectModal();
+}
+
 $('btn-connect').addEventListener('click', () => openConnectModal());
 $('btn-close-connect-modal').addEventListener('click', closeConnectModal);
 $('btn-connect-from-tool').addEventListener('click', () => openConnectModal());
@@ -744,6 +755,7 @@ function subscribeSSE(url, body, { onProgress, onComplete, onError, onLog = null
   }).then(async (res) => {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (err.error === 'Missing x-pb-token header') { handleSessionExpired(); return; }
       onError(err.error || `Request failed (${res.status})`);
       return;
     }
@@ -977,6 +989,23 @@ function renderImportComplete(el, { created = 0, updated = 0, errors = 0, stoppe
   `;
   el.classList.remove('hidden');
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── File reading helper ──────────────────────────────────────────────────────
+/**
+ * Read a File as text with encoding detection.
+ * Tries strict UTF-8 first; falls back to windows-1252 for files saved by
+ * Excel or other tools that do not use UTF-8 (e.g. en-dashes saved as 0x96).
+ * @param {File} file
+ * @returns {Promise<string>}
+ */
+async function readFileText(file) {
+  const buffer = await file.arrayBuffer();
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch (_) {
+    return new TextDecoder('windows-1252').decode(buffer);
+  }
 }
 
 // ── Dropzone helper ──────────────────────────────────────────────────────────

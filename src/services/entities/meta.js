@@ -63,6 +63,9 @@ const HEALTH_TYPES = new Set([
   'objective', 'keyResult', 'initiative', 'feature', 'subfeature',
 ]);
 
+// Entity types that support the progress field (start/current/target measurement)
+const HAS_PROGRESS = new Set(['keyResult']);
+
 // ---------------------------------------------------------------------------
 // Preferred ordering for system fields sourced from configurations.
 // buildTemplateCsv sorts systemFields[] by this order before writing headers.
@@ -79,14 +82,27 @@ const SYSTEM_FIELD_ORDER = [
 /**
  * Synthetic columns that expand composite PB fields into multiple CSV columns.
  * These are always hardcoded (not sourced from configurations).
+ *
+ * @param {string}  entityType
+ * @param {object}  [opts]
+ * @param {boolean} [opts.forTemplate=false]  When true, omit read-only health sub-columns
+ *   (health_updated_by, health_last_updated, health_previous_status) that cannot be set
+ *   on create/patch and are export-only.
  */
-function syntheticColumns(entityType) {
+function syntheticColumns(entityType, { forTemplate = false } = {}) {
   const cols = [];
   if (HAS_TIMEFRAME.has(entityType)) {
     cols.push('timeframe_start (YYYY-MM-DD)', 'timeframe_end (YYYY-MM-DD)');
   }
   if (HEALTH_TYPES.has(entityType)) {
-    cols.push('health_status', 'health_comment', 'health_updated_by (email)', 'health_last_updated', 'health_previous_status');
+    cols.push('health_status', 'health_comment');
+    if (!forTemplate) {
+      // Read-only health metadata — populated by the server, cannot be set on create/patch
+      cols.push('health_updated_by (email)', 'health_last_updated', 'health_previous_status');
+    }
+  }
+  if (HAS_PROGRESS.has(entityType)) {
+    cols.push('progress_start', 'progress_current', 'progress_target');
   }
   return cols;
 }
@@ -124,6 +140,7 @@ module.exports = {
   SKIP_STATUS_VALIDATION,
   HAS_TIMEFRAME,
   HEALTH_TYPES,
+  HAS_PROGRESS,
   SYSTEM_FIELD_ORDER,
   syntheticColumns,
   relationshipColumns,

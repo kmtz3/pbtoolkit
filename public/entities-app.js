@@ -141,7 +141,9 @@ const ENT_FIELD_ALIASES = {
   'timeframe_end':           ['timeframe_end', 'timeframe_end (yyyy-mm-dd)', 'timeframe end', 'end_date', 'end date'],
   'health_status':           ['health_status', 'health status'],
   'health_comment':          ['health_comment', 'health comment'],
-  'health_updated_by_email': ['health_updated_by (email)', 'health_updated_by', 'health updated by', 'health updated by (email)'],
+  'progress_start':          ['progress_start', 'progress start', 'start value', 'start_value'],
+  'progress_current':        ['progress_current', 'progress current', 'current value', 'current_value', 'current state'],
+  'progress_target':         ['progress_target', 'progress target', 'target value', 'target_value', 'goal', 'progress_goal'],
   'parent_ext_key':          ['parent_ext_key', 'parent ext key', 'parent'],
   'parent_feat_ext_key':     ['parent_feat_ext_key', 'parent feat ext key', 'parent feature'],
   'parent_obj_ext_key':      ['parent_obj_ext_key', 'parent obj ext key', 'parent objective'],
@@ -160,6 +162,9 @@ const ENT_HAS_TIMEFRAME = new Set([
 const ENT_HEALTH_TYPES = new Set([
   'objective', 'keyResult', 'initiative', 'feature', 'subfeature',
 ]);
+
+// Entity types that have progress tracking (mirrors HAS_PROGRESS in meta.js)
+const ENT_HAS_PROGRESS = new Set(['keyResult']);
 
 // Preferred order for system fields in mapping table (mirrors SYSTEM_FIELD_ORDER in meta.js)
 const ENT_SYSTEM_FIELD_ORDER = [
@@ -213,9 +218,15 @@ function entGetFieldDefs(entityType, configs) {
 
   // 4. Synthetic health columns (grouped under Default fields)
   if (ENT_HEALTH_TYPES.has(entityType)) {
-    defs.push({ id: 'health_status',           label: 'Health status',             required: false, group: 'system', badge: 'health', defaultHeader: 'health_status' });
-    defs.push({ id: 'health_comment',          label: 'Health comment',            required: false, group: 'system', badge: 'health', defaultHeader: 'health_comment' });
-    defs.push({ id: 'health_updated_by_email', label: 'Health updated by (email)', required: false, group: 'system', badge: 'health', defaultHeader: 'health_updated_by (email)' });
+    defs.push({ id: 'health_status',  label: 'Health status',  required: false, group: 'system', badge: 'health', defaultHeader: 'health_status' });
+    defs.push({ id: 'health_comment', label: 'Health comment', required: false, group: 'system', badge: 'health', defaultHeader: 'health_comment' });
+  }
+
+  // 4b. Synthetic progress columns (keyResult only)
+  if (ENT_HAS_PROGRESS.has(entityType)) {
+    defs.push({ id: 'progress_start',   label: 'Progress start',   required: false, group: 'system', badge: 'progress', defaultHeader: 'progress_start' });
+    defs.push({ id: 'progress_current', label: 'Progress current', required: false, group: 'system', badge: 'progress', defaultHeader: 'progress_current' });
+    defs.push({ id: 'progress_target',  label: 'Progress target',  required: false, group: 'system', badge: 'progress', defaultHeader: 'progress_target' });
   }
 
   // 5. Custom UUID fields from configs
@@ -377,7 +388,10 @@ function renderMappingTable(container, entityType, csvHeaders, configs, savedMap
     </tr>`;
   }).join('');
 
-  container.innerHTML = `<table class="mapping-table">
+  container.innerHTML = `<div class="flex justify-end mb-8">
+    <button class="btn btn-ghost btn-sm" id="ent-btn-skip-all-${entityType}">↕ Skip all</button>
+  </div>
+  <table class="mapping-table">
     <thead><tr><th>PB field</th><th>Type</th><th>CSV column</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -386,6 +400,15 @@ function renderMappingTable(container, entityType, csvHeaders, configs, savedMap
     entImport.mappings[entityType] = entReadMappingFromUI(entityType);
     entSaveMapping(entityType);
   });
+
+  const skipAllBtn = document.getElementById(`ent-btn-skip-all-${entityType}`);
+  if (skipAllBtn) {
+    skipAllBtn.addEventListener('click', () => {
+      container.querySelectorAll('select[data-field-id]').forEach((sel) => { sel.value = ''; });
+      entImport.mappings[entityType] = entReadMappingFromUI(entityType);
+      entSaveMapping(entityType);
+    });
+  }
 }
 
 // Render tabs and active tab's mapping table
@@ -507,7 +530,7 @@ async function entHandleFile(entityType, file) {
     tile.classList.add('has-file');
   }
 
-  const csvText = await file.text();
+  const csvText = await readFileText(file);
 
   // Quick row count + header parse (client-side, for UI display)
   const rowCount = countCSVDataRows(csvText);

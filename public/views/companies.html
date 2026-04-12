@@ -109,7 +109,10 @@
             <div class="panel-body">
 
               <!-- Field mapping -->
-              <div class="text-sm text-muted mb-16">Map your CSV columns to Productboard company fields.</div>
+              <div class="flex items-center justify-between mb-16">
+                <div class="text-sm text-muted">Map your CSV columns to Productboard company fields.</div>
+                <button class="btn btn-ghost btn-sm" id="btn-co-skip-all">↕ Skip all</button>
+              </div>
               <div id="custom-fields-loading" class="text-sm text-muted mb-8 hidden">Loading custom fields…</div>
               <table class="mapping-table" id="co-mapping-table">
                 <thead>

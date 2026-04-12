@@ -36,7 +36,7 @@
 const EXCLUDED_FIELD_IDS = new Set([
   'timeframe', // → timeframe_start (YYYY-MM-DD) / timeframe_end (YYYY-MM-DD)
   'health',    // → health_status / health_comment / health_updated_by (email)
-  'progress',  // keyResult progress metrics — out of scope v1
+  'progress',  // → progress_start / progress_current / progress_target (synthetic columns)
 ]);
 
 // Stable system field IDs that come through configurations as plain (non-UUID) keys.

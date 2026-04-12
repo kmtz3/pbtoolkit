@@ -687,6 +687,10 @@ function initNotesModule() {
       statusEl.style.color = 'var(--color-danger, #e53e3e)';
     } finally { btn.disabled = false; }
   }));
+  $('btn-notes-skip-all').addEventListener('click', () => {
+    $('notes-field-map-rows').querySelectorAll('select').forEach((sel) => { sel.value = ''; });
+    saveNotesMapping();
+  });
   $('btn-notes-validate').addEventListener('click', () => requireToken(() => {
     const mapping = buildNotesMapping();
     if (!validateNotesRequiredMappings(mapping)) return;

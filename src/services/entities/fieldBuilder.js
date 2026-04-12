@@ -8,7 +8,7 @@
 
 const sanitizeHtml = require('sanitize-html');
 const { cell } = require('./csvParser');
-const { HAS_TIMEFRAME, HEALTH_TYPES } = require('./meta');
+const { HAS_TIMEFRAME, HEALTH_TYPES, HAS_PROGRESS } = require('./meta');
 const { normalizeSchema } = require('./configCache');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -234,10 +234,24 @@ function buildFieldsObject(normalizedRow, entityType, config, options, op) {
       const healthObj = { mode: 'manual', status: healthStatus };
       const healthComment = normalizedRow['health_comment'] || '';
       if (healthComment) healthObj.comment = healthComment;
-      const healthEmail = normalizedRow['health_updated_by (email)'] || '';
-      const emailMatch = healthEmail.match(EMAIL_RE);
-      if (emailMatch) healthObj.createdBy = { email: emailMatch[1] };
       F.health = healthObj;
+    }
+  }
+
+  // --- progress (keyResult only) ---
+  if (HAS_PROGRESS.has(entityType)) {
+    const startVal   = normalizedRow['progress_start']   ?? '';
+    const currentVal = normalizedRow['progress_current'] ?? '';
+    const targetVal  = normalizedRow['progress_target']  ?? '';
+    if (startVal !== '' || currentVal !== '' || targetVal !== '') {
+      const progressObj = {};
+      const ps = parseFloat(startVal);
+      const pc = parseFloat(currentVal);
+      const pt = parseFloat(targetVal);
+      if (!isNaN(ps)) progressObj.startValue   = ps;
+      if (!isNaN(pc)) progressObj.currentValue = pc;
+      if (!isNaN(pt)) progressObj.targetValue  = pt;
+      if (Object.keys(progressObj).length > 0) F.progress = progressObj;
     }
   }
 

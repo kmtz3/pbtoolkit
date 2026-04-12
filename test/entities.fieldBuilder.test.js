@@ -335,10 +335,10 @@ describe('buildCreatePayload — health', () => {
     assert.equal(payload.data.fields.health.mode, 'manual');
   });
 
-  test('health_updated_by email → createdBy.email', () => {
+  test('health_updated_by (email) is ignored — PB does not accept createdBy via API', () => {
     const row = makeRow({ health_status: 'at_risk', 'health_updated_by (email)': 'pm@x.com' });
     const payload = buildCreatePayload(row, 'feature', EMPTY_CONFIG, EMPTY_CACHE, {});
-    assert.deepEqual(payload.data.fields.health.createdBy, { email: 'pm@x.com' });
+    assert.equal(payload.data.fields.health.createdBy, undefined);
   });
 });
 
