@@ -8,6 +8,8 @@ claude.env
 !.claude/agents/**
 !.claude/commands/
 !.claude/commands/**
+!.claude/guides/
+!.claude/guides/**
 implementation_notes/
 openapi v2 public API/
 plan*
