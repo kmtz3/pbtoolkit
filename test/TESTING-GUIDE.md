@@ -1,5 +1,5 @@
 # PBToolkit Manual Testing Guide
-_Updated: 2026-04-09_
+_Updated: 2026-04-12_
 
 ## How to use
 Run automated tests first, then work through each section below.
@@ -273,5 +273,33 @@ Tick each box as you verify it. Re-run after any significant change.
 - [ ] Disconnect token → module resets to idle, origins cleared
 
 ---
+
+## 21. Merge Duplicate Companies — Merge from CSV
+
+**Prerequisites:** Prepare a CSV with `domain`, `primary_id` (or `primary_domain`), and `duplicate_id` (or `duplicate_domain`) columns — or export the fixture file from `test/create-duplicate-company-fixtures.js`.
+
+**Upload & validate:**
+- [ ] Navigate to Merge Duplicate Companies → "Merge from CSV" tab
+- [ ] Dropzone shown in default state ("Drop a CSV file here")
+- [ ] Upload a valid CSV → dropzone switches to `has-file` state: filename, row count, ✕ button
+- [ ] Click ✕ → file cleared, dropzone returns to default, preview results hidden
+- [ ] Upload a CSV missing required columns → validation error shown, preview blocked
+- [ ] Upload a CSV with a malformed UUID in `primary_id` → validation error shown per row
+
+**Preview (POST /preview-csv SSE):**
+- [ ] Click "Preview groups" → SSE stream starts; progress bar advances
+- [ ] Preview completes → domain group cards shown with target company name, duplicate counts, and notes/user counts
+- [ ] Company not found in workspace → group card shows "not found" warning, checkbox disabled
+- [ ] Groups with a primary not found → skipped automatically; count shown in summary
+- [ ] Stop button during preview → halts cleanly, partial results shown
+
+**Select & run:**
+- [ ] All groups checked by default; individual checkboxes can uncheck groups
+- [ ] "Select All" / "Deselect All" / "Invert Selection" buttons work correctly
+- [ ] Click "Merge selected" → confirmation prompt shows duplicate count
+- [ ] Confirm → SSE run starts; live log shows per-company relink + delete entries (reuses /run endpoint, same as scan-based merge)
+- [ ] Results panel shows notesRelinked / usersRelinked / deleted / errors counts
+- [ ] Download action log → CSV with per-duplicate audit entries
+- [ ] Disconnect token → module resets, dropzone clears
 
 _Add new sections here as new modules are shipped._

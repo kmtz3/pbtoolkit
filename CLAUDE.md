@@ -72,13 +72,15 @@ PBToolkit/                         ← project root (git repo)
 │       ├── test-token.md          ← /test-token skill
 │       ├── test-api.md            ← /test-api skill
 │       ├── dev.md                 ← /dev skill
-│       └── pre-staging-audit.md   ← /pre-staging-audit skill: runs both audits on changed files
+│       ├── pre-staging-audit.md   ← /pre-staging-audit skill: runs both audits on changed files
+│       └── commit.md              ← /commit skill: bumps semver in package.json then commits
 ├── test/                          ← server-side test files (untracked)
 │   ├── TESTING-GUIDE.md           ← manual QA checklist
 │   ├── companies.delete.test.js
 │   ├── companies.export.test.js
 │   ├── companies.fields.test.js
 │   ├── companies.import.test.js
+│   ├── companiesDuplicateCleanup.test.js
 │   ├── entities.dependencies.test.js
 │   ├── entities.exporter.test.js
 │   ├── entities.fieldBuilder.test.js
@@ -95,11 +97,18 @@ PBToolkit/                         ← project root (git repo)
 │   ├── notes-import.test.js
 │   ├── pbAuth.test.js
 │   ├── sse.test.js
+│   ├── invertSelection.test.js
 │   ├── team-membership.export.bench.js
 │   ├── teamMembership.test.js
 │   ├── teamsCrud.test.js
 │   ├── users.test.js
-│   └── utils.test.js
+│   ├── utils.test.js
+│   ├── create-duplicate-company-fixtures.js ← fixture generator for duplicate company tests
+│   ├── create-name-only-fixtures.js         ← fixture generator for name-only match tests
+│   ├── create-stop-continue-fixtures.js     ← fixture generator for stop/continue tests
+│   ├── duplicate-company-fixtures.json
+│   ├── name-only-fixtures.json
+│   └── stop-continue-fixtures.json
 ├── src/
 │   ├── server.js                  ← Express entry; mounts all routers at /api/*
 │   ├── lib/
@@ -365,6 +374,7 @@ SERVER_URL=http://localhost:8080
 | `/test-api` | Run all read-only endpoints and print a status table |
 | `/dev` | Start the dev server with `npm run dev` |
 | `/pre-staging-audit` | Run consistency + security agents on all files changed vs `main`; prints a combined report with a PASS / BLOCK verdict |
+| `/commit` | Bump semver in `package.json` (MAJOR/MINOR/PATCH based on changes), then commit with a descriptive message |
 
 ### Agents
 

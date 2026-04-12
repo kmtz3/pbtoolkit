@@ -248,6 +248,16 @@ A two-step flow: **Scan → Preview → Run**.
 
 A **Stop** button is available during the run. An **audit log** (downloadable) captures every operation.
 
+### Merge from CSV
+
+An alternative workflow when you already have a prepared list of which companies to merge. Upload a CSV with `domain`, `primary_id` (or `primary_domain`), and `duplicate_id` (or `duplicate_domain`) columns.
+
+**Flow:**
+
+1. **Upload CSV** — drag-and-drop or click to browse. The dropzone shows filename and row count.
+2. **Preview groups** — fetches current company details and note/user counts for each group via SSE. Companies not found in the workspace are flagged and skipped.
+3. **Select & run** — groups are pre-checked; uncheck any to exclude. Confirm, then the merge runs using the same steps as the scan-based flow (relink notes → relink users → delete duplicate). Stop button available. Audit log downloadable.
+
 ---
 
 ## Entities

@@ -14,6 +14,7 @@ pbtoolkit/
 │   ├── companies.export.test.js
 │   ├── companies.fields.test.js
 │   ├── companies.import.test.js
+│   ├── companiesDuplicateCleanup.test.js
 │   ├── entities.dependencies.test.js
 │   ├── entities.exporter.test.js
 │   ├── entities.fieldBuilder.test.js
@@ -30,11 +31,18 @@ pbtoolkit/
 │   ├── notes-import.test.js
 │   ├── pbAuth.test.js
 │   ├── sse.test.js
+│   ├── invertSelection.test.js
 │   ├── team-membership.export.bench.js
 │   ├── teamMembership.test.js
 │   ├── teamsCrud.test.js
 │   ├── users.test.js
-│   └── utils.test.js
+│   ├── utils.test.js
+│   ├── create-duplicate-company-fixtures.js
+│   ├── create-name-only-fixtures.js
+│   ├── create-stop-continue-fixtures.js
+│   ├── duplicate-company-fixtures.json
+│   ├── name-only-fixtures.json
+│   └── stop-continue-fixtures.json
 ├── src/
 │   ├── server.js              # Express entry point — mounts all routers
 │   ├── lib/
@@ -60,7 +68,7 @@ pbtoolkit/
 │       ├── validate.js        # GET /api/validate (token validation)
 │       ├── feedback.js        # POST /api/feedback (bug report → PB note or Brevo email fallback)
 │       ├── notesMerge.js      # POST /api/notes-merge/scan + /run + /scan-empty + /delete-empty (SSE)
-│       └── companiesDuplicateCleanup.js # GET /api/companies-duplicate-cleanup/origins + POST /scan + /run (SSE)
+│       └── companiesDuplicateCleanup.js # GET /api/companies-duplicate-cleanup/origins + POST /scan + /preview-csv + /run (SSE)
 ├── src/services/
 │   ├── teamCache.js           # shared team+member session cache (used by teamMembership + membersTeamsMgmt)
 │   └── entities/
