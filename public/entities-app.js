@@ -141,7 +141,6 @@ const ENT_FIELD_ALIASES = {
   'timeframe_end':           ['timeframe_end', 'timeframe_end (yyyy-mm-dd)', 'timeframe end', 'end_date', 'end date'],
   'health_status':           ['health_status', 'health status'],
   'health_comment':          ['health_comment', 'health comment'],
-  'health_updated_by_email': ['health_updated_by (email)', 'health_updated_by', 'health updated by', 'health updated by (email)'],
   'progress_start':          ['progress_start', 'progress start', 'start value', 'start_value'],
   'progress_current':        ['progress_current', 'progress current', 'current value', 'current_value', 'current state'],
   'progress_target':         ['progress_target', 'progress target', 'target value', 'target_value', 'goal', 'progress_goal'],
@@ -219,9 +218,8 @@ function entGetFieldDefs(entityType, configs) {
 
   // 4. Synthetic health columns (grouped under Default fields)
   if (ENT_HEALTH_TYPES.has(entityType)) {
-    defs.push({ id: 'health_status',           label: 'Health status',             required: false, group: 'system', badge: 'health', defaultHeader: 'health_status' });
-    defs.push({ id: 'health_comment',          label: 'Health comment',            required: false, group: 'system', badge: 'health', defaultHeader: 'health_comment' });
-    defs.push({ id: 'health_updated_by_email', label: 'Health updated by (email)', required: false, group: 'system', badge: 'health', defaultHeader: 'health_updated_by (email)' });
+    defs.push({ id: 'health_status',  label: 'Health status',  required: false, group: 'system', badge: 'health', defaultHeader: 'health_status' });
+    defs.push({ id: 'health_comment', label: 'Health comment', required: false, group: 'system', badge: 'health', defaultHeader: 'health_comment' });
   }
 
   // 4b. Synthetic progress columns (keyResult only)
@@ -390,7 +388,10 @@ function renderMappingTable(container, entityType, csvHeaders, configs, savedMap
     </tr>`;
   }).join('');
 
-  container.innerHTML = `<table class="mapping-table">
+  container.innerHTML = `<div class="flex justify-end mb-8">
+    <button class="btn btn-ghost btn-sm" id="ent-btn-skip-all-${entityType}">↕ Skip all</button>
+  </div>
+  <table class="mapping-table">
     <thead><tr><th>PB field</th><th>Type</th><th>CSV column</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -399,6 +400,15 @@ function renderMappingTable(container, entityType, csvHeaders, configs, savedMap
     entImport.mappings[entityType] = entReadMappingFromUI(entityType);
     entSaveMapping(entityType);
   });
+
+  const skipAllBtn = document.getElementById(`ent-btn-skip-all-${entityType}`);
+  if (skipAllBtn) {
+    skipAllBtn.addEventListener('click', () => {
+      container.querySelectorAll('select[data-field-id]').forEach((sel) => { sel.value = ''; });
+      entImport.mappings[entityType] = entReadMappingFromUI(entityType);
+      entSaveMapping(entityType);
+    });
+  }
 }
 
 // Render tabs and active tab's mapping table

@@ -700,6 +700,10 @@ function initUsersModule() {
   });
 
   // ── Import: map / validate / run ─────────────────────────
+  $('btn-users-skip-all').addEventListener('click', () => {
+    $('users-mapping-rows').querySelectorAll('select').forEach((sel) => { sel.value = ''; });
+    saveUsersMapping();
+  });
   $('btn-users-validate').addEventListener('click', () => requireToken(runUsersValidation));
   $('btn-users-run-import').addEventListener('click', () => requireToken(runUsersImport));
   $('btn-users-back-to-map').addEventListener('click', () => {

@@ -234,9 +234,6 @@ function buildFieldsObject(normalizedRow, entityType, config, options, op) {
       const healthObj = { mode: 'manual', status: healthStatus };
       const healthComment = normalizedRow['health_comment'] || '';
       if (healthComment) healthObj.comment = healthComment;
-      const healthEmail = normalizedRow['health_updated_by (email)'] || '';
-      const emailMatch = healthEmail.match(EMAIL_RE);
-      if (emailMatch) healthObj.createdBy = { email: emailMatch[1] };
       F.health = healthObj;
     }
   }

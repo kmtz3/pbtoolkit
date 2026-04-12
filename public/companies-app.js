@@ -793,6 +793,11 @@ function initCompaniesModule() {
   });
 
   // ── Import: map / validate / run ─────────────────────────
+  $('btn-co-skip-all').addEventListener('click', () => {
+    $('co-mapping-rows').querySelectorAll('select').forEach((sel) => { sel.value = ''; });
+    saveCompaniesMapping();
+    checkUnmappedWarning();
+  });
   $('btn-validate').addEventListener('click', () => requireToken(runValidation));
   $('btn-run-import').addEventListener('click', () => requireToken(runImport));
   $('btn-back-to-map2').addEventListener('click', () => {

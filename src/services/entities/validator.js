@@ -36,13 +36,19 @@ function validateEntityRows(entityType, rows, mapping) {
   const cols     = (mapping && mapping.columns) ? mapping.columns : {};
 
   // Resolve column headers, falling back to template defaults
+  const hasMapping    = Object.keys(cols).length > 0;
   const pbIdCol       = cols['pb_id']                  || 'pb_id';
   const extKeyCol     = cols['ext_key']                || 'ext_key';
   const nameCol       = cols['name']                   || null; // set by mapping or stays null
   const parentRlgrCol = cols['parent_rlgr_ext_key']    || 'parent_rlgr_ext_key';
-  const tfStartCol    = cols['timeframe_start']        || 'timeframe_start (YYYY-MM-DD)';
-  const tfEndCol      = cols['timeframe_end']          || 'timeframe_end (YYYY-MM-DD)';
-  const healthByCol   = cols['health_updated_by_email']|| 'health_updated_by (email)';
+  // Format-validated fields: only validate if explicitly mapped, or if no mapping is configured.
+  // When a mapping exists but the field is absent, the user chose "skip" — don't validate it.
+  const tfStartCol    = 'timeframe_start' in cols         ? cols['timeframe_start']
+                      : (hasMapping ? null : 'timeframe_start (YYYY-MM-DD)');
+  const tfEndCol      = 'timeframe_end' in cols           ? cols['timeframe_end']
+                      : (hasMapping ? null : 'timeframe_end (YYYY-MM-DD)');
+  const healthByCol   = 'health_updated_by_email' in cols ? cols['health_updated_by_email']
+                      : (hasMapping ? null : 'health_updated_by (email)');
 
   const seenExtKeys = new Set();
 
@@ -91,32 +97,38 @@ function validateEntityRows(entityType, rows, mapping) {
     }
 
     // ── Date format (applies to both CREATE and PATCH rows) ──────────────────
-    const tfStart = cell(row, tfStartCol);
-    if (tfStart && !DATE_RE.test(tfStart)) {
-      errors.push({
-        row:     rowNum,
-        field:   tfStartCol,
-        message: `timeframe_start must be YYYY-MM-DD (got '${tfStart}')`,
-      });
+    if (tfStartCol) {
+      const tfStart = cell(row, tfStartCol);
+      if (tfStart && !DATE_RE.test(tfStart)) {
+        errors.push({
+          row:     rowNum,
+          field:   tfStartCol,
+          message: `timeframe_start must be YYYY-MM-DD (got '${tfStart}')`,
+        });
+      }
     }
 
-    const tfEnd = cell(row, tfEndCol);
-    if (tfEnd && !DATE_RE.test(tfEnd)) {
-      errors.push({
-        row:     rowNum,
-        field:   tfEndCol,
-        message: `timeframe_end must be YYYY-MM-DD (got '${tfEnd}')`,
-      });
+    if (tfEndCol) {
+      const tfEnd = cell(row, tfEndCol);
+      if (tfEnd && !DATE_RE.test(tfEnd)) {
+        errors.push({
+          row:     rowNum,
+          field:   tfEndCol,
+          message: `timeframe_end must be YYYY-MM-DD (got '${tfEnd}')`,
+        });
+      }
     }
 
     // ── Email format for health updated-by ───────────────────────────────────
-    const healthBy = cell(row, healthByCol);
-    if (healthBy && !healthBy.match(EMAIL_RE)) {
-      errors.push({
-        row:     rowNum,
-        field:   healthByCol,
-        message: `health_updated_by (email) must be a valid email address (got '${healthBy}')`,
-      });
+    if (healthByCol) {
+      const healthBy = cell(row, healthByCol);
+      if (healthBy && !healthBy.match(EMAIL_RE)) {
+        errors.push({
+          row:     rowNum,
+          field:   healthByCol,
+          message: `health_updated_by (email) must be a valid email address (got '${healthBy}')`,
+        });
+      }
     }
   });
 

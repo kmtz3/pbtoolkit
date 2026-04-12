@@ -267,18 +267,22 @@ router.post('/preview', pbAuth, async (req, res) => {
     // Owner email validation against workspace members
     if (memberEmails) {
       const cols = (mapping && mapping.columns) ? mapping.columns : {};
-      const ownerCol = cols['owner'] || 'Owner';
-      rows.forEach((row, i) => {
-        const ownerVal = (cell(row, ownerCol) || '').trim().toLowerCase();
-        if (ownerVal && !memberEmails.has(ownerVal)) {
-          results[entityType].errors.push({
-            row: i + 2, // 1-indexed, row 1 is header
-            field: ownerCol,
-            message: `Owner '${ownerVal}' is not a workspace member — fix the email or enable "Skip owner if member does not exist"`,
-          });
-          totalErrors++;
-        }
-      });
+      const hasMapping = Object.keys(cols).length > 0;
+      const ownerCol = 'owner' in cols ? cols['owner']
+                     : (hasMapping ? null : 'Owner');
+      if (ownerCol) {
+        rows.forEach((row, i) => {
+          const ownerVal = (cell(row, ownerCol) || '').trim().toLowerCase();
+          if (ownerVal && !memberEmails.has(ownerVal)) {
+            results[entityType].errors.push({
+              row: i + 2, // 1-indexed, row 1 is header
+              field: ownerCol,
+              message: `Owner '${ownerVal}' is not a workspace member — fix the email or enable "Skip owner if member does not exist"`,
+            });
+            totalErrors++;
+          }
+        });
+      }
     }
   }
 
