@@ -61,6 +61,7 @@ async function writeRelations(allRows, idCache, pbFetch, withRetry, onLog) {
   // Each config: sourceTypes[], colName, targetType, linkLabel(entityType)→string
   const LINK_CONFIGS = [
     { sourceTypes: ['feature'],                              colName: 'connected_inis_ext_key', targetType: 'initiative', linkLabel: () => 'feature-initiative'    },
+    { sourceTypes: ['initiative'],                           colName: 'connected_feats_ext_key', targetType: 'feature',   linkLabel: () => 'initiative-feature'    },
     { sourceTypes: ['initiative'],                           colName: 'connected_objs_ext_key', targetType: 'objective',  linkLabel: () => 'initiative-objective'   },
     { sourceTypes: ['feature'],                              colName: 'connected_objs_ext_key', targetType: 'objective',  linkLabel: () => 'feature-objective'      },
     { sourceTypes: ['feature', 'initiative', 'subfeature'],  colName: 'connected_rels_ext_key', targetType: 'release',   linkLabel: (t) => `${t}-release`          },

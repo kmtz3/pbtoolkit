@@ -150,6 +150,7 @@ const ENT_FIELD_ALIASES = {
   'parent_rlgr_ext_key':     ['parent_rlgr_ext_key', 'parent rlgr ext key', 'parent release group'],
   'connected_rels_ext_key':  ['connected_rels_ext_key', 'connected releases'],
   'connected_objs_ext_key':  ['connected_objs_ext_key', 'connected objectives'],
+  'connected_feats_ext_key': ['connected_feats_ext_key', 'connected features'],
   'connected_inis_ext_key':  ['connected_inis_ext_key', 'connected initiatives'],
 };
 
@@ -186,6 +187,8 @@ function entRelFieldDefs(entityType) {
     defs.push({ id: 'connected_rels_ext_key', label: 'Connected releases (comma-sep.)', required: false, defaultHeader: 'connected_rels_ext_key' });
   if (['initiative', 'feature'].includes(entityType))
     defs.push({ id: 'connected_objs_ext_key', label: 'Connected objectives (comma-sep.)', required: false, defaultHeader: 'connected_objs_ext_key' });
+  if (entityType === 'initiative')
+    defs.push({ id: 'connected_feats_ext_key', label: 'Connected features (comma-sep.)', required: false, defaultHeader: 'connected_feats_ext_key' });
   if (entityType === 'feature')
     defs.push({ id: 'connected_inis_ext_key', label: 'Connected initiatives (comma-sep.)', required: false, defaultHeader: 'connected_inis_ext_key' });
   return defs;

@@ -51,7 +51,7 @@ function applyMapping(csvRows, entityType, mapping) {
     // try to read them directly by their canonical column name as a fallback.
     const relCols = [
       'parent_ext_key', 'parent_feat_ext_key', 'parent_obj_ext_key', 'parent_rlgr_ext_key',
-      'connected_rels_ext_key', 'connected_objs_ext_key', 'connected_inis_ext_key',
+      'connected_rels_ext_key', 'connected_objs_ext_key', 'connected_feats_ext_key', 'connected_inis_ext_key',
       'blocked_by_ext_key', 'blocking_ext_key',
     ];
     for (const rc of relCols) {
