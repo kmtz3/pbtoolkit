@@ -63,7 +63,7 @@ const router = express.Router();
  *   2. System fields from configurations           — PB display name as header
  *      (name, description, owner, status, phase, teams/team, archived, workProgress)
  *      sorted by SYSTEM_FIELD_ORDER; objective gets "Team" vs others "Teams" via f.name
- *   3. Synthetic composite columns                 — timeframe_start/end, health_*
+ *   3. Synthetic composite columns (writable only)  — timeframe_start/end, health_status/comment, progress_*
  *   4. Custom UUID fields from configurations      — "Field Name [Type] [uuid]"
  *   5. Relationship columns                        — parent_ext_key, connected_*
  */
@@ -83,8 +83,8 @@ function buildTemplateCsv(entityType, configs) {
     })
     .map((f) => f.name);
 
-  // 3. Synthetic composite columns (timeframe split, health split)
-  const syntheticCols = syntheticColumns(entityType);
+  // 3. Synthetic composite columns (timeframe, health writable-only, progress)
+  const syntheticCols = syntheticColumns(entityType, { forTemplate: true });
 
   // 4. Custom UUID fields
   const customHeaders = entityConfig.customFields.map(
@@ -831,6 +831,7 @@ router.post('/delete/by-csv', pbAuth, async (req, res) => {
           let cursor = null;
           let entityMissing = false;
           do {
+            if (sse.isAborted()) break;
             const url =
               `/v2/entities?parent%5Bid%5D=${encodeURIComponent(uuid)}&fields[]=id` +
               (cursor ? `&pageCursor=${encodeURIComponent(cursor)}` : '');

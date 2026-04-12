@@ -15,6 +15,7 @@ const {
   SYSTEM_FIELD_ORDER,
   HAS_TIMEFRAME,
   HEALTH_TYPES,
+  HAS_PROGRESS,
   syntheticColumns,
   relationshipColumns,
 } = require('./meta');
@@ -246,6 +247,14 @@ function entityToRow(entity, entityType, entityConfig, options = {}) {
     row['health_updated_by (email)'] = fields.health?.createdBy?.email || '';
     row['health_last_updated'] = fields.health?.lastUpdatedAt || '';
     row['health_previous_status'] = fields.health?.previousStatus || '';
+  }
+
+  // 4b. Synthetic progress columns (keyResult only)
+  if (HAS_PROGRESS.has(entityType)) {
+    const p = fields.progress;
+    row['progress_start']   = p?.startValue   != null ? String(p.startValue)   : '';
+    row['progress_current'] = p?.currentValue != null ? String(p.currentValue) : '';
+    row['progress_target']  = p?.targetValue  != null ? String(p.targetValue)  : '';
   }
 
   // 5. Custom UUID fields
