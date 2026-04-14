@@ -98,6 +98,7 @@ async function createCompany({ name, domain, sourceOrigin }) {
       ...(metadata && { metadata }),
     },
   });
+  await sleep(2000); // let PB index the entity as a valid note customer
   return r.data;
 }
 
@@ -121,6 +122,7 @@ async function createUser({ name }) {
       fields: { name },
     },
   });
+  await sleep(2000); // let PB index the entity as a valid note customer
   return r.data;
 }
 

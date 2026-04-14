@@ -121,6 +121,7 @@ async function createUser({ name }) {
   const r = await pbApi('post', '/v2/entities', {
     data: { type: 'user', fields: { name } },
   });
+  await sleep(2000); // let PB index the entity as a valid note customer
   return r.data;
 }
 
