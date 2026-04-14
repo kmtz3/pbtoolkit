@@ -521,6 +521,47 @@ router.post('/preview-csv', pbAuth, async (req, res) => {
 
     if (sse.isAborted()) { sse.complete({ domainRecords: [], totalDomains: 0, totalDuplicates: 0 }); return; }
 
+    // ── Step 3.5: v1 fallback for companies where v2 source is null ──────────
+    // v2 metadata.source.system is null for companies whose source was only
+    // recorded in v1 (legacy migration gap). Paginate v1 and back-fill.
+    const missingSourceIds = new Set(
+      Object.values(companyDetails)
+        .filter(c => !c.notFound && c.sourceOrigin === null)
+        .map(c => c.id)
+    );
+
+    if (missingSourceIds.size > 0 && !sse.isAborted()) {
+      sse.progress(`Fetching source data from v1 API for ${missingSourceIds.size} compan${missingSourceIds.size !== 1 ? 'ies' : 'y'}…`, 45);
+
+      // v1 doesn't support filtering by id, so paginate and collect what we need
+      let offset = 0;
+      const PAGE = 100;
+      let filled = 0;
+      while (filled < missingSourceIds.size && !sse.isAborted()) {
+        const r = await withRetry(
+          () => pbFetch('get', `/companies?pageLimit=${PAGE}&pageOffset=${offset}`),
+          `v1 source fallback offset=${offset}`
+        );
+        const batch = r.data || [];
+        for (const c of batch) {
+          if (c.id && missingSourceIds.has(c.id)) {
+            companyDetails[c.id].sourceOrigin   = c.sourceOrigin   || null;
+            // Only use v1 sourceRecordId if v2 recordId was also null
+            if (!companyDetails[c.id].sourceRecordId) {
+              companyDetails[c.id].sourceRecordId = c.sourceRecordId || null;
+            }
+            filled++;
+          }
+        }
+        if (batch.length < PAGE) break;
+        offset += PAGE;
+      }
+
+      sse.log('info', `Back-filled source data for ${filled} compan${filled !== 1 ? 'ies' : 'y'} from v1 API`);
+    }
+
+    if (sse.isAborted()) { sse.complete({ domainRecords: [], totalDomains: 0, totalDuplicates: 0 }); return; }
+
     // ── Step 4: Fetch note + user counts for duplicates ───────────────────
     const primaryIds    = [...grouped.keys()];
     const domainRecords = [];
