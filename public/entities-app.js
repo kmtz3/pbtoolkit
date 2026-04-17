@@ -326,6 +326,22 @@ function entBuildAutoMapping(entityType, csvHeaders, configs) {
   return { columns };
 }
 
+// Merge auto-mapped columns with a persisted mapping from localStorage.
+// Persisted values only override auto when they reference a column that still
+// exists in the current CSV — mirrors the guard used by notes and companies.
+// Without this check, a stale persisted column name silently overrides auto,
+// and the dropdown falls through to "(⇢ skip)" because the column isn't in
+// the options list.
+function entMergeMapping(auto, persisted, csvHeaders) {
+  if (!persisted) return auto;
+  const headerSet = new Set(csvHeaders);
+  const valid = {};
+  for (const [fieldId, csvHeader] of Object.entries(persisted.columns || {})) {
+    if (headerSet.has(csvHeader)) valid[fieldId] = csvHeader;
+  }
+  return { columns: { ...auto.columns, ...valid } };
+}
+
 // Import state
 const entImport = {
   files:     {},    // entityType → { filename, csvText, headers, rowCount, valid? }
@@ -554,9 +570,7 @@ async function entHandleFile(entityType, file) {
       Object.entries(entImport.files).forEach(([type, f]) => {
         const persisted = entLoadSavedMapping(type);
         const auto = entBuildAutoMapping(type, f.headers, entImport.configs);
-        entImport.mappings[type] = persisted
-          ? { columns: { ...auto.columns, ...persisted.columns } }
-          : auto;
+        entImport.mappings[type] = entMergeMapping(auto, persisted, f.headers);
       });
       entUpdatePanelVisibility();
     });
@@ -564,9 +578,7 @@ async function entHandleFile(entityType, file) {
     // Configs already loaded — auto-map immediately
     const saved = entLoadSavedMapping(entityType);
     const auto  = entBuildAutoMapping(entityType, headers, entImport.configs);
-    entImport.mappings[entityType] = saved
-      ? { columns: { ...auto.columns, ...saved.columns } }
-      : auto;
+    entImport.mappings[entityType] = entMergeMapping(auto, saved, headers);
     entUpdatePanelVisibility();
   }
 }

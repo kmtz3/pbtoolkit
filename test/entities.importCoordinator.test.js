@@ -135,7 +135,8 @@ describe('runImport — basic CREATE', () => {
 
     const subCsv = 'pb_id,ext_key,Name,parent_feat_ext_key\n,,Child,FEAT-1';
     const subMapping = {
-      columns: { pb_id: 'pb_id', ext_key: 'ext_key', name: 'Name' },
+      // parent_feat_ext_key must be explicitly mapped — fallback no longer reads it
+      columns: { pb_id: 'pb_id', ext_key: 'ext_key', name: 'Name', parent_feat_ext_key: 'parent_feat_ext_key' },
     };
 
     const result = await runImport(
