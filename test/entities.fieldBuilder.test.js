@@ -246,6 +246,22 @@ describe('buildCreatePayload — basic structure', () => {
     assert.ok('name' in payload.data.fields);
   });
 
+  test('name absent from CREATE payload when not in mapping (not a key in normalizedRow)', () => {
+    // Simulate a row where the user did not map the name field — the key is absent entirely.
+    // Previously the code always sent F.name = '' on create; now it requires mapped('name').
+    const row = { _type: 'feature', _pbId: '', _extKey: '' };
+    const payload = buildCreatePayload(row, 'feature', EMPTY_CONFIG, EMPTY_CACHE, {});
+    assert.ok(!('name' in payload.data.fields), 'name must not appear in payload when not mapped');
+  });
+
+  test('name absent from PATCH payload when not in mapping', () => {
+    const row = { _type: 'feature', _pbId: 'some-uuid', _extKey: '' };
+    const payload = buildPatchPayload(row, 'feature', EMPTY_CONFIG, {});
+    // PATCH returns { data: { fields } } in default set mode
+    const fields = payload.data.fields || {};
+    assert.ok(!('name' in fields), 'name must not appear in PATCH payload when not mapped');
+  });
+
   test('owner → { email }', () => {
     const row = makeRow({ owner: 'dev@x.com' });
     const payload = buildCreatePayload(row, 'feature', EMPTY_CONFIG, EMPTY_CACHE, {});

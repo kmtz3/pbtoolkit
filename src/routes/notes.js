@@ -33,7 +33,7 @@
  * v2 backfill:   PATCH /v2/notes/{id}     { data: { patch: [...] } }
  * v2 relate:     POST  /v2/notes/{id}/relationships  { data: { type, target } }
  * v2 delete:     DELETE /v2/notes/{id}    204 response
- * v2 search:     GET /v2/notes?source[recordId]=X
+ * v2 search:     POST /v2/notes/search       { data: { filter: { ... } } }
  */
 
 const express = require('express');

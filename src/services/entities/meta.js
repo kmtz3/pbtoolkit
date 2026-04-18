@@ -123,6 +123,7 @@ function relationshipColumns(entityType) {
   // Connected-link relationships (post-create writes)
   if (['initiative', 'feature', 'subfeature'].includes(entityType)) cols.push('connected_rels_ext_key');
   if (['initiative', 'feature'].includes(entityType))                cols.push('connected_objs_ext_key');
+  if (entityType === 'initiative')                                    cols.push('connected_feats_ext_key');
   if (entityType === 'feature')                                       cols.push('connected_inis_ext_key');
 
   // Dependencies (isBlockedBy / isBlocking) — feature, subfeature, initiative; target = feature|subfeature|initiative

@@ -239,35 +239,70 @@ describe('applyMigrationMode — rewrites dep columns', () => {
   });
 });
 
-// ─── 4. fieldBuilder.js — applyMapping() fallback ────────────────────────────
+// ─── 4. fieldBuilder.js — applyMapping() respects mapping as source of truth ──
+// Relationship columns that are not in mapping.columns must be absent from the
+// normalised row — the mapping is the definitive source of truth and a missing
+// key is how the import pipeline detects an explicit skip.
 
-describe('applyMapping — reads dep columns as fallback', () => {
+describe('applyMapping — dep columns only when explicitly mapped', () => {
   const emptyMapping = { columns: {} };
 
-  test('reads blocked_by_ext_key from CSV row when not in mapping', () => {
+  test('blocked_by_ext_key absent from row when not in mapping', () => {
     const csvRows = [{ blocked_by_ext_key: UUID_A, Name: 'Test' }];
     const [row] = applyMapping(csvRows, 'feature', emptyMapping);
-    assert.equal(row['blocked_by_ext_key'], UUID_A);
+    assert.ok(!('blocked_by_ext_key' in row), 'should not be present when not mapped');
   });
 
-  test('reads blocking_ext_key from CSV row when not in mapping', () => {
+  test('blocking_ext_key absent from row when not in mapping', () => {
     const csvRows = [{ blocking_ext_key: UUID_B, Name: 'Test' }];
     const [row] = applyMapping(csvRows, 'feature', emptyMapping);
-    assert.equal(row['blocking_ext_key'], UUID_B);
+    assert.ok(!('blocking_ext_key' in row), 'should not be present when not mapped');
   });
 
-  test('returns empty string for dep columns absent from CSV row', () => {
+  test('dep columns absent from row when CSV row also lacks them', () => {
     const csvRows = [{ Name: 'Test' }];
     const [row] = applyMapping(csvRows, 'feature', emptyMapping);
-    assert.equal(row['blocked_by_ext_key'], '');
-    assert.equal(row['blocking_ext_key'],   '');
+    assert.ok(!('blocked_by_ext_key' in row));
+    assert.ok(!('blocking_ext_key'   in row));
   });
 
-  test('mapped dep column takes precedence over fallback', () => {
+  test('mapped dep column read from correct CSV column', () => {
     const mapping = { columns: { blocked_by_ext_key: 'My Dep Column' } };
     const csvRows = [{ 'My Dep Column': UUID_A, blocked_by_ext_key: 'should-be-ignored', Name: 'Test' }];
     const [row] = applyMapping(csvRows, 'feature', mapping);
     assert.equal(row['blocked_by_ext_key'], UUID_A);
+  });
+
+  // All 10 relationship column types must be absent when not mapped — not just the dep columns.
+  // This verifies the mapping is the definitive source of truth for every relationship type.
+  test('parent_ext_key absent from row when not in mapping', () => {
+    const csvRows = [{ parent_ext_key: UUID_A, Name: 'Test' }];
+    const [row] = applyMapping(csvRows, 'feature', emptyMapping);
+    assert.ok(!('parent_ext_key' in row));
+  });
+
+  test('connected_rels_ext_key absent from row when not in mapping', () => {
+    const csvRows = [{ connected_rels_ext_key: UUID_A, Name: 'Test' }];
+    const [row] = applyMapping(csvRows, 'feature', emptyMapping);
+    assert.ok(!('connected_rels_ext_key' in row));
+  });
+
+  test('connected_feats_ext_key absent from row when not in mapping', () => {
+    const csvRows = [{ connected_feats_ext_key: UUID_A, Name: 'Test' }];
+    const [row] = applyMapping(csvRows, 'initiative', emptyMapping);
+    assert.ok(!('connected_feats_ext_key' in row));
+  });
+
+  test('connected_objs_ext_key absent from row when not in mapping', () => {
+    const csvRows = [{ connected_objs_ext_key: UUID_A, Name: 'Test' }];
+    const [row] = applyMapping(csvRows, 'initiative', emptyMapping);
+    assert.ok(!('connected_objs_ext_key' in row));
+  });
+
+  test('connected_inis_ext_key absent from row when not in mapping', () => {
+    const csvRows = [{ connected_inis_ext_key: UUID_A, Name: 'Test' }];
+    const [row] = applyMapping(csvRows, 'feature', emptyMapping);
+    assert.ok(!('connected_inis_ext_key' in row));
   });
 });
 

@@ -58,26 +58,29 @@ PBToolkit/                         ← project root (git repo)
 │   ├── plan-reset-settings-on-token-disconnect.md
 │   ├── plan-team-membership.md            ← team membership module spec
 │   ├── plan-teams-crud.md                 ← teams CRUD module spec
-│   ├── plan-dependencies-support.md
-│   └── module-creation-guide.md           ← **READ THIS when creating new modules**
+│   └── plan-dependencies-support.md
 ├── .claude/                       ← local tooling (.env gitignored; agents/ and commands/ tracked)
 │   ├── .env                       ← local test secrets (PB_TOKEN, PB_EU, SERVER_URL)
 │   ├── agents/
 │   │   ├── endpoint-tester.md     ← agent: test all API endpoints
 │   │   ├── consistency-checker.md ← agent: audit module conventions (state block, naming, SSE, DOM safety)
 │   │   └── security-checker.md    ← agent: audit XSS, auth gaps, token leakage, injection risks
+│   ├── guides/
+│   │   └── module-creation-guide.md ← **READ THIS when creating new modules**
 │   └── commands/
 │       ├── health.md              ← /health skill
 │       ├── test-token.md          ← /test-token skill
 │       ├── test-api.md            ← /test-api skill
 │       ├── dev.md                 ← /dev skill
-│       └── pre-staging-audit.md   ← /pre-staging-audit skill: runs both audits on changed files
+│       ├── pre-staging-audit.md   ← /pre-staging-audit skill: runs both audits on changed files
+│       └── commit.md              ← /commit skill: bumps semver in package.json then commits
 ├── test/                          ← server-side test files (untracked)
 │   ├── TESTING-GUIDE.md           ← manual QA checklist
 │   ├── companies.delete.test.js
 │   ├── companies.export.test.js
 │   ├── companies.fields.test.js
 │   ├── companies.import.test.js
+│   ├── companiesDuplicateCleanup.test.js
 │   ├── entities.dependencies.test.js
 │   ├── entities.exporter.test.js
 │   ├── entities.fieldBuilder.test.js
@@ -94,11 +97,18 @@ PBToolkit/                         ← project root (git repo)
 │   ├── notes-import.test.js
 │   ├── pbAuth.test.js
 │   ├── sse.test.js
+│   ├── invertSelection.test.js
 │   ├── team-membership.export.bench.js
 │   ├── teamMembership.test.js
 │   ├── teamsCrud.test.js
 │   ├── users.test.js
-│   └── utils.test.js
+│   ├── utils.test.js
+│   ├── create-duplicate-company-fixtures.js ← fixture generator for duplicate company tests
+│   ├── create-name-only-fixtures.js         ← fixture generator for name-only match tests
+│   ├── create-stop-continue-fixtures.js     ← fixture generator for stop/continue tests
+│   ├── duplicate-company-fixtures.json
+│   ├── name-only-fixtures.json
+│   └── stop-continue-fixtures.json
 ├── src/
 │   ├── server.js                  ← Express entry; mounts all routers at /api/*
 │   ├── lib/
@@ -236,7 +246,7 @@ Phases tracked in `implementation_notes/plan-entity-importer.md`:
 - **Module state block — all state at the top**: every `let _xxx` variable in a frontend module must be declared in the `// ── Module state` block at the top of the IIFE. Never declare state mid-file — it makes reset functions incomplete and creates confusing reference-before-declaration patterns.
 - **Module-scoped helpers — hoist and prefix**: any helper function used by more than one function within a module must be hoisted to module level (inside the IIFE, above its first caller) and named with the module prefix (e.g. `nmRow`, `maFmt`). Never define a generic un-prefixed helper (`row()`, `cell()`, `fmt()`) locally inside multiple functions — hoist and prefix it once.
 - **Module-scoped constants — declare at module level**: constants that are referenced by more than one function (e.g. state priority maps, column lists) must be declared at module level inside the IIFE alongside other constants, not inside individual function bodies. Name them with the module prefix (e.g. `NM_STATE_PRIORITY`).
-- **HTML partials + lazy init**: module views live in `public/views/{module}.html` and are injected into `#view-area` on first navigation via `loadPartial()` (idempotent — subsequent navigations skip the fetch). Each module JS file exposes an `initXxxModule()` function on `window` (e.g. `window.initCompaniesModule`). `loadTool()` in `app.js` calls it immediately after the partial is loaded so event listeners and state are wired up only once. New modules must follow this pattern. **See `implementation_notes/module-creation-guide.md` for the complete guide with code templates, HTML skeletons, CSS reference, and step-by-step checklist.**
+- **HTML partials + lazy init**: module views live in `public/views/{module}.html` and are injected into `#view-area` on first navigation via `loadPartial()` (idempotent — subsequent navigations skip the fetch). Each module JS file exposes an `initXxxModule()` function on `window` (e.g. `window.initCompaniesModule`). `loadTool()` in `app.js` calls it immediately after the partial is loaded so event listeners and state are wired up only once. New modules must follow this pattern. **See `.claude/guides/module-creation-guide.md` for the complete guide with code templates, HTML skeletons, CSS reference, and step-by-step checklist.**
 - **memberActivity.js named exports**: `createZeroCountFields`, `isCacheStale`, `filterByRole`, `filterByActiveState`, `buildFilename`, `buildCache`, `COUNT_COLS`, `CACHE_TTL_MS` are exported as named properties on the router module for unit testing. Router behaviour is unchanged.
 - **Download log on error**: import modules that use SSE show the `↓ Download log` button on `onError` as well as `onComplete`/`onAbort`, so partially-run logs are always accessible. For modules where the live log panel is hidden on error (team membership), a download button is added directly to the error state panel (`btn-tm-error-download-log`).
 - **Token disconnect event**: when the user disconnects, `app.js` dispatches `window.dispatchEvent(new CustomEvent('pb:disconnect'))` after clearing the session. Each module listens for this event and resets its own state (file inputs, in-memory buffers, UI panels). New modules should follow this pattern — see `public/entities-app.js` and `public/member-activity-app.js` for examples.
@@ -364,6 +374,7 @@ SERVER_URL=http://localhost:8080
 | `/test-api` | Run all read-only endpoints and print a status table |
 | `/dev` | Start the dev server with `npm run dev` |
 | `/pre-staging-audit` | Run consistency + security agents on all files changed vs `main`; prints a combined report with a PASS / BLOCK verdict |
+| `/commit` | Bump semver in `package.json` (MAJOR/MINOR/PATCH based on changes), then commit with a descriptive message |
 
 ### Agents
 

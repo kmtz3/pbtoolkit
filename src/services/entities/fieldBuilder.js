@@ -11,7 +11,6 @@ const { cell } = require('./csvParser');
 const { HAS_TIMEFRAME, HEALTH_TYPES, HAS_PROGRESS } = require('./meta');
 const { normalizeSchema } = require('./configCache');
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /<?([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})>?/i;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CUSTOM_RE = /^custom__(.+)$/;
@@ -47,18 +46,9 @@ function applyMapping(csvRows, entityType, mapping) {
     // Falling back to the raw CSV column would silently trigger PATCH instead of POST.
     normalized._pbId   = ('pb_id'   in cols) ? (cell(csvRow, cols['pb_id'])   || '') : '';
     normalized._extKey = ('ext_key' in cols) ? (cell(csvRow, cols['ext_key']) || '') : '';
-    // Relationship columns may not be in the mapping if user left them unmapped;
-    // try to read them directly by their canonical column name as a fallback.
-    const relCols = [
-      'parent_ext_key', 'parent_feat_ext_key', 'parent_obj_ext_key', 'parent_rlgr_ext_key',
-      'connected_rels_ext_key', 'connected_objs_ext_key', 'connected_inis_ext_key',
-      'blocked_by_ext_key', 'blocking_ext_key',
-    ];
-    for (const rc of relCols) {
-      if (normalized[rc] === undefined) {
-        normalized[rc] = cell(csvRow, rc);
-      }
-    }
+    // Relationship columns that are not present in cols were either explicitly skipped
+    // or not mapped — both cases should result in no value. Auto-mapping already handles
+    // canonical column names (exact defaultHeader match), so no fallback is needed here.
     return normalized;
   });
 }
@@ -140,9 +130,11 @@ function buildFieldsObject(normalizedRow, entityType, config, options, op) {
   /** True when a system field key was actually mapped in the user's column mapping. */
   function mapped(key) { return key in normalizedRow; }
 
-  // --- name (always sent on create to prevent "Unnamed …") ---
-  const nameVal = normalizedRow['name'] || '';
-  if (nameVal || isCreate) F.name = nameVal;
+  // --- name (only when user mapped it; sent on create even if empty to avoid "Unnamed …") ---
+  if (mapped('name')) {
+    const nameVal = normalizedRow['name'] || '';
+    if (nameVal || isCreate) F.name = nameVal;
+  }
 
   // --- description ---
   const descVal = normalizedRow['description'] || '';

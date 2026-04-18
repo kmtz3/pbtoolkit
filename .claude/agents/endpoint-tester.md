@@ -60,6 +60,7 @@ Build curl headers from those values for all authenticated requests.
 | POST | `/api/notes-merge/scan-empty` | SSE — scans for empty notes (read-only, but can be slow) |
 | POST | `/api/notes-merge/delete-empty` | SSE — deletes empty notes, confirm first |
 | POST | `/api/companies-duplicate-cleanup/scan` | SSE — scans all companies for duplicates (read-only, but can be slow) |
+| POST | `/api/companies-duplicate-cleanup/preview-csv` | SSE — fetches company details + note/user counts for CSV-supplied groups (read-only) |
 | POST | `/api/companies-duplicate-cleanup/run` | SSE — merges and deletes duplicate companies, confirm first |
 
 ## Testing approach
@@ -111,3 +112,57 @@ curl -s -N \
 - Rate limits: burst 10 req/sec, sustained 100 req/15min per IP.
 - SSE streams end with `event: done`.
 - Entity type codes for templates: `objective`, `keyResult`, `initiative`, `product`, `component`, `feature`, `subfeature`, `releaseGroup`, `release`.
+
+---
+
+## Productboard v2 API quirks (verified live)
+
+These are cases where the spec and the live API diverge, or where the API changed without notice. If a route starts failing after working previously, check here first.
+
+### Notes search — `POST /v2/notes/search`
+
+**Breaking change**: The filter format changed. The old `data.relationships` format returns 400.
+
+```js
+// ❌ OLD (400 error — no longer accepted)
+{ data: { relationships: { customer: { ids: [companyId] } } } }
+
+// ✅ CORRECT (verified working)
+{ data: { filter: { relationships: { customer: [{ id: companyId }] } } } }
+```
+
+- Multiple customer IDs use OR logic: `customer: [{ id: id1 }, { id: id2 }]`
+- Pagination: follows `links.next` (cursor-based), same as before
+- Note relationship structure in the response is unchanged — `relationships.data[].type === 'customer'` with `target.type === 'company'` or `'user'`
+- This affects: `fetchNoteCounts()` in `companiesDuplicateCleanup.js`, and the `/run` merge route
+
+### Entities search — `POST /v2/entities/search`
+
+Filter fields go **directly on `data`**, not under a `filter` wrapper:
+
+```js
+// ✅ CORRECT — types and parent at top level of data
+{ data: { types: ['user'], parent: { id: companyId } } }
+
+// ⚠️ Lenient — API currently accepts the wrong format below but silently ignores
+// unknown fields, so results may be unfiltered. Don't rely on this.
+{ data: { filter: { type: ['user'], relationships: { parent: [{ id: companyId }] } } } }
+```
+
+- `type` (singular) is deprecated — use `types` (array)
+- Pagination: `pageCursor` query param on subsequent POST requests
+
+### GET /v2/notes — no customer filter
+
+The `GET /v2/notes` endpoint does **not** support filtering by customer ID. There is no `customer[id]` query parameter. Use `POST /v2/notes/search` with the filter format above.
+
+### Companies: v1 vs v2 scope
+
+- `GET /companies` (v1) only returns companies created through v1 or synced origins (Salesforce, etc.)
+- `POST /v2/entities/search` with `types: ['company']` covers **all** companies including v2-only ones
+- Always use v2 for domain caches and deduplication — v1 misses v2-created companies
+
+### v2 notes/search — `relationships` field not on GET
+
+`GET /v2/notes` supports: `archived`, `processed`, `owner[id/email]`, `creator[id/email]`, `source[recordId]`, `metadata[source][system/recordId]`, `createdFrom/To`, `updatedFrom/To`, `pageCursor`.  
+No relationship (customer/link) filtering available on GET — must use `POST /v2/notes/search`.

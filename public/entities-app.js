@@ -150,6 +150,7 @@ const ENT_FIELD_ALIASES = {
   'parent_rlgr_ext_key':     ['parent_rlgr_ext_key', 'parent rlgr ext key', 'parent release group'],
   'connected_rels_ext_key':  ['connected_rels_ext_key', 'connected releases'],
   'connected_objs_ext_key':  ['connected_objs_ext_key', 'connected objectives'],
+  'connected_feats_ext_key': ['connected_feats_ext_key', 'connected features'],
   'connected_inis_ext_key':  ['connected_inis_ext_key', 'connected initiatives'],
 };
 
@@ -186,6 +187,8 @@ function entRelFieldDefs(entityType) {
     defs.push({ id: 'connected_rels_ext_key', label: 'Connected releases (comma-sep.)', required: false, defaultHeader: 'connected_rels_ext_key' });
   if (['initiative', 'feature'].includes(entityType))
     defs.push({ id: 'connected_objs_ext_key', label: 'Connected objectives (comma-sep.)', required: false, defaultHeader: 'connected_objs_ext_key' });
+  if (entityType === 'initiative')
+    defs.push({ id: 'connected_feats_ext_key', label: 'Connected features (comma-sep.)', required: false, defaultHeader: 'connected_feats_ext_key' });
   if (entityType === 'feature')
     defs.push({ id: 'connected_inis_ext_key', label: 'Connected initiatives (comma-sep.)', required: false, defaultHeader: 'connected_inis_ext_key' });
   return defs;
@@ -321,6 +324,22 @@ function entBuildAutoMapping(entityType, csvHeaders, configs) {
   });
 
   return { columns };
+}
+
+// Merge auto-mapped columns with a persisted mapping from localStorage.
+// Persisted values only override auto when they reference a column that still
+// exists in the current CSV — mirrors the guard used by notes and companies.
+// Without this check, a stale persisted column name silently overrides auto,
+// and the dropdown falls through to "(⇢ skip)" because the column isn't in
+// the options list.
+function entMergeMapping(auto, persisted, csvHeaders) {
+  if (!persisted) return auto;
+  const headerSet = new Set(csvHeaders);
+  const valid = {};
+  for (const [fieldId, csvHeader] of Object.entries(persisted.columns || {})) {
+    if (headerSet.has(csvHeader)) valid[fieldId] = csvHeader;
+  }
+  return { columns: { ...auto.columns, ...valid } };
 }
 
 // Import state
@@ -551,9 +570,7 @@ async function entHandleFile(entityType, file) {
       Object.entries(entImport.files).forEach(([type, f]) => {
         const persisted = entLoadSavedMapping(type);
         const auto = entBuildAutoMapping(type, f.headers, entImport.configs);
-        entImport.mappings[type] = persisted
-          ? { columns: { ...auto.columns, ...persisted.columns } }
-          : auto;
+        entImport.mappings[type] = entMergeMapping(auto, persisted, f.headers);
       });
       entUpdatePanelVisibility();
     });
@@ -561,9 +578,7 @@ async function entHandleFile(entityType, file) {
     // Configs already loaded — auto-map immediately
     const saved = entLoadSavedMapping(entityType);
     const auto  = entBuildAutoMapping(entityType, headers, entImport.configs);
-    entImport.mappings[entityType] = saved
-      ? { columns: { ...auto.columns, ...saved.columns } }
-      : auto;
+    entImport.mappings[entityType] = entMergeMapping(auto, saved, headers);
     entUpdatePanelVisibility();
   }
 }
