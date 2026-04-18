@@ -643,7 +643,7 @@ router.post('/preview-csv', pbAuth, async (req, res) => {
  */
 async function fetchNoteCounts(pbFetch, withRetry, companyId) {
   // ── Query 1: notes linked to this company ───────────────────────────────
-  const notesPayload = { data: { relationships: { customer: { ids: [companyId] } } } };
+  const notesPayload = { data: { filter: { relationships: { customer: [{ id: companyId }] } } } };
   let r = await withRetry(
     () => pbFetch('post', '/v2/notes/search', notesPayload),
     `count notes for ${companyId}`
@@ -780,7 +780,7 @@ router.post('/run', pbAuth, async (req, res) => {
           // ── Step 1: Find and relink all notes linked to this duplicate ───
           const notes = [];
 
-          const payload = { data: { relationships: { customer: { ids: [dupId] } } } };
+          const payload = { data: { filter: { relationships: { customer: [{ id: dupId }] } } } };
           let r = await withRetry(
             () => pbFetch('post', '/v2/notes/search', payload),
             `search notes for ${dupId}`
