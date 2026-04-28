@@ -168,7 +168,7 @@ function buildExportHeaders(entityType, entityConfig, options = {}) {
 
   const relCols = relationshipColumns(entityType);
 
-  return [...prefixCols, ...systemHeaders, ...syntheticCols, ...customHeaders, ...relCols];
+  return [...prefixCols, ...systemHeaders, ...syntheticCols, ...customHeaders, ...relCols, 'pb_html_link'];
 }
 
 /**
@@ -186,6 +186,7 @@ function entityToRow(entity, entityType, entityConfig, options = {}) {
   row['ext_key'] = fields.externalKey || '';
   row['created_at'] = entity.createdAt || '';
   row['updated_at'] = entity.updatedAt || '';
+  row['pb_html_link'] = entity.links?.html || '';
   if (nameMap && !ROOT_ENTITY_TYPES.has(entityType)) {
     row['hierarchy_path'] = resolveBreadcrumb(entity.id, nameMap);
   }

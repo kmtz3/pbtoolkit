@@ -154,11 +154,13 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── Session state ──────────────────────────────────────────
-const SESSION_KEY = 'pb_token';
-const EU_KEY      = 'pb_eu';
+const SESSION_KEY   = 'pb_token';
+const EU_KEY        = 'pb_eu';
+const SPACE_KEY     = 'pb_space';
 
 let token      = sessionStorage.getItem(SESSION_KEY) || '';
 let useEu      = sessionStorage.getItem(EU_KEY) === 'true';
+let spaceName  = sessionStorage.getItem(SPACE_KEY) || null;
 let authMethod = null; // 'oauth' | 'manual' | null
 
 // ── DOM helpers ────────────────────────────────────────────
@@ -348,6 +350,11 @@ function updateConnectionStatus() {
   dot.classList.toggle('conn-dot--connected', connected);
   dot.classList.toggle('conn-dot--disconnected', !connected);
   setText('conn-label', connected ? 'Connected' : 'Not connected');
+  const chip = $('conn-space');
+  if (chip) {
+    chip.textContent = spaceName || '';
+    chip.classList.toggle('hidden', !connected || !spaceName);
+  }
   $('btn-disconnect').classList.toggle('hidden', !connected);
   $('btn-connect').classList.toggle('hidden', connected);
   updateDcToggle();
@@ -648,6 +655,7 @@ $('auth-submit').addEventListener('click', async () => {
     }
     // Notify all modules so they can re-fetch data with the (new) token
     window.dispatchEvent(new CustomEvent('pb:connected'));
+    fetchSpaceName();
   } catch (e) {
     showAuthError('Could not connect. Check your network and token.');
   } finally {
@@ -664,6 +672,17 @@ function showAuthError(msg) {
   show('auth-error');
 }
 
+async function fetchSpaceName() {
+  try {
+    const res = await fetch('/api/validate/space-name', { headers: buildHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    spaceName = data.spaceName || null;
+    if (spaceName) sessionStorage.setItem(SPACE_KEY, spaceName);
+    updateConnectionStatus();
+  } catch (_) {}
+}
+
 // ── Disconnect ─────────────────────────────────────────────
 $('btn-disconnect').addEventListener('click', async () => {
   if (authMethod === 'oauth') {
@@ -673,8 +692,10 @@ $('btn-disconnect').addEventListener('click', async () => {
   }
   sessionStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem(EU_KEY);
+  sessionStorage.removeItem(SPACE_KEY);
   token = '';
   useEu = false;
+  spaceName = null;
   updateConnectionStatus();
   window.dispatchEvent(new CustomEvent('pb:disconnect'));
 });
@@ -1093,6 +1114,7 @@ async function initAuth() {
       authMethod = 'oauth';
       token  = '__oauth__'; // truthy sentinel — actual token lives server-side
       useEu  = status.useEu;
+      if (!spaceName) fetchSpaceName();
     }
   } catch (_) {
     // Network error on status check — fall through to manual token path

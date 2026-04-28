@@ -908,6 +908,19 @@ input:focus, select:focus, textarea:focus {
 }
 .conn-dot--connected    { background: var(--c-ok);   box-shadow: 0 0 0 2px var(--c-ok-bg); }
 .conn-dot--disconnected { background: var(--c-warn); box-shadow: 0 0 0 2px var(--c-warn-bg); }
+.conn-space-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--c-brand-light);
+  color: var(--c-brand);
+  border: 1px solid #b5d4b9;
+  user-select: none;
+}
 
 /* ── Token warning banner (tool view) ── */
 #token-warning-banner {
@@ -1281,6 +1294,7 @@ input:focus, select:focus, textarea:focus {
   .topbar-right      { gap: 6px; }
   .dc-btn            { padding: 4px 8px; font-size: 11px; }
   .conn-label        { display: none; }
+  .conn-space-chip   { display: none; }
 
   .main-content {
     grid-template-columns: 1fr;

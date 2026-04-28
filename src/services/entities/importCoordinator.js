@@ -140,6 +140,7 @@ async function runImport(files, mappings, configs, options, pbFetch, withRetry, 
           if (row._pbId) {
             // ── PATCH ──────────────────────────────────────────────────────
             const payload = buildPatchPayload(row, type, config, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, skipInvalidOwner, _memberEmails, fiscal_year_start_month });
+            if (process.env.DEBUG_MODE === 'true') console.log(`[IMPORT PAYLOAD] PATCH ${type} row ${rowNum} id=${row._pbId}`, JSON.stringify(payload));
             await withRetry(
               () => pbFetch('patch', `/v2/entities/${encodeURIComponent(row._pbId)}`, payload),
               `patch:${type}`,
@@ -156,6 +157,7 @@ async function runImport(files, mappings, configs, options, pbFetch, withRetry, 
             }
 
             const payload = buildCreatePayload(row, type, config, idCache, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, skipInvalidOwner, _memberEmails, fiscal_year_start_month });
+            if (process.env.DEBUG_MODE === 'true') console.log(`[IMPORT PAYLOAD] CREATE ${type} row ${rowNum}`, JSON.stringify(payload));
             const resp = await withRetry(
               () => pbFetch('post', '/v2/entities', payload),
               `create:${type}`,

@@ -27,4 +27,23 @@ router.get('/', pbAuth, async (req, res) => {
   }
 });
 
+router.get('/space-name', pbAuth, async (req, res) => {
+  const { pbFetch } = res.locals.pbClient;
+  // TODO: switch to a v2 endpoint once v2 entity responses include links.html
+  // links.html is currently a v1-only field — try v1 endpoints until one returns a record
+  const v1Paths = ['/features?pageLimit=1', '/components?pageLimit=1', '/products?pageLimit=1'];
+  for (const path of v1Paths) {
+    try {
+      const response = await pbFetch('get', path);
+      const htmlLink = response.data?.[0]?.links?.html;
+      if (htmlLink) {
+        let spaceName = null;
+        try { spaceName = new URL(htmlLink).hostname.split('.')[0]; } catch (_) {}
+        return res.json({ spaceName });
+      }
+    } catch (_) {}
+  }
+  res.json({ spaceName: null });
+});
+
 module.exports = router;
