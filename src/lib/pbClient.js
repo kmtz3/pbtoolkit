@@ -93,7 +93,10 @@ function createClient(token, useEu = false) {
     if (body !== undefined) opts.body = JSON.stringify(body);
 
     const res = await fetch(url, opts);
-    updateRateLimit(Object.fromEntries(res.headers.entries()));
+    const allHeaders = Object.fromEntries(res.headers.entries());
+    updateRateLimit(allHeaders);
+    const xReqId = allHeaders['x-request-id'] || allHeaders['x-pb-request-id'] || allHeaders['request-id'];
+    if (xReqId && method.toUpperCase() !== 'GET' && process.env.DEBUG_MODE === 'true') console.log(`[PB REQUEST ID] ${method.toUpperCase()} ${path} → ${xReqId}`);
 
     const text = await res.text();
 
