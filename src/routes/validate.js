@@ -29,12 +29,11 @@ router.get('/', pbAuth, async (req, res) => {
 
 router.get('/space-name', pbAuth, async (req, res) => {
   const { pbFetch } = res.locals.pbClient;
-  // TODO: switch to a v2 endpoint once v2 entity responses include links.html
-  // links.html is currently a v1-only field — try v1 endpoints until one returns a record
-  const v1Paths = ['/features?pageLimit=1', '/components?pageLimit=1', '/products?pageLimit=1'];
-  for (const path of v1Paths) {
+  // v2 entities now include links.html (added 2026-04-30) — use GET /v2/entities directly
+  const v2Types = ['feature', 'component', 'product'];
+  for (const type of v2Types) {
     try {
-      const response = await pbFetch('get', path);
+      const response = await pbFetch('get', `/v2/entities?type[]=${type}`);
       const htmlLink = response.data?.[0]?.links?.html;
       if (htmlLink) {
         let spaceName = null;

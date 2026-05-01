@@ -101,6 +101,7 @@ const BASE_FIELDS = [
   { key: 'sourceUrl',                label: 'source_url' },
   { key: 'created_at',              label: 'created_at' },
   { key: 'updated_at',              label: 'updated_at' },
+  { key: 'pb_html_link',            label: 'pb_html_link' },
 ];
 
 router.post('/export', pbAuth, async (_req, res) => {
@@ -230,6 +231,7 @@ function buildExportCSV(users, customFields, companyDomainMap) {
       else if (col.key === 'sourceUrl')         row[col.key] = entity.metadata?.source?.url ?? '';
       else if (col.key === 'created_at')        row[col.key] = entity.createdAt ?? '';
       else if (col.key === 'updated_at')        row[col.key] = entity.updatedAt ?? '';
+      else if (col.key === 'pb_html_link')      row[col.key] = entity.links?.html ?? '';
       else if (col.key.startsWith('custom__'))  row[col.key] = formatFieldValue(fields[col.id], col.schema);
       else                                      row[col.key] = '';
     }
