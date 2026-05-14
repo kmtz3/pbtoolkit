@@ -20,6 +20,12 @@ const { formatFieldValue } = require('../services/entities/exporter');
 const { schemaToType, normalizeSchema, EXCLUDED_FIELD_IDS } = require('../services/entities/configCache');
 const { formatCustomFieldValue, isMultiType } = require('../lib/fieldFormat');
 const { buildDomainToIdMap, buildIdToDomainMap } = require('../lib/domainCache');
+const {
+  fetchFieldValues,
+  createFieldValue,
+  collectCsvValues,
+  findMissingValues,
+} = require('../lib/fieldValues');
 
 const STANDARD_FIELD_IDS = new Set(['name', 'email', 'description', 'owner', 'archived']);
 
@@ -385,6 +391,38 @@ router.post('/import/preview', pbAuth, async (req, res) => {
     }
   });
 
+  // ── Field value validation ──────────────────────────────────────────────────
+  const selectFields = (mapping.customFields || []).filter(
+    (cf) => cf.fieldType === 'select' || cf.fieldType === 'multiselect' || cf.fieldType === 'tags'
+  );
+
+  if (selectFields.length > 0) {
+    const fieldValueResults = await Promise.allSettled(
+      selectFields.map((cf) => fetchFieldValues(cf.fieldId, pbFetch, withRetry))
+    );
+    selectFields.forEach((cf, idx) => {
+      if (fieldValueResults[idx].status !== 'fulfilled') return;
+      const knownValues = fieldValueResults[idx].value;
+      const isMulti = cf.fieldType === 'multiselect' || cf.fieldType === 'tags';
+      const csvValues = collectCsvValues(rows, cf.csvColumn, isMulti);
+      const missing = findMissingValues(csvValues, knownValues);
+      if (!missing.length) return;
+      const available = [...knownValues.values()].map((v) => v.name).sort();
+      if (options.autoCreateFieldValues) {
+        warnings.push({
+          field: cf.name || cf.csvColumn,
+          message: `New value(s) will be created for "${cf.name || cf.csvColumn}": ${missing.join(', ')}`,
+          isInfo: true,
+        });
+      } else {
+        warnings.push({
+          field: cf.name || cf.csvColumn,
+          message: `Unknown "${cf.name || cf.csvColumn}" value(s) — will be skipped: ${missing.join(', ')}. Available: ${available.join(', ')}`,
+        });
+      }
+    });
+  }
+
   res.json({
     valid: errors.length === 0,
     totalRows: rows.length,
@@ -403,10 +441,11 @@ router.post('/import/run', pbAuth, async (req, res) => {
   const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
   const { csvText, mapping, options = {} } = req.body;
   const {
-    multiSelectMode     = 'set',
-    bypassEmptyCells    = false,
-    bypassHtmlFormatter = false,
-    skipInvalidOwner    = false,
+    multiSelectMode       = 'set',
+    bypassEmptyCells      = false,
+    bypassHtmlFormatter   = false,
+    skipInvalidOwner      = false,
+    autoCreateFieldValues = false,
   } = options;
   if (!csvText || !mapping) return res.status(400).json({ error: 'Missing csvText or mapping' });
 
@@ -420,6 +459,40 @@ router.post('/import/run', pbAuth, async (req, res) => {
       sse.complete({ created: 0, updated: 0, errors: 0, total: 0, stopped: false });
       sse.done();
       return;
+    }
+
+    // ── Field value pre-flight ──────────────────────────────────────────────
+    const knownFieldValues = new Map(); // fieldId → Map<normalised_name, {id, name}>
+    const selectFields = (mapping.customFields || []).filter(
+      (cf) => cf.fieldType === 'select' || cf.fieldType === 'multiselect' || cf.fieldType === 'tags'
+    );
+
+    if (selectFields.length > 0) {
+      sse.progress('Fetching allowed field values…', 2);
+      await Promise.all(selectFields.map(async (cf) => {
+        try {
+          knownFieldValues.set(cf.fieldId, await fetchFieldValues(cf.fieldId, pbFetch, withRetry));
+        } catch (_) { /* non-fatal */ }
+      }));
+
+      if (autoCreateFieldValues) {
+        for (const cf of selectFields) {
+          const known = knownFieldValues.get(cf.fieldId);
+          if (!known) continue;
+          const isMulti = cf.fieldType === 'multiselect' || cf.fieldType === 'tags';
+          const csvValues = collectCsvValues(rows, cf.csvColumn, isMulti);
+          const missing = findMissingValues(csvValues, known);
+          for (const name of missing) {
+            try {
+              const created = await createFieldValue(cf.fieldId, name, pbFetch, withRetry);
+              known.set(name.toLowerCase().trim(), { id: created.id, name });
+              sse.log('info', `Created field value "${name}" for "${cf.name || cf.csvColumn}"`);
+            } catch (err) {
+              sse.log('warn', `Could not create field value "${name}": ${parseApiError(err)}`);
+            }
+          }
+        }
+      }
     }
 
     // Step 1: Build email → userId cache
@@ -489,7 +562,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
         if (pbId && UUID_RE.test(pbId)) {
           // UUID present → PATCH
           await withRetry(
-            () => patchUser(pbFetch, pbId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails }),
+            () => patchUser(pbFetch, pbId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails, knownFieldValues }),
             `patch user row ${rowNum}`
           );
           userId = pbId;
@@ -499,7 +572,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
           // Email match → PATCH
           const existingId = emailCache[email.toLowerCase()];
           await withRetry(
-            () => patchUser(pbFetch, existingId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails }),
+            () => patchUser(pbFetch, existingId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails, knownFieldValues }),
             `patch by email row ${rowNum}`
           );
           userId = existingId;
@@ -508,7 +581,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
         } else {
           // CREATE (without inline relationships — parent set separately below)
           const newUser = await withRetry(
-            () => createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmails),
+            () => createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmails, knownFieldValues),
             `create user row ${rowNum}`
           );
           userId = newUser.id;
@@ -554,10 +627,39 @@ router.post('/import/run', pbAuth, async (req, res) => {
 // Domain-to-ID cache extracted to src/lib/domainCache.js — shared with companies.js.
 
 /**
+ * Filter a custom field value against the allowed set when knownFieldValues is provided.
+ * For select: returns the formatted value if known, undefined if unknown (caller skips).
+ * For multiselect/tags: filters items to only known values; returns undefined if none remain.
+ * For non-select types: always returns the formatted value unchanged.
+ */
+function _filterSelectValue(rawVal, cf, knownFieldValues) {
+  const isSelect = cf.fieldType === 'select';
+  const isMulti  = cf.fieldType === 'multiselect' || cf.fieldType === 'tags';
+
+  if (!knownFieldValues || (!isSelect && !isMulti)) {
+    return formatCustomFieldValue(rawVal, cf.fieldType);
+  }
+
+  const known = knownFieldValues.get(cf.fieldId);
+  if (!known) return formatCustomFieldValue(rawVal, cf.fieldType); // no data — pass through
+
+  if (isSelect) {
+    const s = String(rawVal).trim();
+    return known.has(s.toLowerCase()) ? { name: s } : undefined;
+  }
+
+  // multiselect / tags — filter items
+  const parts = String(rawVal).split(',').map((x) => x.trim()).filter(Boolean);
+  const knownParts = parts.filter((p) => known.has(p.toLowerCase()));
+  if (!knownParts.length) return undefined;
+  return knownParts.map((n) => ({ name: n }));
+}
+
+/**
  * Create a new user via POST /v2/entities.
  * Note: `archived` is NOT included on create (API rejects it).
  */
-async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmails) {
+async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmails, knownFieldValues = null) {
   const fields = {};
 
   const name = cell(row, mapping.nameColumn)?.trim();
@@ -578,7 +680,8 @@ async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmai
   for (const cf of mapping.customFields || []) {
     const rawVal = cell(row, cf.csvColumn);
     if (rawVal !== '' && rawVal != null) {
-      fields[cf.fieldId] = formatCustomFieldValue(rawVal, cf.fieldType);
+      const filteredVal = _filterSelectValue(rawVal, cf, knownFieldValues);
+      if (filteredVal !== undefined) fields[cf.fieldId] = filteredVal;
     }
   }
 
@@ -591,7 +694,7 @@ async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmai
  * PATCH an existing user via PATCH /v2/entities/{id}.
  */
 async function patchUser(pbFetch, userId, row, mapping, options) {
-  const { multiSelectMode = 'set', bypassEmptyCells = false, bypassHtmlFormatter = false, memberEmails = new Set() } = options || {};
+  const { multiSelectMode = 'set', bypassEmptyCells = false, bypassHtmlFormatter = false, memberEmails = new Set(), knownFieldValues = null } = options || {};
   const ops = [];
 
   const name = cell(row, mapping.nameColumn)?.trim();
@@ -625,9 +728,10 @@ async function patchUser(pbFetch, userId, row, mapping, options) {
     const rawVal = cell(row, cf.csvColumn);
     const isEmpty = rawVal === '' || rawVal == null;
     if (!isEmpty) {
-      const value = formatCustomFieldValue(rawVal, cf.fieldType);
+      const filteredVal = _filterSelectValue(rawVal, cf, knownFieldValues);
+      if (filteredVal === undefined) continue; // entirely unknown — skip
       const opName = isMultiType(cf.fieldType) ? multiSelectMode : 'set';
-      ops.push({ op: opName, path: cf.fieldId, value });
+      ops.push({ op: opName, path: cf.fieldId, value: filteredVal });
     } else if (!bypassEmptyCells) {
       ops.push({ op: 'clear', path: cf.fieldId });
     }

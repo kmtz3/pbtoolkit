@@ -426,7 +426,7 @@ async function buildMigrationCache(pbFetch, withRetry, fieldName = 'original_uui
   for (const type of types) {
     const entities = await fetchAllEntitiesPost(
       pbFetch, withRetry,
-      { data: { types: [type] } },
+      { data: { filter: { type: [type] } } },
       `fetch ${type} for migration cache`
     );
     for (const entity of entities) {

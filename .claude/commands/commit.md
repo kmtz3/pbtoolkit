@@ -64,8 +64,6 @@ git commit -m "$(cat <<'EOF'
 <type>: <description>
 
 Bumps version to X.Y.Z.
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -74,8 +72,6 @@ On `main` (no version bump), use a plain merge message:
 ```bash
 git commit -m "$(cat <<'EOF'
 <type>: <description>
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
 )"
 ```

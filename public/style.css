@@ -985,6 +985,7 @@ input:focus, select:focus, textarea:focus {
 .text-sm  { font-size: 13px; }
 .text-muted { color: var(--c-muted); }
 .text-danger { color: var(--c-danger); }
+.text-info   { color: var(--c-info); }
 .text-ok    { color: var(--c-ok); }
 .font-mono { font-family: ui-monospace, monospace; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

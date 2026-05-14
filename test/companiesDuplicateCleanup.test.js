@@ -93,7 +93,9 @@ before(async () => {
       const method  = req.method;
       const fullUrl = req.url;
       const path    = fullUrl.split('?')[0];
-      mockCalls.push({ method, path, url: fullUrl });
+      let parsedBody = null;
+      if (body) { try { parsedBody = JSON.parse(body); } catch {} }
+      mockCalls.push({ method, path, url: fullUrl, body: parsedBody });
 
       // v2 company list  (GET /v2/entities?type[]=company...)
       if (method === 'GET' && path === '/v2/entities') {
@@ -113,7 +115,9 @@ before(async () => {
       if (method === 'POST' && path === '/v2/notes/search') {
         let parsed = {};
         try { parsed = JSON.parse(body); } catch {}
-        const ids   = parsed.data?.relationships?.customer?.ids || [];
+        const filterIds = (parsed.data?.filter?.relationships?.customer || []).map(c => c.id);
+        const legacyIds = parsed.data?.relationships?.customer?.ids || [];
+        const ids   = filterIds.length ? filterIds : legacyIds;
         const notes = (mockState.notesByCompany || {})[ids[0]] || [];
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ data: notes, links: { next: null } }));
@@ -152,6 +156,53 @@ before(async () => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ data: {} }));
         }
+        return;
+      }
+
+      // list relationships  (GET /v2/entities/{id}/relationships)
+      // Returns whatever the test seeded via mockState.relationshipsByCompany[companyId];
+      // defaults to an empty list so non-relationship tests don't need to opt in.
+      if (method === 'GET' && /\/v2\/entities\/[^/]+\/relationships(\?.*)?$/.test(path)) {
+        const id = path.split('/v2/entities/')[1].split('/')[0];
+        const rels = (mockState.relationshipsByCompany || {})[id] || [];
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: rels, links: { next: null } }));
+        return;
+      }
+
+      // create relationship  (POST /v2/entities/{id}/relationships) — entity relink to target
+      if (method === 'POST' && /\/v2\/entities\/[^/]+\/relationships$/.test(path)) {
+        if (mockState.entityRelinkError) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ errors: [{ detail: 'entity relink failed' }] }));
+        } else {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ data: {} }));
+        }
+        return;
+      }
+
+      // delete relationship  (DELETE /v2/entities/{id}/relationships/{type}/{targetId})
+      // Used by keep/archive mode to remove stale links from the duplicate.
+      if (method === 'DELETE' && /\/v2\/entities\/[^/]+\/relationships\/[^/]+\/[^/]+$/.test(path)) {
+        res.writeHead(204); res.end();
+        return;
+      }
+
+      // single-entity GET  (GET /v2/entities/{id}) — used to fetch current name for rename
+      if (method === 'GET' && path.startsWith('/v2/entities/') && !path.includes('/relationships/')) {
+        const id = path.split('/').pop();
+        const entity = (mockState.entityById || {})[id]
+          || { id, type: 'company', fields: { name: `Co-${id.slice(0, 4)}` } };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: entity }));
+        return;
+      }
+
+      // entity PATCH  (PATCH /v2/entities/{id}) — used to rename kept duplicates
+      if (method === 'PATCH' && path.startsWith('/v2/entities/')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: {} }));
         return;
       }
 
@@ -519,7 +570,11 @@ test('run: relinks note with user customer via user parent relationship', async 
     });
 
   const complete = parseCompleteEvent(res.text);
-  assert.equal(complete.notesRelinked, 0, 'User-type customer does not count as a relinked note');
+  // The user-customer flow now also re-PUTs the note's customer (same user)
+  // to force PB to re-derive the note's denormalized company link — without
+  // this, notes stay attributed to the old company in the UI even after the
+  // user's parent moves. So a user-customer note counts as one note relink.
+  assert.equal(complete.notesRelinked, 1, 'note customer is refreshed to force re-derivation');
   assert.equal(complete.usersRelinked, 1);
   assert.equal(complete.deleted, 1);
   assert.equal(complete.errors,  0);
@@ -528,6 +583,11 @@ test('run: relinks note with user customer via user parent relationship', async 
     c => c.method === 'PUT' && c.path === `/v2/entities/${USER_ID}/relationships/parent`
   );
   assert.ok(relinkedUser, 'Should PUT user parent relink');
+
+  const refreshedNote = mockCalls.find(
+    c => c.method === 'PUT' && c.path === `/v2/notes/${NOTE_ID}/relationships/customer`
+  );
+  assert.ok(refreshedNote, 'Should also PUT note customer to refresh attribution');
 });
 
 test('run: relinks users directly parented to duplicate via entities/search (Step 3)', async () => {
@@ -813,4 +873,146 @@ test('run: no-domain (name-only) record — completes successfully with empty do
 
   const deleted = mockCalls.find(c => c.method === 'DELETE' && c.path === `/v2/entities/${HB_ID}`);
   assert.ok(deleted, 'Should DELETE the duplicate company');
+});
+
+// ── POST /run — keepDuplicates + renamePrefix ─────────────────────────────────
+
+test('run: keepDuplicates=true skips DELETE and counts as kept', async () => {
+  reset({
+    notesByCompany: {
+      [HB_ID]: [noteWithCustomer(NOTE_ID, 'company', HB_ID)],
+    },
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/run')
+    .set('x-pb-token', 'token-run-keep')
+    .send({
+      keepDuplicates: true,
+      domainRecords: [{
+        domain:     'acme.com',
+        primaryId:  PRIMARY_ID,
+        duplicates: [{ id: HB_ID }],
+      }],
+    });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.ok(complete, 'Should emit complete event');
+  assert.equal(complete.notesRelinked, 1);
+  assert.equal(complete.deleted,  0, 'No DELETE when keepDuplicates=true');
+  assert.equal(complete.kept,     1, 'Should count duplicate as kept');
+  assert.equal(complete.archived, 0, 'No archive without archiveDuplicates');
+  assert.equal(complete.errors,   0);
+
+  const deleteCalls = mockCalls.filter(c => c.method === 'DELETE' && c.path.startsWith('/v2/entities/'));
+  assert.equal(deleteCalls.length, 0, 'No DELETE issued for kept duplicate');
+
+  const patchCalls = mockCalls.filter(c => c.method === 'PATCH' && c.path === `/v2/entities/${HB_ID}`);
+  assert.equal(patchCalls.length, 0, 'No PATCH without archiveDuplicates');
+
+  const entry = complete.actionLog.find(e => e.duplicateCompanyId === HB_ID);
+  assert.ok(entry, 'actionLog entry exists');
+  assert.equal(entry.kept,     true);
+  assert.equal(entry.archived, false);
+  assert.equal(entry.deleted,  false);
+});
+
+test('run: keepDuplicates=true with archiveDuplicates issues PATCH to set archived=true', async () => {
+  reset({
+    notesByCompany: {
+      [HB_ID]: [noteWithCustomer(NOTE_ID, 'company', HB_ID)],
+    },
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/run')
+    .set('x-pb-token', 'token-run-keep-archive')
+    .send({
+      keepDuplicates:    true,
+      archiveDuplicates: true,
+      domainRecords: [{
+        domain:     'acme.com',
+        primaryId:  PRIMARY_ID,
+        duplicates: [{ id: HB_ID }],
+      }],
+    });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.ok(complete, 'Should emit complete event');
+  assert.equal(complete.deleted,  0);
+  assert.equal(complete.kept,     1);
+  assert.equal(complete.archived, 1);
+  assert.equal(complete.errors,   0);
+
+  const patchCalls = mockCalls.filter(c => c.method === 'PATCH' && c.path === `/v2/entities/${HB_ID}`);
+  assert.equal(patchCalls.length, 1, 'Should PATCH the duplicate once to archive');
+
+  const patchOp = patchCalls[0].body?.data?.patch?.[0];
+  assert.ok(patchOp, 'PATCH body should contain a patch op');
+  assert.equal(patchOp.op,    'set');
+  assert.equal(patchOp.path,  'archived');
+  assert.equal(patchOp.value, true);
+
+  const entry = complete.actionLog.find(e => e.duplicateCompanyId === HB_ID);
+  assert.equal(entry.kept,     true);
+  assert.equal(entry.archived, true);
+});
+
+test('run: archiveDuplicates without keepDuplicates is ignored (DELETE wins)', async () => {
+  // Defensive: archive flag only takes effect when the duplicate is being kept.
+  reset({
+    notesByCompany: {
+      [HB_ID]: [noteWithCustomer(NOTE_ID, 'company', HB_ID)],
+    },
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/run')
+    .set('x-pb-token', 'token-run-archive-only')
+    .send({
+      archiveDuplicates: true,   // without keepDuplicates
+      domainRecords: [{
+        domain:     'acme.com',
+        primaryId:  PRIMARY_ID,
+        duplicates: [{ id: HB_ID }],
+      }],
+    });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.deleted,  1, 'DELETE still wins when keepDuplicates is false');
+  assert.equal(complete.kept,     0);
+  assert.equal(complete.archived, 0);
+
+  const patchCalls = mockCalls.filter(c => c.method === 'PATCH' && c.path === `/v2/entities/${HB_ID}`);
+  assert.equal(patchCalls.length, 0, 'No archive PATCH without keepDuplicates');
+});
+
+test('run: keepDuplicates=true does not archive when relinks failed', async () => {
+  reset({
+    notesByCompany: {
+      [HB_ID]: [noteWithCustomer(NOTE_ID, 'company', HB_ID)],
+    },
+    relinkError: true,
+  });
+
+  const res = await request(app)
+    .post('/api/companies-duplicate-cleanup/run')
+    .set('x-pb-token', 'token-run-keep-relink-fail')
+    .send({
+      keepDuplicates:    true,
+      archiveDuplicates: true,
+      domainRecords: [{
+        domain:     'acme.com',
+        primaryId:  PRIMARY_ID,
+        duplicates: [{ id: HB_ID }],
+      }],
+    });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.errors,   1);
+  assert.equal(complete.kept,     0, 'Failed relinks should not count as kept');
+  assert.equal(complete.archived, 0);
+
+  const patchCalls = mockCalls.filter(c => c.method === 'PATCH' && c.path === `/v2/entities/${HB_ID}`);
+  assert.equal(patchCalls.length, 0, 'No archive PATCH when relink failed');
 });

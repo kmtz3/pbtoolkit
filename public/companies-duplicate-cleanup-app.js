@@ -14,6 +14,7 @@
   let _runCtrl         = null;  // AbortController for run SSE
   let _auditLog        = null;  // cumulative action log across all run segments
   let _pendingRun      = null;  // original toProcess list for current run (enables continue)
+  let _pendingRunOpts  = null;  // { keepDuplicates, renamePrefix } captured at run start
   let _logAppender     = null;
   let _fromRun         = false; // true if last error came from /run (enables back-to-preview)
   let _originsLoaded   = false;
@@ -44,16 +45,22 @@
     _groupCardEls    = new Map();
     _auditLog        = null;
     _pendingRun      = null;
+    _pendingRunOpts  = null;
     _fromRun         = false;
     _originsLoaded   = false;
     _originsLoading  = false;
     if (_logAppender) _logAppender.reset();
     dcHide('dc-results-download-log');
+    dcHide('dc-download-survivors');
     dcHide('dc-error-download-log');
     closeCompareModal();
     dcGo('idle');
     const gate = dc$('dc-gate-checkbox');
     if (gate) gate.checked = false;
+    const keepCb    = dc$('dc-keep-checkbox');    if (keepCb)    keepCb.checked    = false;
+    const archiveCb = dc$('dc-archive-checkbox'); if (archiveCb) archiveCb.checked = false;
+    const archiveLabel = dc$('dc-archive-label');
+    if (archiveLabel) { archiveLabel.style.opacity = '0.4'; archiveLabel.style.pointerEvents = 'none'; }
     unlockScanConfig(false);
   }
 
@@ -173,9 +180,11 @@
         const matchLabel = matchCriteria
           ? ` · ${matchCriteria}${fuzzyMatch ? ' (fuzzy)' : ''} match`
           : '';
+        const opts = readMergeOptions();
+        const fate = opts.keepDuplicates ? 'to keep' : 'to delete';
         summaryText.textContent =
           `${totalDomains} group${totalDomains !== 1 ? 's' : ''} · ` +
-          `${totalDuplicates} duplicate compan${totalDuplicates !== 1 ? 'ies' : 'y'} to delete` +
+          `${totalDuplicates} duplicate compan${totalDuplicates !== 1 ? 'ies' : 'y'} ${fate}` +
           (isManual ? ' · manual target selection' : '') +
           matchLabel +
           (skippedRows.length ? ` · ${skippedRows.length} skipped` : '');
@@ -183,6 +192,7 @@
         summaryText.textContent = `No duplicate groups found.${skippedRows.length ? ` ${skippedRows.length} domain(s) skipped.` : ''}`;
       }
     }
+    renderPreviewMode();
 
     if (totalDomains === 0) {
       dcShow('dc-no-duplicates');
@@ -243,8 +253,9 @@
           domain:         dr.primaryDomain || null,
           sourceOrigin:   dr.primaryOrigin || null,
           sourceRecordId: dr.primarySourceRecordId || null,
-          notesCount:     dr.primaryNotesCount ?? null,
-          usersCount:     dr.primaryUsersCount ?? null,
+          notesCount:     dr.primaryNotesCount    ?? null,
+          usersCount:     dr.primaryUsersCount    ?? null,
+          entitiesCount:  dr.primaryEntitiesCount ?? null,
         },
         ...(dr.duplicates || []),
       ];
@@ -289,14 +300,15 @@
     groupLabel.className = 'nm-group-label';
     groupLabel.textContent = `Group ${di + 1}`;
 
-    const totalNotes = duplicates.reduce((n, d) => n + (d.notesCount ?? 0), 0);
-    const totalUsers = duplicates.reduce((n, d) => n + (d.usersCount ?? 0), 0);
+    const totalNotes    = duplicates.reduce((n, d) => n + (d.notesCount    ?? 0), 0);
+    const totalUsers    = duplicates.reduce((n, d) => n + (d.usersCount    ?? 0), 0);
+    const totalEntities = duplicates.reduce((n, d) => n + (d.entitiesCount ?? 0), 0);
     const hasCounts  = dr.allCompanies.some(c => c.notesCount != null);
 
     const countLabel = document.createElement('span');
     countLabel.className = 'nm-group-count';
     let countText = `${total} compan${total !== 1 ? 'ies' : 'y'} · ${duplicates.length} to delete`;
-    if (hasCounts) countText += ` (${totalNotes} note${totalNotes !== 1 ? 's' : ''} + ${totalUsers} user${totalUsers !== 1 ? 's' : ''} to move)`;
+    if (hasCounts) countText += ` (${totalNotes} note${totalNotes !== 1 ? 's' : ''} + ${totalUsers} user${totalUsers !== 1 ? 's' : ''} + ${totalEntities} entit${totalEntities !== 1 ? 'ies' : 'y'} to relink)`;
     countLabel.textContent = countText;
 
     const domainLabel = document.createElement('span');
@@ -331,7 +343,7 @@
           <th>Domain</th>
           <th>UUID</th>
           <th>Source</th>
-          ${hasCounts ? '<th style="text-align:right;width:60px;">Notes</th><th style="text-align:right;width:60px;">Users</th>' : ''}
+          ${hasCounts ? '<th style="text-align:right;width:60px;">Notes</th><th style="text-align:right;width:60px;">Users</th><th style="text-align:right;width:72px;" title="Linked entities (features, components, etc.) attached to this company that will be relinked to the target.">Entities</th>' : ''}
           ${isManual  ? '<th style="width:110px;"></th>' : ''}
         </tr>
       </thead>
@@ -340,10 +352,12 @@
 
     // Pre-compute totals incoming to target from all duplicates (non-manual auto mode display)
     const dupCompanies   = dr.allCompanies.filter(c => c.id !== dr.primaryId);
-    const incomingNotes  = dupCompanies.every(d => d.notesCount != null)
+    const incomingNotes    = dupCompanies.every(d => d.notesCount != null)
       ? dupCompanies.reduce((n, d) => n + d.notesCount, 0) : null;
-    const incomingUsers  = dupCompanies.every(d => d.usersCount != null)
+    const incomingUsers    = dupCompanies.every(d => d.usersCount != null)
       ? dupCompanies.reduce((n, d) => n + (d.usersCount ?? 0), 0) : null;
+    const incomingEntities = dupCompanies.every(d => d.entitiesCount != null)
+      ? dupCompanies.reduce((n, d) => n + (d.entitiesCount ?? 0), 0) : null;
 
     // All companies in stable original order — badge reflects current target
     for (const c of dr.allCompanies) {
@@ -353,7 +367,7 @@
       const badge    = isTarget
         ? `<span class="badge badge-ok" style="font-size:10px;">Target</span>`
         : `<span class="badge badge-danger" style="font-size:10px;">Delete</span>`;
-      let noteCell, userCell;
+      let noteCell, userCell, entCell;
       if (isTarget && !isManual) {
         noteCell = incomingNotes != null
           ? `<td style="text-align:right;font-size:12px;color:var(--c-ok,#22c55e);font-weight:600;">+${incomingNotes}</td>`
@@ -361,19 +375,28 @@
         userCell = incomingUsers != null
           ? `<td style="text-align:right;font-size:12px;color:var(--c-ok,#22c55e);font-weight:600;">+${incomingUsers}</td>`
           : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+        entCell  = incomingEntities != null
+          ? `<td style="text-align:right;font-size:12px;color:var(--c-ok,#22c55e);font-weight:600;">+${incomingEntities}</td>`
+          : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
       } else if (isTarget && isManual) {
         const inNoteTag = incomingNotes != null && incomingNotes > 0
           ? `<span style="color:var(--c-ok,#22c55e);font-weight:600;margin-left:4px;">(+${incomingNotes})</span>` : '';
         const inUserTag = incomingUsers != null && incomingUsers > 0
           ? `<span style="color:var(--c-ok,#22c55e);font-weight:600;margin-left:4px;">(+${incomingUsers})</span>` : '';
-        noteCell = `<td style="text-align:right;font-size:12px;">${c.notesCount != null ? c.notesCount : '—'}${inNoteTag}</td>`;
-        userCell = `<td style="text-align:right;font-size:12px;">${c.usersCount != null ? c.usersCount : '—'}${inUserTag}</td>`;
+        const inEntTag  = incomingEntities != null && incomingEntities > 0
+          ? `<span style="color:var(--c-ok,#22c55e);font-weight:600;margin-left:4px;">(+${incomingEntities})</span>` : '';
+        noteCell = `<td style="text-align:right;font-size:12px;">${c.notesCount    != null ? c.notesCount    : '—'}${inNoteTag}</td>`;
+        userCell = `<td style="text-align:right;font-size:12px;">${c.usersCount    != null ? c.usersCount    : '—'}${inUserTag}</td>`;
+        entCell  = `<td style="text-align:right;font-size:12px;">${c.entitiesCount != null ? c.entitiesCount : '—'}${inEntTag}</td>`;
       } else {
         noteCell = c.notesCount != null
           ? `<td style="text-align:right;font-size:12px;">${c.notesCount}</td>`
           : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
         userCell = c.usersCount != null
           ? `<td style="text-align:right;font-size:12px;">${c.usersCount}</td>`
+          : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+        entCell  = c.entitiesCount != null
+          ? `<td style="text-align:right;font-size:12px;">${c.entitiesCount}</td>`
           : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
       }
       tr.innerHTML = `
@@ -382,7 +405,7 @@
         <td style="font-size:12px;color:var(--c-muted);">${esc(c.domain || '—')}</td>
         <td style="font-family:monospace;font-size:11px;color:var(--c-muted);">${esc(c.id.slice(0, 18))}…</td>
         <td style="font-size:12px;">${esc(c.sourceOrigin || '—')}</td>
-        ${hasCounts ? noteCell + userCell : ''}
+        ${hasCounts ? noteCell + userCell + entCell : ''}
         ${isManual  ? '<td></td>' : ''}
       `;
       if (isManual) {
@@ -503,11 +526,15 @@
     // hasCounts: true if counts were ever fetched for this group (check allCompanies, not just current dups)
     const hasCounts   = dr.allCompanies.some(c => c.notesCount != null);
     const knownDups   = dups.filter(d => d.notesCount != null);
-    const totalNotes  = knownDups.reduce((n, d) => n + d.notesCount, 0);
-    const totalUsers  = knownDups.reduce((n, d) => n + (d.usersCount ?? 0), 0);
+    const totalNotes    = knownDups.reduce((n, d) => n + d.notesCount, 0);
+    const totalUsers    = knownDups.reduce((n, d) => n + (d.usersCount    ?? 0), 0);
+    const totalEntities = knownDups.reduce((n, d) => n + (d.entitiesCount ?? 0), 0);
     // If no current dups have known counts (e.g. all were swapped to target), show null (→ "—") not 0
     const targetWithCounts = hasCounts
-      ? { ...target, notesCount: knownDups.length > 0 ? totalNotes : null, usersCount: knownDups.length > 0 ? totalUsers : null }
+      ? { ...target,
+          notesCount:    knownDups.length > 0 ? totalNotes    : null,
+          usersCount:    knownDups.length > 0 ? totalUsers    : null,
+          entitiesCount: knownDups.length > 0 ? totalEntities : null }
       : target;
 
     const leftEl = dc$('dc-split-left');
@@ -526,19 +553,24 @@
   }
 
   function renderCompanyCard(c, roleLabel, isTarget = false, hasCounts = false) {
-    const noteLabel = isTarget ? 'Notes incoming (total)' : 'Notes to move';
-    const userLabel = isTarget ? 'Users incoming (total)' : 'Users to move';
-    const showSection = hasCounts || c.notesCount != null || c.usersCount != null;
+    const noteLabel = isTarget ? 'Notes incoming (total)'    : 'Notes to move';
+    const userLabel = isTarget ? 'Users incoming (total)'    : 'Users to move';
+    const entLabel  = isTarget ? 'Entities incoming (total)' : 'Entities to relink';
+    const showSection = hasCounts || c.notesCount != null || c.usersCount != null || c.entitiesCount != null;
     const noteVal = c.notesCount != null
       ? (isTarget && c.notesCount > 0 ? `<span style="color:var(--c-ok,#22c55e);">+${c.notesCount}</span>` : c.notesCount)
       : '—';
     const userVal = c.usersCount != null
       ? (isTarget && c.usersCount > 0 ? `<span style="color:var(--c-ok,#22c55e);">+${c.usersCount}</span>` : c.usersCount)
       : '—';
+    const entVal  = c.entitiesCount != null
+      ? (isTarget && c.entitiesCount > 0 ? `<span style="color:var(--c-ok,#22c55e);">+${c.entitiesCount}</span>` : c.entitiesCount)
+      : '—';
     const countRows = showSection ? `
       <div style="display:flex;gap:24px;margin-top:16px;padding-top:14px;border-top:1px solid var(--c-border);">
         <div><div style="font-size:11px;color:var(--c-muted);margin-bottom:2px;">${noteLabel}</div><div style="font-size:22px;font-weight:600;line-height:1;">${noteVal}</div></div>
         <div><div style="font-size:11px;color:var(--c-muted);margin-bottom:2px;">${userLabel}</div><div style="font-size:22px;font-weight:600;line-height:1;">${userVal}</div></div>
+        <div><div style="font-size:11px;color:var(--c-muted);margin-bottom:2px;">${entLabel}</div><div style="font-size:22px;font-weight:600;line-height:1;">${entVal}</div></div>
       </div>` : '';
     return `
       <div style="font-size:10px;font-weight:700;color:${isTarget ? 'var(--c-ok,#22c55e)' : 'var(--c-danger,#ef4444)'};letter-spacing:.06em;margin-bottom:10px;">${esc(roleLabel)}</div>
@@ -593,8 +625,8 @@
         ? `Merge & delete selected (${_selectedDomains.size})`
         : 'Merge & delete duplicates';
     }
-    if (anySelected) { dcShow('dc-unselect-all'); dcShow('dc-invert-selection'); }
-    else             { dcHide('dc-unselect-all'); dcHide('dc-invert-selection'); }
+    // Selection toolbar buttons stay visible at all times so the user can use
+    // "Select all" without needing to tick a row first.
   }
 
   // ── Merge confirmation wrappers ────────────────────────────
@@ -605,17 +637,28 @@
     const intro    = _selectedDomains.size > 0
       ? `Merge ${records.length} selected group(s)?`
       : `Merge all ${records.length} group(s)?`;
+    const opts = readMergeOptions();
+    const actionSuffix = opts.keepDuplicates
+      ? (opts.archiveDuplicates ? 'kept (and archived)' : 'kept (not deleted)')
+      : `permanently deleted`;
+    const tail = opts.keepDuplicates
+      ? `\n\nDuplicate compan${dupCount !== 1 ? 'ies' : 'y'} will not be deleted — you can review and clean up later using the surviving-UUIDs CSV.`
+      : `\n\nThis cannot be undone. Export your companies data from Companies → Export first if you need a backup.`;
     showConfirm(
-      `${intro}\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to their target company, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone. Export your companies data from Companies → Export first if you need a backup.`,
-      { confirmText: 'Merge & delete', danger: true }
+      `${intro}\n\nNotes, users, and linked entities from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to their target company, then the duplicate${dupCount !== 1 ? 's' : ''} will be ${actionSuffix}.${tail}`,
+      { confirmText: opts.keepDuplicates ? 'Merge & keep' : 'Merge & delete', danger: !opts.keepDuplicates }
     ).then((confirmed) => { if (confirmed) runMerge(records); });
   }
 
   function startSingleGroupMerge(dr, groupNum) {
     const dupCount = dr.duplicates?.length ?? 0;
+    const opts = readMergeOptions();
+    const actionSuffix = opts.keepDuplicates
+      ? (opts.archiveDuplicates ? 'kept (and archived)' : 'kept (not deleted)')
+      : `permanently deleted`;
     showConfirm(
-      `Merge group ${groupNum} (${dr.domain || dr.matchName || 'no domain'})?\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${dr.primaryName || dr.primaryId}, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone.`,
-      { confirmText: 'Merge this group', danger: true }
+      `Merge group ${groupNum} (${dr.domain || dr.matchName || 'no domain'})?\n\nNotes, users, and linked entities from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${dr.primaryName || dr.primaryId}, then the duplicate${dupCount !== 1 ? 's' : ''} will be ${actionSuffix}.${opts.keepDuplicates ? '' : '\n\nThis cannot be undone.'}`,
+      { confirmText: 'Merge this group', danger: !opts.keepDuplicates }
     ).then((confirmed) => { if (confirmed) runMerge([dr]); });
   }
 
@@ -625,7 +668,10 @@
     const toProcess = records ?? (_selectedDomains.size > 0 ? [..._selectedDomains] : _previewData?.domainRecords ?? []);
     if (!toProcess.length) return;
 
-    if (!isContinuation) _pendingRun = toProcess;
+    if (!isContinuation) {
+      _pendingRun     = toProcess;
+      _pendingRunOpts = readMergeOptions();
+    }
 
     _fromRun = true;
     dcGo('running');
@@ -637,7 +683,7 @@
 
     _runCtrl = subscribeSSE(
       '/api/companies-duplicate-cleanup/run',
-      { domainRecords: toProcess },
+      { domainRecords: toProcess, ...(_pendingRunOpts || {}) },
       {
         onProgress({ message, percent }) { setProgress('dc-run', message, percent ?? 0); },
         onLog(entry) { if (_logAppender) _logAppender(entry); },
@@ -668,6 +714,7 @@
   // ── Continue a stopped run with remaining unprocessed dups ─
   function continueRun() {
     if (!_pendingRun || !_auditLog) return;
+    // Continue with the same options as the original run so kept/rename behavior is consistent.
     const processedDupIds = new Set(_auditLog.map(e => e.duplicateCompanyId));
     const remaining = _pendingRun
       .map(dr => ({ ...dr, duplicates: (dr.duplicates || []).filter(d => !processedDupIds.has(d.id)) }))
@@ -681,22 +728,26 @@
   // "Back to preview" after a stopped run doesn't re-show already-deleted companies.
   function pruneCompletedFromPreview() {
     if (!_previewData || !_auditLog?.length) return;
-    const deletedIds = new Set(_auditLog.filter(e => e.deleted).map(e => e.duplicateCompanyId));
-    if (!deletedIds.size) return;
+    // "Done" = deleted OR successfully kept (no error). Both kinds are processed and
+    // should not reappear on "Back to preview".
+    const doneIds = new Set(
+      _auditLog.filter(e => e.deleted || (e.kept && !e.error)).map(e => e.duplicateCompanyId)
+    );
+    if (!doneIds.size) return;
 
     const kept = [];
     for (const dr of _previewData.domainRecords) {
-      const remainingDups = (dr.duplicates || []).filter(d => !deletedIds.has(d.id));
+      const remainingDups = (dr.duplicates || []).filter(d => !doneIds.has(d.id));
       if (remainingDups.length === 0) {
-        // Every dup in this group was successfully deleted — drop it entirely
+        // Every dup in this group was successfully processed — drop it entirely
         _selectedDomains.delete(dr);
         continue;
       }
-      // Some dups deleted — trim in-place to preserve object reference for _selectedDomains
+      // Some dups done — trim in-place to preserve object reference for _selectedDomains
       if (remainingDups.length !== (dr.duplicates || []).length) {
         dr.duplicates = remainingDups;
         if (dr.allCompanies) {
-          dr.allCompanies = dr.allCompanies.filter(c => c.id === dr.primaryId || !deletedIds.has(c.id));
+          dr.allCompanies = dr.allCompanies.filter(c => c.id === dr.primaryId || !doneIds.has(c.id));
         }
       }
       kept.push(dr);
@@ -709,7 +760,7 @@
 
   // ── Render results summary ─────────────────────────────────
   function renderResults(data) {
-    const { notesRelinked = 0, usersRelinked = 0, deleted = 0, errors = 0, stopped = false } = data;
+    const { notesRelinked = 0, usersRelinked = 0, entitiesRelinked = 0, deleted = 0, kept = 0, archived = 0, errors = 0, stopped = false } = data;
     const summaryEl = dc$('dc-results-summary');
     if (!summaryEl) return;
 
@@ -728,9 +779,12 @@
     const status     = stopped ? 'Merge stopped' : 'Merge complete';
 
     const parts = [];
-    if (notesRelinked) parts.push(`${notesRelinked} note${notesRelinked !== 1 ? 's' : ''} relinked`);
-    if (usersRelinked) parts.push(`${usersRelinked} user${usersRelinked !== 1 ? 's' : ''} updated`);
+    if (notesRelinked)    parts.push(`${notesRelinked} note${notesRelinked !== 1 ? 's' : ''} relinked`);
+    if (usersRelinked)    parts.push(`${usersRelinked} user${usersRelinked !== 1 ? 's' : ''} updated`);
+    if (entitiesRelinked) parts.push(`${entitiesRelinked} entit${entitiesRelinked !== 1 ? 'ies' : 'y'} relinked`);
     if (deleted)       parts.push(`${deleted} compan${deleted !== 1 ? 'ies' : 'y'} deleted`);
+    if (kept)          parts.push(`${kept} compan${kept !== 1 ? 'ies' : 'y'} kept`);
+    if (archived)      parts.push(`${archived} archived`);
     if (errors)        parts.push(`${errors} error${errors !== 1 ? 's' : ''}`);
     if (remainingCount) parts.push(`${remainingCount} left undone`);
 
@@ -744,10 +798,16 @@
     if (stopped && remainingCount > 0) dcShow('dc-continue-run');
     else dcHide('dc-continue-run');
 
-    // Hide "Back to preview" if no groups remain after this run (all merged/deleted)
-    const deletedIds = new Set((_auditLog || []).filter(e => e.deleted).map(e => e.duplicateCompanyId));
+    // Show survivors CSV button when any duplicate was not deleted
+    if (survivorIdsFromAudit(_auditLog).length > 0) dcShow('dc-download-survivors');
+    else dcHide('dc-download-survivors');
+
+    // Hide "Back to preview" if no groups remain after this run (all processed: deleted or kept)
+    const doneIds = new Set(
+      (_auditLog || []).filter(e => e.deleted || (e.kept && !e.error)).map(e => e.duplicateCompanyId)
+    );
     const remainingGroups = (_previewData?.domainRecords || []).filter(dr =>
-      (dr.duplicates || []).some(d => !deletedIds.has(d.id))
+      (dr.duplicates || []).some(d => !doneIds.has(d.id))
     ).length;
     if (remainingGroups > 0) dcShow('dc-back-to-preview');
     else dcHide('dc-back-to-preview');
@@ -775,6 +835,44 @@
     );
   }
 
+  // Read keep/archive options from the merge-mode controls on the scan page.
+  function readMergeOptions() {
+    const keep    = dc$('dc-keep-checkbox')?.checked === true;
+    const archive = keep && dc$('dc-archive-checkbox')?.checked === true;
+    return { keepDuplicates: keep, archiveDuplicates: archive };
+  }
+
+  // Renders the "Mode:" line on the preview banner. Applies to bulk and one-by-one merges alike.
+  function renderPreviewMode() {
+    const el = dc$('dc-preview-mode-text');
+    if (!el) return;
+    const opts = readMergeOptions();
+    const label = opts.keepDuplicates
+      ? (opts.archiveDuplicates
+        ? 'Mode: Keep duplicates · archive them after relink'
+        : 'Mode: Keep duplicates · do not delete after relink')
+      : 'Mode: Delete duplicates after relink';
+    el.textContent = `${label} — applies to every merge below (bulk and one-by-one). Change it back on the scan page.`;
+  }
+
+  // Survivor = duplicate that was not deleted (kept on purpose, or relink failed, or stopped).
+  function survivorIdsFromAudit(audit) {
+    return (audit || [])
+      .filter(e => e && e.duplicateCompanyId && !e.deleted)
+      .map(e => e.duplicateCompanyId);
+  }
+
+  function downloadSurvivorsCsv() {
+    const ids = survivorIdsFromAudit(_auditLog);
+    if (!ids.length) return;
+    const csv = 'pb_id\n' + ids.join('\n') + '\n';
+    const date = new Date().toISOString().slice(0, 10);
+    triggerDownload(
+      new Blob([csv], { type: 'text/csv;charset=utf-8;' }),
+      `companies-duplicate-survivors-${date}.csv`
+    );
+  }
+
   // ==========================================================
   // ── MERGE FROM CSV submodule (prefix: dcm) ──────────────
   // ==========================================================
@@ -790,6 +888,7 @@
   let _dcmLogAppender  = null;
   let _dcmAuditLog     = null;
   let _dcmPendingRun   = null;
+  let _dcmPendingRunOpts = null;
   let _dcmSelectedDomains = new Set();
   let _dcmGroupCardEls    = new Map();  // domainRecord → { el, di }
   let _dcmFromRun      = false;
@@ -814,6 +913,7 @@
     _dcmSkippedGroups   = [];
     _dcmAuditLog        = null;
     _dcmPendingRun      = null;
+    _dcmPendingRunOpts  = null;
     _dcmSelectedDomains = new Set();
     _dcmGroupCardEls    = new Map();
     _dcmFromRun         = false;
@@ -822,7 +922,12 @@
     dcmHide('dcm-validate-error');
     dcmHide('dcm-validate-warn');
     dcmHide('dcm-results-download-log');
+    dcmHide('dcm-download-survivors');
     dcmHide('dcm-error-download-log');
+    const keepCb    = dcm$('dcm-keep-checkbox');    if (keepCb)    keepCb.checked    = false;
+    const archiveCb = dcm$('dcm-archive-checkbox'); if (archiveCb) archiveCb.checked = false;
+    const archiveLabel = dcm$('dcm-archive-label');
+    if (archiveLabel) { archiveLabel.style.opacity = '0.4'; archiveLabel.style.pointerEvents = 'none'; }
     dcmGo('idle');
   }
 
@@ -991,12 +1096,15 @@
 
     const summaryText = dcm$('dcm-preview-summary-text');
     if (summaryText) {
+      const opts = dcmReadMergeOptions();
+      const fate = opts.keepDuplicates ? 'to keep' : 'to delete';
       let text = `${actionable.length} group${actionable.length !== 1 ? 's' : ''} · ` +
-        `${actionableDups} duplicate compan${actionableDups !== 1 ? 'ies' : 'y'} to delete`;
+        `${actionableDups} duplicate compan${actionableDups !== 1 ? 'ies' : 'y'} ${fate}`;
       if (_dcmSkippedGroups.length > 0)
         text += ` · ${_dcmSkippedGroups.length} skipped`;
       summaryText.textContent = text;
     }
+    dcmRenderPreviewMode();
 
     const listEl = dcm$('dcm-groups-list');
     if (listEl) {
@@ -1079,15 +1187,16 @@
 
     const activeDups   = duplicates.filter(d => !d.notFound);
     const skippedDups  = duplicates.filter(d =>  d.notFound);
-    const hasCounts    = activeDups.some(d => d.notesCount != null);
-    const totalNotes   = activeDups.reduce((n, d) => n + (d.notesCount ?? 0), 0);
-    const totalUsers   = activeDups.reduce((n, d) => n + (d.usersCount ?? 0), 0);
+    const hasCounts     = activeDups.some(d => d.notesCount != null);
+    const totalNotes    = activeDups.reduce((n, d) => n + (d.notesCount    ?? 0), 0);
+    const totalUsers    = activeDups.reduce((n, d) => n + (d.usersCount    ?? 0), 0);
+    const totalEntities = activeDups.reduce((n, d) => n + (d.entitiesCount ?? 0), 0);
 
     const countLabel = document.createElement('span');
     countLabel.className   = 'nm-group-count';
     let countText = `${total} compan${total !== 1 ? 'ies' : 'y'} · ${activeDups.length} to delete`;
     if (skippedDups.length > 0) countText += ` · ${skippedDups.length} not found (skipped)`;
-    if (hasCounts) countText += ` (${totalNotes} note${totalNotes !== 1 ? 's' : ''} + ${totalUsers} user${totalUsers !== 1 ? 's' : ''} to move)`;
+    if (hasCounts) countText += ` (${totalNotes} note${totalNotes !== 1 ? 's' : ''} + ${totalUsers} user${totalUsers !== 1 ? 's' : ''} + ${totalEntities} entit${totalEntities !== 1 ? 'ies' : 'y'} to relink)`;
     countLabel.textContent = countText;
 
     // Label: use domain if set, otherwise fall back to target UUID (truncated)
@@ -1123,10 +1232,12 @@
       ...duplicates.map(d => ({ ...d, isTarget: false })),
     ];
 
-    const incomingNotes = activeDups.every(d => d.notesCount != null)
+    const incomingNotes    = activeDups.every(d => d.notesCount != null)
       ? activeDups.reduce((n, d) => n + d.notesCount, 0) : null;
-    const incomingUsers = activeDups.every(d => d.usersCount != null)
+    const incomingUsers    = activeDups.every(d => d.usersCount != null)
       ? activeDups.reduce((n, d) => n + (d.usersCount ?? 0), 0) : null;
+    const incomingEntities = activeDups.every(d => d.entitiesCount != null)
+      ? activeDups.reduce((n, d) => n + (d.entitiesCount ?? 0), 0) : null;
 
     const table = document.createElement('table');
     table.className = 'mapping-table';
@@ -1139,7 +1250,7 @@
           <th>Name</th>
           <th>Domain</th>
           <th>Source</th>
-          ${hasCounts ? '<th style="text-align:right;width:60px;">Notes</th><th style="text-align:right;width:60px;">Users</th>' : ''}
+          ${hasCounts ? '<th style="text-align:right;width:60px;">Notes</th><th style="text-align:right;width:60px;">Users</th><th style="text-align:right;width:72px;" title="Linked entities (features, components, etc.) attached to this company that will be relinked to the target.">Entities</th>' : ''}
         </tr>
       </thead>
     `;
@@ -1153,7 +1264,7 @@
         : c.notFound
           ? `<span class="badge badge-warn" style="font-size:10px;">Skip</span>`
           : `<span class="badge badge-danger" style="font-size:10px;">Delete</span>`;
-      let noteCell = '', userCell = '';
+      let noteCell = '', userCell = '', entCell = '';
       if (hasCounts) {
         if (c.isTarget) {
           noteCell = incomingNotes != null
@@ -1162,15 +1273,22 @@
           userCell = incomingUsers != null
             ? `<td style="text-align:right;font-size:12px;color:var(--c-ok,#22c55e);font-weight:600;">+${incomingUsers}</td>`
             : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+          entCell  = incomingEntities != null
+            ? `<td style="text-align:right;font-size:12px;color:var(--c-ok,#22c55e);font-weight:600;">+${incomingEntities}</td>`
+            : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
         } else if (c.notFound) {
           noteCell = `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
           userCell = `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+          entCell  = `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
         } else {
           noteCell = c.notesCount != null
             ? `<td style="text-align:right;font-size:12px;">${c.notesCount}</td>`
             : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
           userCell = c.usersCount != null
             ? `<td style="text-align:right;font-size:12px;">${c.usersCount}</td>`
+            : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
+          entCell  = c.entitiesCount != null
+            ? `<td style="text-align:right;font-size:12px;">${c.entitiesCount}</td>`
             : `<td style="text-align:right;color:var(--c-muted);font-size:12px;">—</td>`;
         }
       }
@@ -1183,7 +1301,7 @@
         <td>${nameCell}</td>
         <td style="font-size:12px;color:var(--c-muted);">${esc(c.domain || '—')}</td>
         <td style="font-size:12px;">${esc(c.sourceOrigin || '—')}</td>
-        ${hasCounts ? noteCell + userCell : ''}
+        ${hasCounts ? noteCell + userCell + entCell : ''}
       `;
       tbody.appendChild(tr);
     }
@@ -1205,8 +1323,8 @@
         ? `Merge & delete selected (${_dcmSelectedDomains.size})`
         : 'Merge & delete duplicates';
     }
-    if (anySelected) { dcmShow('dcm-unselect-all'); dcmShow('dcm-invert-selection'); }
-    else             { dcmHide('dcm-unselect-all'); dcmHide('dcm-invert-selection'); }
+    // Selection toolbar buttons stay visible at all times so the user can use
+    // "Select all" without needing to tick a row first.
   }
 
   // ── Merge confirmation wrappers ────────────────────────────
@@ -1223,9 +1341,16 @@
     const intro    = _dcmSelectedDomains.size > 0
       ? `Merge ${records.length} selected group(s)?`
       : `Merge all ${records.length} group(s)?`;
+    const opts = dcmReadMergeOptions();
+    const actionSuffix = opts.keepDuplicates
+      ? (opts.archiveDuplicates ? 'kept (and archived)' : 'kept (not deleted)')
+      : `permanently deleted`;
+    const tail = opts.keepDuplicates
+      ? `\n\nDuplicate compan${dupCount !== 1 ? 'ies' : 'y'} will not be deleted — you can review and clean up later using the surviving-UUIDs CSV.`
+      : `\n\nThis cannot be undone. Export your companies data first if you need a backup.`;
     showConfirm(
-      `${intro}\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to their target company, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone. Export your companies data first if you need a backup.`,
-      { confirmText: 'Merge & delete', danger: true }
+      `${intro}\n\nNotes, users, and linked entities from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to their target company, then the duplicate${dupCount !== 1 ? 's' : ''} will be ${actionSuffix}.${tail}`,
+      { confirmText: opts.keepDuplicates ? 'Merge & keep' : 'Merge & delete', danger: !opts.keepDuplicates }
     ).then(confirmed => { if (confirmed) dcmRunMerge(records); });
   }
 
@@ -1233,12 +1358,45 @@
     const activeDups = (dr.duplicates || []).filter(d => !d.notFound);
     if (!activeDups.length) return;
     const dupCount = activeDups.length;
+    const opts = dcmReadMergeOptions();
+    const actionSuffix = opts.keepDuplicates
+      ? (opts.archiveDuplicates ? 'kept (and archived)' : 'kept (not deleted)')
+      : `permanently deleted`;
     showConfirm(
-      `Merge group ${groupNum}?\n\nNotes and users from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${dr.primaryName || dr.primaryId}, then the duplicate${dupCount !== 1 ? 's' : ''} will be permanently deleted.\n\nThis cannot be undone.`,
-      { confirmText: 'Merge this group', danger: true }
+      `Merge group ${groupNum}?\n\nNotes, users, and linked entities from ${dupCount} duplicate compan${dupCount !== 1 ? 'ies' : 'y'} will be relinked to ${dr.primaryName || dr.primaryId}, then the duplicate${dupCount !== 1 ? 's' : ''} will be ${actionSuffix}.${opts.keepDuplicates ? '' : '\n\nThis cannot be undone.'}`,
+      { confirmText: 'Merge this group', danger: !opts.keepDuplicates }
     ).then(confirmed => {
       if (confirmed) dcmRunMerge([{ ...dr, duplicates: activeDups }]);
     });
+  }
+
+  function dcmReadMergeOptions() {
+    const keep    = dcm$('dcm-keep-checkbox')?.checked === true;
+    const archive = keep && dcm$('dcm-archive-checkbox')?.checked === true;
+    return { keepDuplicates: keep, archiveDuplicates: archive };
+  }
+
+  function dcmRenderPreviewMode() {
+    const el = dcm$('dcm-preview-mode-text');
+    if (!el) return;
+    const opts = dcmReadMergeOptions();
+    const label = opts.keepDuplicates
+      ? (opts.archiveDuplicates
+        ? 'Mode: Keep duplicates · archive them after relink'
+        : 'Mode: Keep duplicates · do not delete after relink')
+      : 'Mode: Delete duplicates after relink';
+    el.textContent = `${label} — applies to every merge below (bulk and one-by-one). Change it back on the mapping page.`;
+  }
+
+  function dcmDownloadSurvivorsCsv() {
+    const ids = survivorIdsFromAudit(_dcmAuditLog);
+    if (!ids.length) return;
+    const csv = 'pb_id\n' + ids.join('\n') + '\n';
+    const date = new Date().toISOString().slice(0, 10);
+    triggerDownload(
+      new Blob([csv], { type: 'text/csv;charset=utf-8;' }),
+      `companies-merge-csv-survivors-${date}.csv`
+    );
   }
 
   // ── Run merge via SSE ──────────────────────────────────────
@@ -1251,7 +1409,10 @@
       .filter(dr => dr.duplicates.length > 0);
     if (!toProcess.length) return;
 
-    if (!isContinuation) _dcmPendingRun = toProcess;
+    if (!isContinuation) {
+      _dcmPendingRun     = toProcess;
+      _dcmPendingRunOpts = dcmReadMergeOptions();
+    }
 
     _dcmFromRun = true;
     dcmGo('running');
@@ -1263,7 +1424,7 @@
 
     _dcmRunCtrl = subscribeSSE(
       '/api/companies-duplicate-cleanup/run',
-      { domainRecords: toProcess },
+      { domainRecords: toProcess, ...(_dcmPendingRunOpts || {}) },
       {
         onProgress({ message, percent }) { setProgress('dcm-run', message, percent ?? 0); },
         onLog(entry) { if (_dcmLogAppender) _dcmLogAppender(entry); },
@@ -1304,12 +1465,14 @@
   // ── Prune completed groups before back-to-preview ─────────
   function dcmPruneCompleted() {
     if (!_dcmPreviewData || !_dcmAuditLog?.length) return;
-    const deletedIds = new Set(_dcmAuditLog.filter(e => e.deleted).map(e => e.duplicateCompanyId));
-    if (!deletedIds.size) return;
+    const doneIds = new Set(
+      _dcmAuditLog.filter(e => e.deleted || (e.kept && !e.error)).map(e => e.duplicateCompanyId)
+    );
+    if (!doneIds.size) return;
 
     const kept = [];
     for (const dr of _dcmPreviewData.domainRecords) {
-      const remainingDups = (dr.duplicates || []).filter(d => !deletedIds.has(d.id));
+      const remainingDups = (dr.duplicates || []).filter(d => !doneIds.has(d.id));
       if (remainingDups.length === 0) { _dcmSelectedDomains.delete(dr); continue; }
       if (remainingDups.length !== (dr.duplicates || []).length) dr.duplicates = remainingDups;
       kept.push(dr);
@@ -1321,7 +1484,7 @@
 
   // ── Render results summary ─────────────────────────────────
   function dcmRenderResults(data) {
-    const { notesRelinked = 0, usersRelinked = 0, deleted = 0, errors = 0, stopped = false } = data;
+    const { notesRelinked = 0, usersRelinked = 0, entitiesRelinked = 0, deleted = 0, kept = 0, archived = 0, errors = 0, stopped = false } = data;
     const summaryEl = dcm$('dcm-results-summary');
     if (!summaryEl) return;
 
@@ -1339,9 +1502,12 @@
     const status     = stopped ? 'Merge stopped' : 'Merge complete';
 
     const parts = [];
-    if (notesRelinked) parts.push(`${notesRelinked} note${notesRelinked !== 1 ? 's' : ''} relinked`);
-    if (usersRelinked) parts.push(`${usersRelinked} user${usersRelinked !== 1 ? 's' : ''} updated`);
+    if (notesRelinked)    parts.push(`${notesRelinked} note${notesRelinked !== 1 ? 's' : ''} relinked`);
+    if (usersRelinked)    parts.push(`${usersRelinked} user${usersRelinked !== 1 ? 's' : ''} updated`);
+    if (entitiesRelinked) parts.push(`${entitiesRelinked} entit${entitiesRelinked !== 1 ? 'ies' : 'y'} relinked`);
     if (deleted)       parts.push(`${deleted} compan${deleted !== 1 ? 'ies' : 'y'} deleted`);
+    if (kept)          parts.push(`${kept} compan${kept !== 1 ? 'ies' : 'y'} kept`);
+    if (archived)      parts.push(`${archived} archived`);
     if (errors)        parts.push(`${errors} error${errors !== 1 ? 's' : ''}`);
     if (remainingCount) parts.push(`${remainingCount} left undone`);
 
@@ -1355,12 +1521,17 @@
     if (stopped && remainingCount > 0) dcmShow('dcm-continue-run');
     else                               dcmHide('dcm-continue-run');
 
+    if (survivorIdsFromAudit(_dcmAuditLog).length > 0) dcmShow('dcm-download-survivors');
+    else                                               dcmHide('dcm-download-survivors');
+
     // Only show "Back to preview" if actionable groups remain — skipped groups
     // (target not found / all dups not found) don't warrant returning to preview.
-    const deletedIds = new Set((_dcmAuditLog || []).filter(e => e.deleted).map(e => e.duplicateCompanyId));
+    const doneIds = new Set(
+      (_dcmAuditLog || []).filter(e => e.deleted || (e.kept && !e.error)).map(e => e.duplicateCompanyId)
+    );
     const remainingActionable = (_dcmPreviewData?.domainRecords || [])
       .filter(dr => !dr.primaryNotFound)
-      .filter(dr => (dr.duplicates || []).some(d => !d.notFound && !deletedIds.has(d.id)))
+      .filter(dr => (dr.duplicates || []).some(d => !d.notFound && !doneIds.has(d.id)))
       .length;
     if (remainingActionable > 0) dcmShow('dcm-back-to-preview');
     else                         dcmHide('dcm-back-to-preview');
@@ -1466,6 +1637,19 @@
     });
 
     // Unselect all
+    // Select all — iterate rendered group cards via _dcmGroupCardEls, which only contains
+    // actionable groups (skipped/not-found groups are listed separately, not as cards).
+    dcm$('dcm-select-all')?.addEventListener('click', () => {
+      _dcmSelectedDomains.clear();
+      for (const [dr, { el }] of _dcmGroupCardEls) {
+        const cb = el.querySelector('summary > input[type=checkbox]');
+        if (!cb) continue;
+        cb.checked = true;
+        _dcmSelectedDomains.add(dr);
+      }
+      dcmUpdateSelectionUI();
+    });
+
     dcm$('dcm-unselect-all')?.addEventListener('click', () => {
       _dcmSelectedDomains.clear();
       dcm$('dcm-groups-list')?.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
@@ -1474,16 +1658,13 @@
 
     // Invert selection
     dcm$('dcm-invert-selection')?.addEventListener('click', () => {
-      dcm$('dcm-groups-list')?.querySelectorAll('details[data-di]').forEach(detailsEl => {
-        const di = parseInt(detailsEl.dataset.di, 10);
-        const dr = _dcmPreviewData?.domainRecords?.[di];
-        if (!dr) return;
-        const cb = detailsEl.querySelector('summary > input[type=checkbox]');
-        if (!cb) return;
+      for (const [dr, { el }] of _dcmGroupCardEls) {
+        const cb = el.querySelector('summary > input[type=checkbox]');
+        if (!cb) continue;
         cb.checked = !cb.checked;
         if (cb.checked) _dcmSelectedDomains.add(dr);
         else            _dcmSelectedDomains.delete(dr);
-      });
+      }
       dcmUpdateSelectionUI();
     });
 
@@ -1519,7 +1700,22 @@
       if (_dcmLogAppender) downloadLogCsv(_dcmLogAppender, 'companies-merge-csv');
     });
     dcm$('dcm-download-audit')?.addEventListener('click', dcmDownloadAuditLog);
+    dcm$('dcm-download-survivors')?.addEventListener('click', dcmDownloadSurvivorsCsv);
     dcm$('dcm-start-over')?.addEventListener('click', dcmReset);
+
+    // Merge mode: keep checkbox toggles archive row enablement, and refreshes preview banner if visible
+    dcm$('dcm-keep-checkbox')?.addEventListener('change', (e) => {
+      const enabled = e.target.checked;
+      const al = dcm$('dcm-archive-label');
+      if (al) { al.style.opacity = enabled ? '1' : '0.4'; al.style.pointerEvents = enabled ? 'auto' : 'none'; }
+      if (!enabled) {
+        const cb = dcm$('dcm-archive-checkbox'); if (cb) cb.checked = false;
+      }
+      if (_dcmPreviewData) dcmRenderPreview(_dcmPreviewData);
+    });
+    dcm$('dcm-archive-checkbox')?.addEventListener('change', () => {
+      if (_dcmPreviewData) dcmRenderPreviewMode();
+    });
 
     // Error actions
     dcm$('dcm-error-back-to-preview')?.addEventListener('click', () => {
@@ -1602,6 +1798,22 @@
       if (btn) btn.textContent = anyOpen ? 'Expand all' : 'Collapse all';
     });
 
+    // Select all — iterate details[data-di] so we only touch group-summary checkboxes,
+    // never extra checkboxes inside expanded cards (matches the invert-selection pattern).
+    dc$('dc-select-all')?.addEventListener('click', () => {
+      _selectedDomains.clear();
+      dc$('dc-groups-list')?.querySelectorAll('details[data-di]').forEach(detailsEl => {
+        const di = parseInt(detailsEl.dataset.di, 10);
+        const dr = _previewData?.domainRecords?.[di];
+        if (!dr) return;
+        const cb = detailsEl.querySelector('summary > input[type=checkbox]');
+        if (!cb) return;
+        cb.checked = true;
+        _selectedDomains.add(dr);
+      });
+      updateSelectionUI();
+    });
+
     // Unselect all
     dc$('dc-unselect-all')?.addEventListener('click', () => {
       _selectedDomains.clear();
@@ -1661,7 +1873,22 @@
       if (_logAppender) downloadLogCsv(_logAppender, 'companies-merge');
     });
     dc$('dc-download-audit')?.addEventListener('click', downloadAuditLog);
+    dc$('dc-download-survivors')?.addEventListener('click', downloadSurvivorsCsv);
     dc$('dc-start-over')?.addEventListener('click', resetModule);
+
+    // Merge mode: keep checkbox toggles archive row enablement, and refreshes preview banner if visible
+    dc$('dc-keep-checkbox')?.addEventListener('change', (e) => {
+      const enabled = e.target.checked;
+      const al = dc$('dc-archive-label');
+      if (al) { al.style.opacity = enabled ? '1' : '0.4'; al.style.pointerEvents = enabled ? 'auto' : 'none'; }
+      if (!enabled) {
+        const cb = dc$('dc-archive-checkbox'); if (cb) cb.checked = false;
+      }
+      if (_previewData) renderPreview(_previewData);
+    });
+    dc$('dc-archive-checkbox')?.addEventListener('change', () => {
+      if (_previewData) renderPreviewMode();
+    });
 
     // Error actions
     dc$('dc-error-back-to-preview')?.addEventListener('click', () => {
