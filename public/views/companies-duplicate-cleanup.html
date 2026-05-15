@@ -112,6 +112,25 @@
                     </div>
                   </div>
 
+                  <!-- Merge mode (applies to all merges in this run, incl. one-by-one) -->
+                  <div class="field" style="margin-bottom:20px;">
+                    <label>Merge mode
+                      <span class="info-icon" data-tip="Applies to every merge you trigger from the preview — whether you click 'Merge all' or merge groups one by one. You can change the mode without re-scanning.">i</span>
+                    </label>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="dc-keep-checkbox">
+                        Keep duplicates (only relink, don't delete)
+                        <span class="info-icon" data-tip="Notes and users are still moved to the target company, but the duplicate company is kept. Useful when you want to review before deleting — you can later remove them via Companies → Delete by CSV using the surviving-UUIDs CSV available after the run.">i</span>
+                      </label>
+                      <label class="checkbox-label is-disabled-ctl" id="dc-archive-label" style="margin-left:20px;">
+                        <input type="checkbox" id="dc-archive-checkbox">
+                        Archive kept duplicates
+                        <span class="info-icon" data-tip="Sets archived=true on each kept duplicate via the v2 API. The Productboard UI does not expose company archive directly, but archived companies are filtered out of most default views — useful for hiding the leftovers without deleting them.">i</span>
+                      </label>
+                    </div>
+                  </div>
+
                   <button class="btn btn-primary" id="dc-scan-btn">Scan for duplicates</button>
                 </div>
 
@@ -138,7 +157,10 @@
 
                 <div class="alert alert-info" id="dc-preview-summary" style="margin-bottom:16px;">
                   <span class="alert-icon">🔍</span>
-                  <span id="dc-preview-summary-text"></span>
+                  <span>
+                    <span id="dc-preview-summary-text"></span>
+                    <span id="dc-preview-mode-text" style="display:block;margin-top:4px;font-size:12px;opacity:0.85;"></span>
+                  </span>
                 </div>
 
                 <!-- No duplicates found -->
@@ -156,8 +178,9 @@
                   <!-- Toolbar -->
                   <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
                     <button class="btn btn-ghost btn-sm" id="dc-toggle-all-groups">Collapse all</button>
-                    <button class="btn btn-ghost btn-sm hidden" id="dc-unselect-all">Unselect all</button>
-                    <button class="btn btn-ghost btn-sm hidden" id="dc-invert-selection">Invert selection</button>
+                    <button class="btn btn-ghost btn-sm" id="dc-select-all">Select all</button>
+                    <button class="btn btn-ghost btn-sm" id="dc-unselect-all">Unselect all</button>
+                    <button class="btn btn-ghost btn-sm" id="dc-invert-selection">Invert selection</button>
                   </div>
 
                   <!-- Domain group cards injected here by JS -->
@@ -227,6 +250,7 @@
                   <button class="btn btn-primary hidden" id="dc-continue-run">▶ Continue merge</button>
                   <button class="btn btn-secondary" id="dc-back-to-preview">← Back to preview</button>
                   <button class="btn btn-ghost btn-sm" id="dc-download-audit">↓ Download audit log (JSON)</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="dc-download-survivors">↓ Download surviving UUIDs (CSV)</button>
                   <button class="btn btn-ghost btn-sm" id="dc-start-over">Start over</button>
                 </div>
 
@@ -410,6 +434,25 @@
                   </div>
                 </div>
 
+                <!-- Merge mode (applies to all merges in this run, incl. one-by-one) -->
+                <div class="field" style="margin:16px 0 20px;">
+                  <label>Merge mode
+                    <span class="info-icon" data-tip="Applies to every merge you trigger from the preview — whether you click 'Merge all' or merge groups one by one. You can change the mode without re-uploading.">i</span>
+                  </label>
+                  <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="dcm-keep-checkbox">
+                      Keep duplicates (only relink, don't delete)
+                      <span class="info-icon" data-tip="Notes and users are still moved to the target company, but the duplicate company is kept. Useful when you want to review before deleting — you can later remove them via Companies → Delete by CSV using the surviving-UUIDs CSV available after the run.">i</span>
+                    </label>
+                    <label class="checkbox-label is-disabled-ctl" id="dcm-archive-label" style="margin-left:20px;">
+                      <input type="checkbox" id="dcm-archive-checkbox">
+                      Archive kept duplicates
+                      <span class="info-icon" data-tip="Sets archived=true on each kept duplicate via the v2 API. The Productboard UI does not expose company archive directly, but archived companies are filtered out of most default views — useful for hiding the leftovers without deleting them.">i</span>
+                    </label>
+                  </div>
+                </div>
+
                 <button class="btn btn-primary" id="dcm-preview-btn">🔍 Validate &amp; preview</button>
               </div><!-- /dcm-mapping -->
 
@@ -434,14 +477,18 @@
 
                 <div class="alert alert-info" id="dcm-preview-summary" style="margin-bottom:16px;">
                   <span class="alert-icon">🔍</span>
-                  <span id="dcm-preview-summary-text"></span>
+                  <span>
+                    <span id="dcm-preview-summary-text"></span>
+                    <span id="dcm-preview-mode-text" style="display:block;margin-top:4px;font-size:12px;opacity:0.85;"></span>
+                  </span>
                 </div>
 
                 <!-- Toolbar -->
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
                   <button class="btn btn-ghost btn-sm" id="dcm-toggle-all-groups">Collapse all</button>
-                  <button class="btn btn-ghost btn-sm hidden" id="dcm-unselect-all">Unselect all</button>
-                  <button class="btn btn-ghost btn-sm hidden" id="dcm-invert-selection">Invert selection</button>
+                  <button class="btn btn-ghost btn-sm" id="dcm-select-all">Select all</button>
+                  <button class="btn btn-ghost btn-sm" id="dcm-unselect-all">Unselect all</button>
+                  <button class="btn btn-ghost btn-sm" id="dcm-invert-selection">Invert selection</button>
                 </div>
 
                 <!-- Group cards injected by JS -->
@@ -507,6 +554,7 @@
                   <button class="btn btn-primary hidden" id="dcm-continue-run">▶ Continue merge</button>
                   <button class="btn btn-secondary hidden" id="dcm-back-to-preview">← Back to preview</button>
                   <button class="btn btn-ghost btn-sm" id="dcm-download-audit">↓ Download audit log (JSON)</button>
+                  <button class="btn btn-ghost btn-sm hidden" id="dcm-download-survivors">↓ Download surviving UUIDs (CSV)</button>
                   <button class="btn btn-ghost btn-sm" id="dcm-start-over">Start over</button>
                 </div>
                 <div id="dcm-results-log" class="live-log hidden mt-16">

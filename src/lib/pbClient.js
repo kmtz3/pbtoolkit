@@ -175,7 +175,7 @@ function sleep(ms) {
  *
  * @param {Function} pbFetch   - bound pbFetch from createClient
  * @param {Function} withRetry - bound withRetry from createClient
- * @param {object}   body      - base request body, e.g. { data: { types: ['company'] } }
+ * @param {object}   body      - base request body, e.g. { data: { filter: { type: ['company'] } } }
  * @param {string}   label     - label for retry logging
  * @returns {Promise<object[]>} all items across all pages
  */

@@ -28,6 +28,7 @@ const authRouter           = require('./routes/auth');
 const feedbackRouter       = require('./routes/feedback');
 const notesMergeRouter          = require('./routes/notesMerge');
 const companiesDuplicateCleanupRouter = require('./routes/companiesDuplicateCleanup');
+const fieldValueDeleteRouter          = require('./routes/fieldValueDelete');
 
 const shouldCompress = (req, res) => {
   if (req.headers.accept && req.headers.accept.includes('text/event-stream')) {
@@ -147,6 +148,7 @@ app.use('/api/members-teams-mgmt', membersTeamsMgmtRouter);
 app.use('/api/feedback', feedbackRouter);
 app.use('/api/notes-merge', notesMergeRouter);
 app.use('/api/companies-duplicate-cleanup', companiesDuplicateCleanupRouter);
+app.use('/api/tag-values', fieldValueDeleteRouter);
 
 // Static pages
 app.get('/privacy', (_req, res) => {

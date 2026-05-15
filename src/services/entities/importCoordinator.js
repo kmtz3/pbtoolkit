@@ -74,6 +74,7 @@ async function runImport(files, mappings, configs, options, pbFetch, withRetry, 
     autoGenerateExtKeys      = false,
     workspaceCode            = '',
     relationshipsOnly        = false,
+    knownFieldValues         = null, // Map<fieldId, Map<normalised_name, {id,name}>> — passed by /run
   } = options || {};
 
   const idCache   = createIdCache();
@@ -103,6 +104,46 @@ async function runImport(files, mappings, configs, options, pbFetch, withRetry, 
       onLog('warn', `${ENTITY_LABELS[type]}: no data rows found — skipped`, { entityType: type });
     } else if (rowCount > 50000) {
       onLog('warn', `${ENTITY_LABELS[type]}: ${rowCount.toLocaleString()} rows — large file, this may take a while`, { entityType: type });
+    }
+  }
+
+  // ── Step 1.5: Filter unknown custom select values ────────────────────────
+  // When knownFieldValues is provided, remove or trim any custom select/multiselect
+  // values in normalized rows that aren't in the allowed set. This prevents the
+  // PB API from rejecting rows (unknown values would cause a 422) while still
+  // importing the rest of the row's data. Applies after auto-create, so with
+  // autoCreateFieldValues ON all values should be known and nothing is stripped.
+  if (knownFieldValues && knownFieldValues.size > 0) {
+    for (const type of Object.keys(normalizedByType)) {
+      const config = configs[type] || { customFields: [] };
+      for (const row of normalizedByType[type]) {
+        for (const [key, rawVal] of Object.entries(row)) {
+          if (!key.startsWith('custom__')) continue;
+          const fieldId = key.slice(8);
+          const known = knownFieldValues.get(fieldId);
+          if (!known) continue;
+          const fc = config.customFields.find((f) => f.id === fieldId);
+          if (!fc) continue;
+          const isMulti = fc.displayType === 'MultiSelect';
+
+          if (rawVal == null || String(rawVal).trim() === '') continue;
+
+          if (isMulti) {
+            const parts = String(rawVal).split(',').map((s) => s.trim()).filter(Boolean);
+            const knownParts = parts.filter((p) => known.has(p.toLowerCase()));
+            const skipped = parts.filter((p) => !known.has(p.toLowerCase()));
+            if (skipped.length) {
+              onLog('warn', `Skipping unknown "${fc.name}" value(s): ${skipped.join(', ')}`, { entityType: type });
+              row[key] = knownParts.join(', ') || null;
+            }
+          } else {
+            if (!known.has(String(rawVal).toLowerCase().trim())) {
+              onLog('warn', `Skipping unknown "${fc.name}" value "${rawVal}"`, { entityType: type });
+              row[key] = null;
+            }
+          }
+        }
+      }
     }
   }
 

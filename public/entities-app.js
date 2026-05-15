@@ -674,7 +674,8 @@ function entBuildPreviewPayload() {
       bypassHtmlFormatter:      document.getElementById('ent-bypass-html')?.checked   || false,
       skipInvalidOwner:         document.getElementById('ent-skip-invalid-owner')?.checked || false,
       fiscal_year_start_month:  parseInt(document.getElementById('ent-fiscal-month')?.value || '1', 10),
-      autoGenerateExtKeys:      document.getElementById('ent-autogen-extkeys')?.checked || false,
+      autoGenerateExtKeys:      document.getElementById('ent-autogen-extkeys')?.checked     || false,
+      autoCreateFieldValues:    document.getElementById('ent-auto-create-values')?.checked  || false,
       workspaceCode:            (document.getElementById('ent-workspace-code')?.value || '').trim().toUpperCase(),
     },
   };
@@ -742,7 +743,7 @@ function renderValidationResults(data) {
       const r = allResults[type];
       const rows = [
         ...(r.errors   || []).map((e) => `<tr><td>${e.row || '—'}</td><td class="col-tag">${esc(e.field || '')}</td><td style="color:var(--c-danger)">${esc(e.message)}</td></tr>`),
-        ...(r.warnings || []).map((w) => `<tr><td>${w.row || '—'}</td><td class="col-tag">${esc(w.field || '')}</td><td style="color:var(--c-warn)">${esc(w.message)}</td></tr>`),
+        ...(r.warnings || []).map((w) => `<tr><td>${w.row || '—'}</td><td class="col-tag">${esc(w.field || '')}</td><td ${w.isInfo ? 'class="text-info"' : 'style="color:var(--c-warn)"'}>${esc(w.message)}</td></tr>`),
       ].join('');
       const errCount  = (r.errors   || []).length;
       const warnCount = (r.warnings || []).length;
@@ -837,7 +838,7 @@ function entImportShowComplete(data) {
 
   // Per-entity breakdown table
   const rows = perEntity.map((e) =>
-    `<tr><td>${ENT_LABELS[e.entityType] || e.entityType}</td>` +
+    `<tr><td>${esc(ENT_LABELS[e.entityType] || e.entityType)}</td>` +
     `<td>${e.created}</td><td>${e.updated}</td><td>${e.errors}</td></tr>`
   ).join('');
 
@@ -1421,7 +1422,7 @@ function entDelShowComplete(data) {
 
   const rows = perType.map((e) =>
     `<tr>
-      <td>${ENT_LABELS[e.type] || e.type}</td>
+      <td>${esc(ENT_LABELS[e.type] || e.type)}</td>
       <td>${e.total}</td>
       <td>${e.deleted}</td>
       <td>${e.skipped}</td>
@@ -1538,6 +1539,244 @@ function initEntitiesDeleteView() {
   });
 }
 
+// ── Delete all view ───────────────────────────────────────
+
+// Cascade-children map: selecting a parent auto-checks these types (PB cascade-deletes them)
+const ENT_DA_CASCADE_CHILDREN = {
+  objective:    ['keyResult'],
+  product:      ['component', 'feature', 'subfeature'],
+  component:    ['feature', 'subfeature'],
+  feature:      ['subfeature'],
+  releaseGroup: ['release'],
+};
+
+const entDelAll = {
+  controller: null,  // subscribeSSE abort controller
+};
+
+const _entDALogBase = makeLogAppender('ent-da-live-log', 'ent-da-log-entries', 'ent-da-log-counts');
+function entDAAppendLog(level, message, detail) { _entDALogBase({ level, message, detail }); }
+entDAAppendLog.reset     = () => _entDALogBase.reset();
+entDAAppendLog.getCounts = () => _entDALogBase.getCounts();
+
+/** Recompute which types are cascade-locked based on currently explicit (non-locked) checks. */
+function entDAUpdateCheckboxes() {
+  // Collect explicitly-checked types (enabled checkboxes that are checked)
+  const explicit = new Set();
+  for (const type of ENT_ORDER) {
+    const cb = document.getElementById(`ent-da-cb-${type}`);
+    if (cb && cb.checked && !cb.disabled) explicit.add(type);
+  }
+
+  // Expand to all cascade-covered descendants
+  const cascaded = new Set();
+  for (const type of explicit) {
+    for (const child of (ENT_DA_CASCADE_CHILDREN[type] || [])) cascaded.add(child);
+  }
+
+  // Update each checkbox
+  for (const type of ENT_ORDER) {
+    const cb  = document.getElementById(`ent-da-cb-${type}`);
+    const lbl = document.getElementById(`ent-da-lbl-${type}`);
+    if (!cb) continue;
+    if (cascaded.has(type)) {
+      cb.checked  = true;
+      cb.disabled = true;
+      if (lbl) lbl.style.opacity = '0.6';
+    } else {
+      cb.disabled = false;
+      if (lbl) lbl.style.opacity = '';
+    }
+  }
+
+  // Show/hide cascade info banner
+  const cascadeInfo = document.getElementById('ent-da-cascade-info');
+  const cascadeMsg  = document.getElementById('ent-da-cascade-msg');
+  if (cascadeInfo) {
+    if (cascaded.size > 0) {
+      cascadeInfo.classList.remove('hidden');
+      const labels = [...cascaded].map((t) => ENT_LABELS[t] || t).join(', ');
+      if (cascadeMsg) cascadeMsg.textContent =
+        `${labels} will be cascade-deleted by Productboard — no direct API call needed for those types.`;
+    } else {
+      cascadeInfo.classList.add('hidden');
+    }
+  }
+
+  entDASyncRunBtn();
+}
+
+/** Enable run button only when ≥1 type is checked and confirm text equals "DELETE". */
+function entDASyncRunBtn() {
+  const anyChecked  = ENT_ORDER.some((t) => { const cb = document.getElementById(`ent-da-cb-${t}`); return cb && cb.checked; });
+  const confirmVal  = (document.getElementById('ent-da-confirm-input')?.value || '').trim();
+  const btn         = document.getElementById('btn-ent-da-run');
+  if (btn) btn.disabled = !(anyChecked && confirmVal === 'DELETE');
+}
+
+/** Switch to/from running state. */
+function entDASetRunning(running) {
+  const idle    = document.getElementById('ent-da-idle');
+  const runEl   = document.getElementById('ent-da-running');
+  const results = document.getElementById('ent-da-results');
+
+  if (running) {
+    idle?.classList.add('hidden');
+    runEl?.classList.remove('hidden');
+    results?.classList.add('hidden');
+    entDAAppendLog.reset();
+    document.getElementById('btn-ent-da-download-log')?.classList.add('hidden');
+    entDASetProgress(0, '');
+    runEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    document.getElementById('btn-ent-da-download-log')?.classList.remove('hidden');
+  }
+}
+
+function entDASetProgress(pct, msg) {
+  const bar   = document.getElementById('ent-da-progress-bar');
+  const msgEl = document.getElementById('ent-da-progress-msg');
+  const pctEl = document.getElementById('ent-da-progress-pct');
+  if (bar)   bar.style.width      = `${Math.min(100, pct)}%`;
+  if (msgEl) msgEl.textContent    = msg || '';
+  if (pctEl) pctEl.textContent    = `${Math.min(100, Math.round(pct))}%`;
+}
+
+function entDAShowResults(data) {
+  const { perType = [], total = 0, deleted = 0, skipped = 0, errors = 0, cascadedTypes = [] } = data;
+  const hasErrors  = errors > 0;
+  const alertClass = hasErrors ? 'alert-warn' : 'alert-ok';
+  const icon       = hasErrors ? '⚠️' : '✅';
+
+  let cascadeNote = '';
+  if (cascadedTypes.length) {
+    const labels = cascadedTypes.map((t) => ENT_LABELS[t] || t).join(', ');
+    cascadeNote  = `<p class="text-sm text-muted mt-8">${esc(labels)} were cascade-deleted by their parent types.</p>`;
+  }
+
+  const rows = perType.map((e) =>
+    `<tr>
+      <td>${esc(ENT_LABELS[e.type] || e.type)}</td>
+      <td>${e.total}</td>
+      <td>${e.deleted}</td>
+      <td>${e.skipped}</td>
+      <td>${e.errors}</td>
+    </tr>`
+  ).join('');
+
+  const summaryEl = document.getElementById('ent-da-summary-alert');
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div class="alert ${alertClass}">
+        <span class="alert-icon">${icon}</span>
+        <span>${deleted} deleted · ${skipped} skipped · ${errors} error(s) · ${total} in workspace</span>
+      </div>
+      ${cascadeNote}
+      ${rows ? `<table class="mapping-table mt-12">
+        <thead><tr><th>Entity type</th><th>Found</th><th>Deleted</th><th>Skipped</th><th>Errors</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : ''}`;
+  }
+
+  const results = document.getElementById('ent-da-results');
+  if (results) results.classList.remove('hidden');
+}
+
+/** Collect all currently-checked entity types (explicit + cascade-locked). */
+function entDAGetSelectedTypes() {
+  return ENT_ORDER.filter((type) => {
+    const cb = document.getElementById(`ent-da-cb-${type}`);
+    return cb && cb.checked;
+  });
+}
+
+/** Run the delete-by-type SSE operation. */
+function runEntityDeleteAll() {
+  const types = entDAGetSelectedTypes();
+  if (!types.length) return;
+
+  entDASetRunning(true);
+  entDelAll.controller = subscribeSSE('/api/entities/delete/by-type', { types }, {
+    onProgress: ({ message, percent }) => {
+      entDASetProgress(percent || 0, message || '');
+      if (message) {
+        const liveLog = document.getElementById('ent-da-live-log');
+        if (liveLog && liveLog.classList.contains('hidden')) liveLog.classList.remove('hidden');
+      }
+    },
+    onLog: (e) => {
+      entDAAppendLog(e.level, e.message, e.detail);
+      document.getElementById('ent-da-live-log')?.classList.remove('hidden');
+    },
+    onComplete: (data) => {
+      entDASetRunning(false);
+      entDAShowResults(data);
+      document.getElementById('ent-da-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    onError: (msg) => {
+      entDASetRunning(false);
+      const summaryEl = document.getElementById('ent-da-summary-alert');
+      if (summaryEl) summaryEl.innerHTML =
+        `<div class="alert alert-danger"><span class="alert-icon">❌</span><span>${esc(msg)}</span></div>`;
+      document.getElementById('ent-da-results')?.classList.remove('hidden');
+    },
+    onAbort: () => {
+      entDASetRunning(false);
+      entDAAppendLog('warn', 'Deletion stopped by user');
+      const summaryEl = document.getElementById('ent-da-summary-alert');
+      if (summaryEl) summaryEl.innerHTML =
+        `<div class="alert alert-warn"><span class="alert-icon">⏹</span><span>Deletion stopped by user.</span></div>`;
+      document.getElementById('ent-da-results')?.classList.remove('hidden');
+    },
+  });
+}
+
+/** Initialize the delete-all view checkboxes and event listeners. */
+function initEntitiesDeleteAllView() {
+  const grid = document.getElementById('ent-da-checkboxes');
+  if (!grid || grid.dataset.init) return;
+  grid.dataset.init = '1';
+
+  // Render one labeled checkbox per entity type
+  grid.innerHTML = ENT_ORDER.map((type) => {
+    const isCascadeChild = Object.values(ENT_DA_CASCADE_CHILDREN).some((children) => children.includes(type));
+    const hint = isCascadeChild ? ' <span class="text-muted" style="font-size:11px">(cascade)</span>' : '';
+    return `<label class="checkbox-row" id="ent-da-lbl-${type}">
+      <input type="checkbox" id="ent-da-cb-${type}" data-da-type="${type}" />
+      ${esc(ENT_LABELS[type])}${hint}
+    </label>`;
+  }).join('');
+
+  grid.addEventListener('change', () => entDAUpdateCheckboxes());
+
+  document.getElementById('btn-ent-da-select-all')?.addEventListener('click', () => {
+    ENT_ORDER.forEach((t) => { const cb = document.getElementById(`ent-da-cb-${t}`); if (cb && !cb.disabled) cb.checked = true; });
+    entDAUpdateCheckboxes();
+  });
+  document.getElementById('btn-ent-da-clear-all')?.addEventListener('click', () => {
+    ENT_ORDER.forEach((t) => { const cb = document.getElementById(`ent-da-cb-${t}`); if (cb) { cb.checked = false; cb.disabled = false; } });
+    entDAUpdateCheckboxes();
+  });
+
+  document.getElementById('ent-da-confirm-input')?.addEventListener('input', () => entDASyncRunBtn());
+
+  document.getElementById('btn-ent-da-run')?.addEventListener('click', () => requireToken(runEntityDeleteAll));
+  document.getElementById('btn-ent-da-stop')?.addEventListener('click', () => entDelAll.controller?.abort());
+  document.getElementById('btn-ent-da-download-log')?.addEventListener('click', () =>
+    downloadLogCsv(_entDALogBase, 'entities-delete-all')
+  );
+  document.getElementById('btn-ent-da-again')?.addEventListener('click', () => {
+    document.getElementById('ent-da-running')?.classList.add('hidden');
+    document.getElementById('ent-da-results')?.classList.add('hidden');
+    const summaryEl = document.getElementById('ent-da-summary-alert');
+    if (summaryEl) summaryEl.innerHTML = '';
+    document.getElementById('ent-da-idle')?.classList.remove('hidden');
+    const input = document.getElementById('ent-da-confirm-input');
+    if (input) input.value = '';
+    entDASyncRunBtn();
+  });
+}
+
 // ── Navigation ────────────────────────────────────────────
 
 function setupEntitiesNav() {
@@ -1546,6 +1785,7 @@ function setupEntitiesNav() {
     'nav-entities-export':        'entities-export',
     'nav-entities-import':        'entities-import',
     'nav-entities-delete':        'entities-delete',
+    'nav-entities-delete-all':    'entities-delete-all',
   };
 
   Object.entries(navMap).forEach(([btnId, viewName]) => {
@@ -1567,6 +1807,7 @@ function initEntitiesModule() {
   initEntitiesTemplatesView();
   initEntitiesImportView();
   initEntitiesDeleteView();
+  initEntitiesDeleteAllView();
   setupEntitiesNav();
 
   // Templates: download selected button

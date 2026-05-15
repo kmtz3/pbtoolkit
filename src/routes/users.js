@@ -20,6 +20,11 @@ const { formatFieldValue } = require('../services/entities/exporter');
 const { schemaToType, normalizeSchema, EXCLUDED_FIELD_IDS } = require('../services/entities/configCache');
 const { formatCustomFieldValue, isMultiType } = require('../lib/fieldFormat');
 const { buildDomainToIdMap, buildIdToDomainMap } = require('../lib/domainCache');
+const {
+  filterSelectValue,
+  collectFieldValueWarnings,
+  preflightFieldValues,
+} = require('../lib/fieldValues');
 
 const STANDARD_FIELD_IDS = new Set(['name', 'email', 'description', 'owner', 'archived']);
 
@@ -385,6 +390,12 @@ router.post('/import/preview', pbAuth, async (req, res) => {
     }
   });
 
+  // ── Field value validation ──────────────────────────────────────────────────
+  const fieldValueWarnings = await collectFieldValueWarnings(mapping, rows, pbFetch, withRetry, {
+    autoCreateFieldValues: !!options.autoCreateFieldValues,
+  });
+  warnings.push(...fieldValueWarnings);
+
   res.json({
     valid: errors.length === 0,
     totalRows: rows.length,
@@ -403,10 +414,11 @@ router.post('/import/run', pbAuth, async (req, res) => {
   const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
   const { csvText, mapping, options = {} } = req.body;
   const {
-    multiSelectMode     = 'set',
-    bypassEmptyCells    = false,
-    bypassHtmlFormatter = false,
-    skipInvalidOwner    = false,
+    multiSelectMode       = 'set',
+    bypassEmptyCells      = false,
+    bypassHtmlFormatter   = false,
+    skipInvalidOwner      = false,
+    autoCreateFieldValues = false,
   } = options;
   if (!csvText || !mapping) return res.status(400).json({ error: 'Missing csvText or mapping' });
 
@@ -421,6 +433,11 @@ router.post('/import/run', pbAuth, async (req, res) => {
       sse.done();
       return;
     }
+
+    // ── Field value pre-flight ──────────────────────────────────────────────
+    const knownFieldValues = await preflightFieldValues(
+      mapping, rows, pbFetch, withRetry, sse, { autoCreateFieldValues }
+    );
 
     // Step 1: Build email → userId cache
     sse.progress('Building email cache…', 5);
@@ -489,7 +506,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
         if (pbId && UUID_RE.test(pbId)) {
           // UUID present → PATCH
           await withRetry(
-            () => patchUser(pbFetch, pbId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails }),
+            () => patchUser(pbFetch, pbId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails, knownFieldValues }),
             `patch user row ${rowNum}`
           );
           userId = pbId;
@@ -499,7 +516,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
           // Email match → PATCH
           const existingId = emailCache[email.toLowerCase()];
           await withRetry(
-            () => patchUser(pbFetch, existingId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails }),
+            () => patchUser(pbFetch, existingId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails, knownFieldValues }),
             `patch by email row ${rowNum}`
           );
           userId = existingId;
@@ -508,7 +525,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
         } else {
           // CREATE (without inline relationships — parent set separately below)
           const newUser = await withRetry(
-            () => createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmails),
+            () => createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmails, knownFieldValues),
             `create user row ${rowNum}`
           );
           userId = newUser.id;
@@ -552,12 +569,13 @@ router.post('/import/run', pbAuth, async (req, res) => {
 });
 
 // Domain-to-ID cache extracted to src/lib/domainCache.js — shared with companies.js.
+// filterSelectValue / pre-flight helpers extracted to src/lib/fieldValues.js.
 
 /**
  * Create a new user via POST /v2/entities.
  * Note: `archived` is NOT included on create (API rejects it).
  */
-async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmails) {
+async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmails, knownFieldValues = null) {
   const fields = {};
 
   const name = cell(row, mapping.nameColumn)?.trim();
@@ -578,7 +596,8 @@ async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmai
   for (const cf of mapping.customFields || []) {
     const rawVal = cell(row, cf.csvColumn);
     if (rawVal !== '' && rawVal != null) {
-      fields[cf.fieldId] = formatCustomFieldValue(rawVal, cf.fieldType);
+      const filteredVal = filterSelectValue(rawVal, cf, knownFieldValues);
+      if (filteredVal !== undefined) fields[cf.fieldId] = filteredVal;
     }
   }
 
@@ -591,7 +610,7 @@ async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmai
  * PATCH an existing user via PATCH /v2/entities/{id}.
  */
 async function patchUser(pbFetch, userId, row, mapping, options) {
-  const { multiSelectMode = 'set', bypassEmptyCells = false, bypassHtmlFormatter = false, memberEmails = new Set() } = options || {};
+  const { multiSelectMode = 'set', bypassEmptyCells = false, bypassHtmlFormatter = false, memberEmails = new Set(), knownFieldValues = null } = options || {};
   const ops = [];
 
   const name = cell(row, mapping.nameColumn)?.trim();
@@ -625,9 +644,10 @@ async function patchUser(pbFetch, userId, row, mapping, options) {
     const rawVal = cell(row, cf.csvColumn);
     const isEmpty = rawVal === '' || rawVal == null;
     if (!isEmpty) {
-      const value = formatCustomFieldValue(rawVal, cf.fieldType);
+      const filteredVal = filterSelectValue(rawVal, cf, knownFieldValues);
+      if (filteredVal === undefined) continue; // entirely unknown — skip
       const opName = isMultiType(cf.fieldType) ? multiSelectMode : 'set';
-      ops.push({ op: opName, path: cf.fieldId, value });
+      ops.push({ op: opName, path: cf.fieldId, value: filteredVal });
     } else if (!bypassEmptyCells) {
       ops.push({ op: 'clear', path: cf.fieldId });
     }

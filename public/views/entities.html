@@ -274,6 +274,10 @@
                     <input type="checkbox" id="ent-skip-invalid-owner" />
                     Skip owner if member does not exist <span class="info-icon" data-tip="When enabled, rows with an owner email that doesn't match a workspace member will have the owner field silently skipped instead of causing an API error">i</span>
                   </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="ent-auto-create-values" />
+                    Auto-create non-existing field values <span class="info-icon" data-tip="When enabled, unknown single/multi-select values will be created automatically before import. When disabled, unknown values are silently skipped.">i</span>
+                  </label>
                   <div>
                     <label class="checkbox-row">
                       <input type="checkbox" id="ent-autogen-extkeys" />
@@ -428,3 +432,86 @@
           </div>
 
         </div><!-- /view-entities-delete -->
+
+        <!-- ── ENTITIES DELETE ALL ── -->
+        <div id="view-entities-delete-all" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete entities by type</h2>
+              <div class="panel-subtitle">Select entity types to permanently delete. Deleting a parent type cascade-deletes all its children automatically.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Select types</strong> — check the entity types you want to delete. Selecting a parent type (e.g. Product) auto-checks its children — they'll be cascade-deleted by Productboard.</li>
+                  <li><strong>Export first</strong> — there is no way to recover deleted entities. Export a backup before continuing.</li>
+                  <li><strong>Only parents are deleted via API</strong> — locked checkboxes indicate types that will be removed by cascade, not by direct API call.</li>
+                  <li><strong>Confirm</strong> — type DELETE and click the button to start the deletion.</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- Idle / criteria state -->
+              <div id="ent-da-idle">
+
+                <div class="alert alert-danger mb-16">
+                  <span class="alert-icon">⛔</span>
+                  <span><strong>This permanently deletes all entities of the selected types.</strong> This action cannot be undone. Export a backup before continuing.</span>
+                </div>
+
+                <!-- Type checkboxes -->
+                <div class="mb-16">
+                  <div class="text-sm text-muted mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">Select entity types to delete</div>
+                  <div id="ent-da-checkboxes" class="ent-export-check-grid">
+                    <!-- Rendered by JS -->
+                  </div>
+                  <div class="flex gap-8 mt-8">
+                    <button class="btn btn-ghost btn-xs" id="btn-ent-da-select-all">Select all</button>
+                    <button class="btn btn-ghost btn-xs" id="btn-ent-da-clear-all">Deselect all</button>
+                  </div>
+                </div>
+
+                <!-- Cascade info (shown when locked/cascade types exist) -->
+                <div id="ent-da-cascade-info" class="alert alert-info hidden mb-16">
+                  <span class="alert-icon">ℹ️</span>
+                  <span id="ent-da-cascade-msg"></span>
+                </div>
+
+                <!-- Confirmation -->
+                <label class="text-sm text-muted mb-8" style="display:block">Type <strong>DELETE</strong> to enable the button.</label>
+                <input type="text" id="ent-da-confirm-input" placeholder="Type DELETE to confirm" autocomplete="off"
+                  style="display:block;width:100%;max-width:320px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-size:14px;margin-bottom:12px" />
+                <button class="btn btn-danger" id="btn-ent-da-run" disabled>⛔ Delete selected entity types</button>
+
+              </div><!-- /ent-da-idle -->
+
+              <!-- Running state -->
+              <div id="ent-da-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="ent-da-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="ent-da-progress-msg">Starting…</span>
+                  <span id="ent-da-progress-pct">0%</span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="btn-ent-da-stop">⏹ Stop</button>
+                <div id="ent-da-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header">
+                    <span>Live log</span>
+                    <span id="ent-da-log-counts" class="live-log-counts"></span>
+                    <button id="btn-ent-da-download-log" class="btn btn-ghost btn-sm hidden" style="margin-left:auto">↓ Download log</button>
+                  </div>
+                  <div id="ent-da-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div><!-- /ent-da-running -->
+
+              <!-- Results state -->
+              <div id="ent-da-results" class="hidden mt-8">
+                <div id="ent-da-summary-alert"></div>
+                <button class="btn btn-secondary mt-16" id="btn-ent-da-again">← Start over</button>
+              </div><!-- /ent-da-results -->
+
+            </div>
+          </div>
+        </div><!-- /view-entities-delete-all -->

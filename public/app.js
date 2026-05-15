@@ -277,7 +277,7 @@ function createViewState(prefix, states) {
 // ── Routing ─────────────────────────────────────────────────
 const VALID_TOOLS = new Set([
   'entities', 'notes', 'companies',
-  'member-activity', 'teams', 'notes-merge', 'companies-duplicate-cleanup',
+  'member-activity', 'teams', 'notes-merge', 'companies-duplicate-cleanup', 'tag-values',
 ]);
 
 const PAGE_META = {
@@ -287,6 +287,7 @@ const PAGE_META = {
   'member-activity': { title: 'Member Activity', desc: 'Export Productboard member activity data for license auditing and enablement planning.' },
   teams:                { title: 'Teams & Members', desc: 'Manage Productboard teams — edit names, handles, descriptions, and members. Import and export via CSV.' },
   'companies-duplicate-cleanup':  { title: 'Merge Duplicate Companies', desc: 'Relink notes and user associations from duplicate Productboard companies to their Salesforce canonical record, then delete the duplicates.' },
+  'tag-values':  { title: 'Tag Values', desc: 'Delete tag and select field values in bulk — remove all, delete from CSV, diff by CSV, or pick interactively from a checklist.' },
 };
 
 const DEFAULT_TITLE = 'PBToolkit \u2014 Productboard Importer, Exporter & Migration Tool';
@@ -307,6 +308,7 @@ const DEFAULT_VIEWS = {
   teams:             'members-teams-mgmt-manage',
   'notes-merge':        'notes-merge-view',
   'companies-duplicate-cleanup':  'companies-duplicate-cleanup',
+  'tag-values':  'tag-values-delete-all',
 };
 
 const TOOL_VIEWS = {
@@ -321,6 +323,7 @@ const TOOL_VIEWS = {
   ],
   'notes-merge':       ['notes-merge-view', 'notes-merge-empty'],
   'companies-duplicate-cleanup': ['companies-duplicate-cleanup'],
+  'tag-values': ['tag-values-delete-all', 'tag-values-delete-csv', 'tag-values-delete-diff', 'tag-values-delete-pick'],
 };
 
 let _currentTool = null;
@@ -522,7 +525,7 @@ document.querySelectorAll('.tool-card:not(.tool-card-soon)').forEach((card) => {
 });
 
 async function loadTool(toolName) {
-  const names = { companies: 'Companies & Users', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', teams: 'Teams', 'notes-merge': 'Merge Duplicate Notes', 'companies-duplicate-cleanup': 'Merge Duplicate Companies' };
+  const names = { companies: 'Companies & Users', notes: 'Notes', entities: 'Entities', 'member-activity': 'Member Activity', teams: 'Teams', 'notes-merge': 'Merge Duplicate Notes', 'companies-duplicate-cleanup': 'Merge Duplicate Companies', 'tag-values': 'Tag Values' };
   setText('topbar-tool-name', names[toolName] || toolName);
   showScreen('tool');
   _currentTool = toolName;
@@ -535,6 +538,7 @@ async function loadTool(toolName) {
   $('sidebar-teams').classList.toggle('hidden', toolName !== 'teams');
   $('sidebar-notes-merge').classList.toggle('hidden', toolName !== 'notes-merge');
   $('sidebar-companies-duplicate-cleanup').classList.toggle('hidden', toolName !== 'companies-duplicate-cleanup');
+  $('sidebar-tag-values').classList.toggle('hidden', toolName !== 'tag-values');
 
   try {
     if (toolName === 'companies') {
@@ -565,6 +569,7 @@ async function loadTool(toolName) {
   if (toolName === 'member-activity')  window.initMemberActivityModule?.();
   if (toolName === 'notes-merge')        window.initNotesMergeModule?.();
   if (toolName === 'companies-duplicate-cleanup')  window.initCompaniesDuplicateCleanupModule?.();
+  if (toolName === 'tag-values')  window.initTagValuesModule?.();
   if (toolName === 'teams') {
     window.initTeamsCrudModule?.();
     window.initTeamMembershipModule?.();
@@ -730,6 +735,7 @@ function showView(view, { updateUrl = false } = {}) {
     'users-export', 'users-import', 'users-delete-csv', 'users-delete-all',
     'notes-merge-view', 'notes-merge-empty',
     'companies-duplicate-cleanup', 'companies-duplicate-cleanup-csv',
+    'tag-values-delete-all', 'tag-values-delete-csv', 'tag-values-delete-diff', 'tag-values-delete-pick',
   ].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', v !== view);

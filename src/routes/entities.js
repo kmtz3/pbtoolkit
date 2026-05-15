@@ -48,6 +48,13 @@ const {
 } = require('../services/entities/exporter');
 const { applyMigrationMode } = require('../services/entities/migrationHelper');
 const { runImport } = require('../services/entities/importCoordinator');
+const {
+  fetchFieldValues,
+  createFieldValue,
+  collectCsvValues,
+  findMissingValues,
+  filterStatusValuesByType,
+} = require('../lib/fieldValues');
 
 const router = express.Router();
 
@@ -212,18 +219,54 @@ router.post('/preview', pbAuth, async (req, res) => {
     return res.status(400).json({ error: 'Missing files object' });
   }
 
-  // Validate owner emails against workspace members when skipInvalidOwner is OFF
+  // Fetch member emails (owner validation) and entity configs in parallel.
+  // Configs are needed to identify which mapped fields are select-type.
   let memberEmails = null;
-  if (!options.skipInvalidOwner) {
-    try {
-      const members = await fetchAllPages('/v2/members', 'fetch members for owner validation');
-      memberEmails = new Set(members.map((m) => (m.fields?.email || '').toLowerCase()).filter(Boolean));
-    } catch (err) {
-      console.error('entities/preview: failed to fetch members for owner validation:', err.message);
-      return res.status(500).json({ error: `Failed to fetch workspace members: ${parseApiError(err)}` });
+  let configs = {};
+  try {
+    const fetchMembers = options.skipInvalidOwner
+      ? Promise.resolve(null)
+      : fetchAllPages('/v2/members', 'fetch members for owner validation')
+          .then((ms) => new Set(ms.map((m) => (m.fields?.email || '').toLowerCase()).filter(Boolean)));
+
+    [memberEmails, configs] = await Promise.all([
+      fetchMembers,
+      fetchEntityConfigs(pbFetch, withRetry),
+    ]);
+  } catch (err) {
+    console.error('entities/preview: failed to fetch members or configs:', err.message);
+    return res.status(500).json({ error: `Failed to fetch workspace members: ${parseApiError(err)}` });
+  }
+
+  // ── Pass 1: collect all select field IDs referenced by any mapping ──────────
+  // Identifies which field values to fetch before running per-type validation.
+  const selectFieldIds = new Set(); // field IDs (UUID or "status") to fetch values for
+  for (const [entityType, fileData] of Object.entries(files)) {
+    if (!ENTITY_ORDER.includes(entityType) || !fileData?.csvText) continue;
+    const cols = (mappings[entityType]?.columns) || {};
+    const config = configs[entityType];
+    for (const internalId of Object.keys(cols)) {
+      if (internalId === 'status') {
+        selectFieldIds.add('status');
+      } else if (internalId.startsWith('custom__')) {
+        const fieldId = internalId.slice(8);
+        const fc = config?.customFields?.find((f) => f.id === fieldId);
+        if (fc && (fc.displayType === 'SingleSelect' || fc.displayType === 'MultiSelect')) {
+          selectFieldIds.add(fieldId);
+        }
+      }
     }
   }
 
+  // ── Fetch all needed field values in parallel ─────────────────────────────
+  const fieldValuesMap = new Map(); // fieldId → Map<normalised_name, {id, name, ...}>
+  await Promise.all([...selectFieldIds].map(async (fieldId) => {
+    try {
+      fieldValuesMap.set(fieldId, await fetchFieldValues(fieldId, pbFetch, withRetry));
+    } catch (_) { /* non-fatal — skip validation for this field if fetch fails */ }
+  }));
+
+  // ── Pass 2: per-type CSV parsing + validation ─────────────────────────────
   const results = {};
   let totalErrors = 0;
 
@@ -247,7 +290,6 @@ router.post('/preview', pbAuth, async (req, res) => {
     }
 
     if (rows.length > 50000) {
-      // Warn — don't block
       results[entityType] = {
         rowCount: rows.length,
         headers,
@@ -264,24 +306,76 @@ router.post('/preview', pbAuth, async (req, res) => {
     results[entityType].warnings.push(...warnings);
     totalErrors += errors.length;
 
-    // Owner email validation against workspace members
+    // Owner email validation
     if (memberEmails) {
       const cols = (mapping && mapping.columns) ? mapping.columns : {};
       const hasMapping = Object.keys(cols).length > 0;
-      const ownerCol = 'owner' in cols ? cols['owner']
-                     : (hasMapping ? null : 'Owner');
+      const ownerCol = 'owner' in cols ? cols['owner'] : (hasMapping ? null : 'Owner');
       if (ownerCol) {
         rows.forEach((row, i) => {
           const ownerVal = (cell(row, ownerCol) || '').trim().toLowerCase();
           if (ownerVal && !memberEmails.has(ownerVal)) {
             results[entityType].errors.push({
-              row: i + 2, // 1-indexed, row 1 is header
+              row: i + 2,
               field: ownerCol,
               message: `Owner '${ownerVal}' is not a workspace member — fix the email or enable "Skip owner if member does not exist"`,
             });
             totalErrors++;
           }
         });
+      }
+    }
+
+    // ── Field value validation ────────────────────────────────────────────────
+    const cols = mapping.columns || {};
+    const config = configs[entityType];
+
+    for (const [internalId, csvHeader] of Object.entries(cols)) {
+      if (internalId === 'status') {
+        // Status: validate against type-filtered values; always a hard error if unknown
+        const allStatusValues = fieldValuesMap.get('status');
+        if (!allStatusValues) continue;
+        const typeStatusValues = filterStatusValuesByType(allStatusValues, entityType);
+        const csvValues = collectCsvValues(rows, csvHeader, false);
+        const missing = findMissingValues(csvValues, typeStatusValues);
+        if (missing.length) {
+          const available = [...typeStatusValues.values()].map((v) => v.name).sort();
+          results[entityType].errors.push({
+            row: null,
+            field: 'Status',
+            message: `Unknown Status value(s): ${missing.join(', ')}. Available values: ${available.join(', ')}`,
+          });
+          totalErrors++;
+        }
+
+      } else if (internalId.startsWith('custom__')) {
+        const fieldId = internalId.slice(8);
+        const fc = config?.customFields?.find((f) => f.id === fieldId);
+        if (!fc || (fc.displayType !== 'SingleSelect' && fc.displayType !== 'MultiSelect')) continue;
+
+        const isMulti = fc.displayType === 'MultiSelect';
+        const knownValues = fieldValuesMap.get(fieldId);
+        if (!knownValues) continue;
+
+        const csvValues = collectCsvValues(rows, csvHeader, isMulti);
+        const missing = findMissingValues(csvValues, knownValues);
+        if (missing.length) {
+          const available = [...knownValues.values()].map((v) => v.name).sort();
+          if (options.autoCreateFieldValues) {
+            results[entityType].warnings.push({
+              row: null,
+              field: fc.name,
+              message: `New value(s) will be created for "${fc.name}": ${missing.join(', ')}`,
+              isInfo: true,
+            });
+          } else {
+            results[entityType].warnings.push({
+              row: null,
+              field: fc.name,
+              message: `Unknown "${fc.name}" value(s) — will be skipped: ${missing.join(', ')}. Available: ${available.join(', ')}`,
+            });
+          }
+        }
       }
     }
   }
@@ -644,8 +738,9 @@ router.post('/run', pbAuth, async (req, res) => {
   const sse = startSSE(res);
   const { files, mappings, options } = req.body || {};
 
-  // If skipInvalidOwner is enabled, pre-fetch workspace members and inject the email set into options
   let resolvedOptions = options || {};
+
+  // Pre-fetch workspace members when skipInvalidOwner is enabled
   if (resolvedOptions.skipInvalidOwner) {
     try {
       const members = await fetchAllPages('/v2/members', 'fetch members for owner validation');
@@ -661,6 +756,80 @@ router.post('/run', pbAuth, async (req, res) => {
 
   try {
     const configs = await fetchEntityConfigs(pbFetch, withRetry);
+
+    // ── Field value pre-flight ────────────────────────────────────────────────
+    // Collect all select field IDs referenced across all uploaded entity types,
+    // fetch their current allowed values, optionally auto-create missing ones,
+    // and pass knownFieldValues into importCoordinator so it can skip unknowns.
+    const knownFieldValues = new Map(); // fieldId → Map<normalised_name, {id, name}>
+    const selectFieldIds = new Map();   // fieldId → { isMulti, canAutoCreate }
+
+    for (const [entityType, fileData] of Object.entries(files || {})) {
+      if (!fileData?.csvText) continue;
+      const config = configs[entityType];
+      const cols = (mappings?.[entityType]?.columns) || {};
+      for (const internalId of Object.keys(cols)) {
+        if (internalId.startsWith('custom__')) {
+          const fieldId = internalId.slice(8);
+          const fc = config?.customFields?.find((f) => f.id === fieldId);
+          if (fc && (fc.displayType === 'SingleSelect' || fc.displayType === 'MultiSelect')) {
+            selectFieldIds.set(fieldId, { isMulti: fc.displayType === 'MultiSelect', canAutoCreate: true });
+          }
+        }
+        // Note: status is not included here — status can't be auto-created and
+        // unknown status values are caught as hard errors in /preview.
+      }
+    }
+
+    if (selectFieldIds.size > 0) {
+      sse.progress('Fetching allowed field values…', 2);
+      await Promise.all([...selectFieldIds.keys()].map(async (fieldId) => {
+        try {
+          knownFieldValues.set(fieldId, await fetchFieldValues(fieldId, pbFetch, withRetry));
+        } catch (_) { /* non-fatal */ }
+      }));
+
+      // Auto-create missing values pre-flight (before any row is processed)
+      if (resolvedOptions.autoCreateFieldValues) {
+        // Parse each entity-type CSV at most once, no matter how many select fields reference it.
+        const rowsByType = new Map();
+        const getRows = (entityType, csvText) => {
+          if (!rowsByType.has(entityType)) {
+            rowsByType.set(entityType, parseEntityCsv(csvText).rows);
+          }
+          return rowsByType.get(entityType);
+        };
+
+        for (const [fieldId, { isMulti }] of selectFieldIds) {
+          const known = knownFieldValues.get(fieldId);
+          if (!known) continue;
+
+          for (const [entityType, fileData] of Object.entries(files || {})) {
+            if (!fileData?.csvText) continue;
+            const cols = (mappings?.[entityType]?.columns) || {};
+            const csvHeader = cols[`custom__${fieldId}`];
+            if (!csvHeader) continue;
+
+            const rows = getRows(entityType, fileData.csvText);
+            const csvValues = collectCsvValues(rows, csvHeader, isMulti);
+            const missing = findMissingValues(csvValues, known);
+
+            for (const name of missing) {
+              try {
+                const created = await createFieldValue(fieldId, name, pbFetch, withRetry);
+                known.set(name.toLowerCase().trim(), { id: created.id, name });
+                sse.log('info', `Created field value "${name}"`, { fieldId });
+              } catch (err) {
+                sse.log('warn', `Could not create field value "${name}": ${parseApiError(err)}`, { fieldId });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    resolvedOptions = { ...resolvedOptions, knownFieldValues };
+
     const result = await runImport(
       files    || {},
       mappings || {},
@@ -709,6 +878,147 @@ router.post('/relationships', pbAuth, async (req, res) => {
       { abortSignal: { get aborted() { return sse.isAborted(); } } },
     );
     sse.complete(result);
+  } catch (err) {
+    sse.error(parseApiError(err));
+  } finally {
+    sse.done();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /delete/by-type  — delete all entities of selected types (SSE)
+//
+// Body: {
+//   types: string[],   // entity type keys, e.g. ['product', 'releaseGroup']
+// }
+//
+// Algorithm:
+//   1. Validate types.
+//   2. Compute "effective types" = types whose ancestor is NOT also in types.
+//      (If product is selected, component/feature/subfeature are cascade-deleted —
+//       no need to DELETE them explicitly; PB handles it.)
+//   3. For each effective type in ENTITY_ORDER: fetch all IDs, delete each via
+//      DELETE /v2/entities/{id}. PB cascade-deletes descendants automatically.
+// ---------------------------------------------------------------------------
+
+// Cascade-ancestor map: for each type, which types (if selected) would cascade-delete it.
+const ENTITY_CASCADE_ANCESTORS = {
+  keyResult:  ['objective'],
+  component:  ['product'],
+  feature:    ['component', 'product'],
+  subfeature: ['feature', 'component', 'product'],
+  release:    ['releaseGroup'],
+};
+
+router.post('/delete/by-type', pbAuth, async (req, res) => {
+  const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
+  const { types = [] } = req.body || {};
+
+  const sse = startSSE(res);
+
+  try {
+    const unknownTypes = types.filter((t) => !ENTITY_ORDER.includes(t));
+    if (unknownTypes.length) {
+      sse.error(`Unknown entity types: ${unknownTypes.join(', ')}`);
+      return;
+    }
+    if (!types.length) {
+      sse.error('No entity types selected');
+      return;
+    }
+
+    const typeSet = new Set(types);
+
+    // Only delete types whose ancestor is not also being deleted (PB cascades the rest)
+    const effectiveTypes = ENTITY_ORDER.filter((t) => {
+      if (!typeSet.has(t)) return false;
+      const ancestors = ENTITY_CASCADE_ANCESTORS[t] || [];
+      return !ancestors.some((a) => typeSet.has(a));
+    });
+
+    const cascadedTypes = types.filter((t) => !effectiveTypes.includes(t));
+
+    sse.progress(`Fetching entity counts for ${effectiveTypes.length} type(s)…`, 2);
+
+    // Phase 1: Fetch all IDs per effective type
+    const idsByType = {};
+    let totalCount = 0;
+
+    for (let i = 0; i < effectiveTypes.length; i++) {
+      if (sse.isAborted()) break;
+      const entityType = effectiveTypes[i];
+      const label = ENTITY_LABELS[entityType] || entityType;
+      sse.progress(`Fetching ${label}…`, 2 + Math.floor((i / effectiveTypes.length) * 16));
+      const entities = await fetchAllPages(
+        `/v2/entities?type[]=${entityType}`,
+        `fetch ${entityType} IDs for delete-by-type`
+      );
+      idsByType[entityType] = entities.map((e) => e.id);
+      totalCount += idsByType[entityType].length;
+      sse.log('info', `${label}: ${idsByType[entityType].length} found`);
+    }
+
+    if (totalCount === 0) {
+      sse.complete({
+        perType: effectiveTypes.map((t) => ({ type: t, total: 0, deleted: 0, skipped: 0, errors: 0 })),
+        total: 0, deleted: 0, skipped: 0, errors: 0,
+        cascadedTypes,
+      });
+      return;
+    }
+
+    sse.progress(`Found ${totalCount} entities across ${effectiveTypes.length} type(s). Starting deletion…`, 18);
+
+    // Phase 2: Delete
+    let totalDeleted = 0;
+    let totalSkipped = 0;
+    let totalErrors  = 0;
+    let processed    = 0;
+    const perType    = [];
+
+    for (const entityType of effectiveTypes) {
+      if (sse.isAborted()) break;
+      const ids   = idsByType[entityType];
+      const label = ENTITY_LABELS[entityType] || entityType;
+      let typeDeleted = 0, typeSkipped = 0, typeErrors = 0;
+
+      sse.log('info', `Deleting ${label} (${ids.length})…`);
+
+      for (const id of ids) {
+        if (sse.isAborted()) break;
+        try {
+          await withRetry(
+            () => pbFetch('delete', `/v2/entities/${id}`),
+            `delete ${entityType} ${id}`
+          );
+          typeDeleted++;
+          totalDeleted++;
+          if (typeDeleted % 50 === 0) sse.log('info', `Deleted ${typeDeleted}/${ids.length} ${label}…`);
+        } catch (err) {
+          if (err.status === 404) {
+            typeSkipped++;
+            totalSkipped++;
+          } else {
+            typeErrors++;
+            totalErrors++;
+            sse.log('error', `Failed to delete ${entityType} ${id}: ${parseApiError(err)}`, { id, entityType });
+          }
+        }
+        processed++;
+        sse.progress(
+          `Deleted ${totalDeleted} of ${totalCount}…`,
+          18 + Math.round((processed / totalCount) * 82)
+        );
+      }
+
+      perType.push({ type: entityType, total: ids.length, deleted: typeDeleted, skipped: typeSkipped, errors: typeErrors });
+      sse.log(
+        typeErrors > 0 ? 'warn' : 'success',
+        `${label}: ${typeDeleted} deleted · ${typeSkipped} skipped · ${typeErrors} error(s)`
+      );
+    }
+
+    sse.complete({ perType, total: totalCount, deleted: totalDeleted, skipped: totalSkipped, errors: totalErrors, cascadedTypes });
   } catch (err) {
     sse.error(parseApiError(err));
   } finally {
