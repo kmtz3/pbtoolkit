@@ -25,6 +25,7 @@ const { pbAuth } = require('../middleware/pbAuth');
 const { startSSE } = require('../lib/sse');
 const { parseApiError } = require('../lib/errorUtils');
 const { UUID_RE } = require('../lib/constants');
+const { extractCursor } = require('../lib/pbClient');
 
 const router = express.Router();
 
@@ -99,8 +100,7 @@ router.get('/origins', pbAuth, async (req, res) => {
         if (sys) originsSet.add(sys);
         else if (c.id) missingV2Ids.add(c.id);
       }
-      const next = r.links?.next || null;
-      cursor = next ? (next.match(/[?&]pageCursor=([^&]+)/)?.[1] ?? null) : null;
+      cursor = extractCursor(r.links?.next);
     } while (cursor);
 
     // v1 fallback: sourceOrigin for companies whose v2 source was null.
@@ -204,8 +204,7 @@ router.post('/scan', pbAuth, async (req, res) => {
         : '/v2/entities?type[]=company';
       const r = await withRetry(() => pbFetch('get', path), 'fetch v2 companies');
       if (r.data?.length) v2Companies.push(...r.data);
-      const next = r.links?.next || null;
-      cursor = next ? (next.match(/[?&]pageCursor=([^&]+)/)?.[1] ?? null) : null;
+      cursor = extractCursor(r.links?.next);
     } while (cursor);
 
     sse.log('info', `Fetched ${v2Companies.length} compan${v2Companies.length === 1 ? 'y' : 'ies'} from v2 API`);
@@ -701,9 +700,7 @@ async function fetchNoteCounts(pbFetch, withRetry, companyId) {
     for (const user of (ur.data || [])) {
       allUserIds.add(user.id);
     }
-    cursor = ur.links?.next
-      ? (ur.links.next.match(/pageCursor=([^&]+)/)?.[1] ?? null)
-      : null;
+    cursor = extractCursor(ur.links?.next);
   } while (cursor);
 
   // ── Query 3: relationships on the company itself ────────────────────────
@@ -738,9 +735,7 @@ async function fetchCompanyEntityRelationships(pbFetch, withRetry, companyId) {
       seen.add(key);
       out.push({ type: relType, targetId, targetType });
     }
-    cursor = r.links?.next
-      ? (r.links.next.match(/pageCursor=([^&]+)/)?.[1] ?? null)
-      : null;
+    cursor = extractCursor(r.links?.next);
   } while (cursor);
   return out;
 }
@@ -857,11 +852,59 @@ router.post('/run', pbAuth, async (req, res) => {
 
             try {
               if (targetType === 'user') {
-                // Step 2a: re-parent the user — once per user, even if they're
-                // the customer on multiple notes attributed to this duplicate.
-                // Without dedupe we'd PUT the same parent N times and inflate
-                // usersRelinked. (Confirmed live: notes/search filter
-                // customer=dup returns one row per note, each with target=user.)
+                // ── WORKAROUND for PB API bug (IS-8968) — remove once PB fix ships ──────
+                //
+                // BUG: when a user's parent company changes, PB's notes/search index does
+                // not reliably re-derive the note's company. Re-PUTting the same user as
+                // customer (the intuitive fix) is a no-op — the search index ignores it.
+                // Tracked in: https://productboard.atlassian.net/browse/IS-8968
+                // ETA for PB fix: ~week of 2026-05-22
+                //
+                // REVERT INSTRUCTIONS (once IS-8968 is resolved and deployed):
+                //   Delete Steps 2a, 2b, and 2c entirely and replace with these two calls:
+                //
+                //     // Relink user to target company
+                //     if (!relinkUserIds.has(targetId)) {
+                //       await withRetry(
+                //         () => pbFetch('put', `/v2/entities/${targetId}/relationships/parent`, {
+                //           data: { target: { id: dr.primaryId }, type: 'company' },
+                //         }),
+                //         `relink user ${targetId} to target company`
+                //       );
+                //       sse.log('success', `Relinked user ${targetId} → target company (via note ${noteId})`, { uuid: targetId });
+                //       relinkUserIds.add(targetId);
+                //       entry.usersRelinked++;
+                //       entry.userIds.push(targetId);
+                //       usersRelinked++;
+                //     }
+                //     // Relink note customer to same user (PB should now auto-resolve company)
+                //     await withRetry(
+                //       () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
+                //         data: { target: { type: 'user', id: targetId } },
+                //       }),
+                //       `refresh note ${noteId} customer attribution`
+                //     );
+                //     sse.log('success', `Relinked note ${noteId} → user ${targetId}`, { uuid: noteId });
+                //     entry.noteIds.push(noteId);
+                //     entry.notesRelinked++;
+                //     notesRelinked++;
+                //
+                // ────────────────────────────────────────────────────────────────────────
+
+                // Step 2a: break the stale denormalized source link FIRST, before touching
+                // the user. PUT note → company must happen before the user parent moves —
+                // doing the user PUT first leaves the note stuck under source even with the
+                // intermediate company PUT. (Live testing 2026-05-15, IS-8968.)
+                await withRetry(
+                  () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
+                    data: { target: { type: 'company', id: dr.primaryId } },
+                  }),
+                  `clear stale source link on note ${noteId}`
+                );
+                sse.log('info', `Cleared stale source link on note ${noteId} → target company`, { uuid: noteId });
+
+                // Step 2b: re-parent the user — once per user, even if they're the
+                // customer on multiple notes attributed to this duplicate.
                 if (!relinkUserIds.has(targetId)) {
                   await withRetry(
                     () => pbFetch('put', `/v2/entities/${targetId}/relationships/parent`, {
@@ -875,26 +918,44 @@ router.post('/run', pbAuth, async (req, res) => {
                   entry.userIds.push(targetId);
                   usersRelinked++;
                 } else {
-                  sse.log('info', `User ${targetId} already relinked — refreshing note ${noteId} attribution only`, { uuid: targetId });
+                  sse.log('info', `User ${targetId} already relinked — re-attributing note ${noteId} only`, { uuid: targetId });
                 }
 
-                // Step 2b: per-note customer "refresh" — PUT the note's
-                // customer back to the SAME user. Re-parenting the user alone
-                // is not enough: PB keeps a stale denormalized company link on
-                // each note that does not update when the user's parent moves.
-                // Re-PUTting the customer forces PB to re-derive the note's
-                // company from the user's (now-correct) parent. Confirmed live:
-                // without this step a note still appears under the old company
-                // tab in the UI; with it the note immediately moves to the new
-                // company. Runs once per note (not deduped) since each note
-                // carries its own stale attribution.
-                await withRetry(
-                  () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
-                    data: { target: { type: 'user', id: targetId } },
-                  }),
-                  `refresh note ${noteId} customer attribution`
-                );
-                sse.log('info', `Refreshed note ${noteId} customer attribution → forces re-derivation under target`, { uuid: noteId });
+                // Step 2c: reattribute note back to the user so PB re-derives company from
+                // the user's current (target) parent. The note-search index lags behind the
+                // user-parent update, so the note can bounce back to source on the first PUT.
+                // Verify after each attempt and retry until the note clears from the source
+                // index. (Live testing 2026-05-15: resolves in 1–2 attempts consistently.)
+                const MAX_REATTRIB_ATTEMPTS = 3;
+                let reattribDone = false;
+                for (let ra = 0; ra < MAX_REATTRIB_ATTEMPTS; ra++) {
+                  if (ra > 0) {
+                    await new Promise(r => setTimeout(r, 500));
+                    sse.log('info', `Retrying note ${noteId} reattribution (attempt ${ra + 1}/${MAX_REATTRIB_ATTEMPTS})…`, { uuid: noteId });
+                  }
+                  await withRetry(
+                    () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
+                      data: { target: { type: 'user', id: targetId } },
+                    }),
+                    `reattribute note ${noteId} to user (attempt ${ra + 1})`
+                  );
+                  // 1000ms: empirically the minimum for the note-search index to reflect
+                  // the user-parent change. 600ms was too short (triggered retry on ~every note).
+                  await new Promise(r => setTimeout(r, 1000));
+                  const verifyR = await withRetry(
+                    () => pbFetch('post', '/v2/notes/search', {
+                      data: { filter: { relationships: { customer: [{ id: dupId }] } } },
+                    }),
+                    `verify note ${noteId} cleared from source`
+                  );
+                  const stillOnSource = (verifyR.data || []).some(n => n.id === noteId);
+                  if (!stillOnSource) { reattribDone = true; break; }
+                }
+                if (reattribDone) {
+                  sse.log('info', `Reattributed note ${noteId} → user ${targetId} under target company`, { uuid: noteId });
+                } else {
+                  sse.log('warn', `Note ${noteId} reattributed to user but still visible under source after ${MAX_REATTRIB_ATTEMPTS} attempts — may resolve with time`, { uuid: noteId });
+                }
                 entry.noteIds.push(noteId);
                 entry.notesRelinked++;
                 notesRelinked++;
@@ -1025,8 +1086,7 @@ router.post('/run', pbAuth, async (req, res) => {
                 created = true;
                 sse.log('success', `Relinked ${relType} → ${relTargetType || 'entity'} ${relTargetId} (on target company)`, { uuid: relTargetId });
               } catch (relinkErr) {
-                const status = relinkErr?.status;
-                if (status === 409 || /409/.test(String(relinkErr?.message || ''))) {
+                if (relinkErr?.status === 409) {
                   // Defensive: API currently returns 201 on duplicate, but treat 409 as already-linked.
                   created = true;
                   sse.log('info', `${relType} → ${relTargetId} already linked on target, skipping create`, { uuid: relTargetId });

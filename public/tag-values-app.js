@@ -10,12 +10,23 @@ let _tvSelectedFieldId = '';  // currently selected field id (shared across view
 let _tvValues = [];           // [{ id, name }] — loaded for pick-mode checklist
 let _tvCheckedIds = new Set();// checked value IDs in pick mode
 let _tvDeleteCtrl = null;     // SSE abort controller
+let _tvInitDone = false;      // initTagValuesModule() guard
 
 // CSV modes
 let _tvCsvParsed = null;      // { raw, headers, rowCount } for delete-by-csv
 let _tvClearCsv = null;       // wireDropzone clear fn
 let _tvDiffParsed = null;     // { raw, headers, rowCount } for delete-by-diff
 let _tvClearDiff = null;      // wireDropzone clear fn
+
+// ── Module constants ──────────────────────────────────────────────────────────
+const TV_FIELD_PICKER_IDS = [
+  'tv-field-select-all',
+  'tv-field-select-csv',
+  'tv-field-select-diff',
+  'tv-field-select-pick',
+  'tv-field-select-pick-2',
+];
+const TV_TAG_NAME_HINTS = ['name', 'tag', 'value', 'tag_name', 'tag_value'];
 
 // ── DOM shortcuts ─────────────────────────────────────────────────────────────
 function tv$(id)       { return document.getElementById(id); }
@@ -36,14 +47,6 @@ function resetTagValuesState() {
 }
 
 // ── Field picker ──────────────────────────────────────────────────────────────
-
-const TV_FIELD_PICKER_IDS = [
-  'tv-field-select-all',
-  'tv-field-select-csv',
-  'tv-field-select-diff',
-  'tv-field-select-pick',
-  'tv-field-select-pick-2',
-];
 
 function tvPopulateFieldPicker(selectId) {
   const sel = tv$(selectId);
@@ -241,28 +244,40 @@ function tvUpdateCsvRunBtn() {
   if (btn) btn.disabled = !(_tvSelectedFieldId && _tvCsvParsed);
 }
 
-function tvLoadCsvFile(file) {
+// Shared CSV loader for delete-by-csv and delete-by-diff submodules.
+function tvLoadCsvForMode(file, opts) {
+  const { selectId, colWrapId, subtitleId, onParsed, updateBtn } = opts;
   const reader = new FileReader();
   reader.onload = (e) => {
     const text = e.target.result;
     const headers = parseCSVHeaders(text);
     const rowCount = countCSVDataRows(text);
     if (rowCount === 0) { showAlert('CSV appears empty.'); return; }
-    _tvCsvParsed = { raw: text, headers, rowCount };
+    onParsed({ raw: text, headers, rowCount });
 
-    const sel = tv$('tv-csv-column-select');
+    const sel = tv$(selectId);
     if (sel) {
       sel.innerHTML = headers.map((h) => `<option value="${esc(h)}">${esc(h)}</option>`).join('');
-      const auto = headers.find((h) => ['name', 'tag', 'value', 'tag_name', 'tag_value'].includes(h.toLowerCase()));
+      const auto = headers.find((h) => TV_TAG_NAME_HINTS.includes(h.toLowerCase()));
       if (auto) sel.value = auto;
     }
 
-    const colWrap = tv$('tv-csv-column-wrap');
+    const colWrap = tv$(colWrapId);
     if (colWrap) colWrap.style.display = '';
-    tvText('tv-csv-subtitle', `${rowCount.toLocaleString()} rows · ${headers.length} columns`);
-    tvUpdateCsvRunBtn();
+    tvText(subtitleId, `${rowCount.toLocaleString()} rows · ${headers.length} columns`);
+    updateBtn();
   };
   reader.readAsText(file);
+}
+
+function tvLoadCsvFile(file) {
+  tvLoadCsvForMode(file, {
+    selectId: 'tv-csv-column-select',
+    colWrapId: 'tv-csv-column-wrap',
+    subtitleId: 'tv-csv-subtitle',
+    onParsed: (p) => { _tvCsvParsed = p; },
+    updateBtn: tvUpdateCsvRunBtn,
+  });
 }
 
 function tvStartDeleteCsv() {
@@ -329,27 +344,13 @@ function tvUpdateDiffRunBtn() {
 }
 
 function tvLoadDiffFile(file) {
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const text = e.target.result;
-    const headers = parseCSVHeaders(text);
-    const rowCount = countCSVDataRows(text);
-    if (rowCount === 0) { showAlert('CSV appears empty.'); return; }
-    _tvDiffParsed = { raw: text, headers, rowCount };
-
-    const sel = tv$('tv-diff-column-select');
-    if (sel) {
-      sel.innerHTML = headers.map((h) => `<option value="${esc(h)}">${esc(h)}</option>`).join('');
-      const auto = headers.find((h) => ['name', 'tag', 'value', 'tag_name', 'tag_value'].includes(h.toLowerCase()));
-      if (auto) sel.value = auto;
-    }
-
-    const colWrap = tv$('tv-diff-column-wrap');
-    if (colWrap) colWrap.style.display = '';
-    tvText('tv-diff-subtitle', `${rowCount.toLocaleString()} rows · ${headers.length} columns`);
-    tvUpdateDiffRunBtn();
-  };
-  reader.readAsText(file);
+  tvLoadCsvForMode(file, {
+    selectId: 'tv-diff-column-select',
+    colWrapId: 'tv-diff-column-wrap',
+    subtitleId: 'tv-diff-subtitle',
+    onParsed: (p) => { _tvDiffParsed = p; },
+    updateBtn: tvUpdateDiffRunBtn,
+  });
 }
 
 function tvStartDeleteDiff() {
@@ -551,8 +552,6 @@ function tvStartDeletePick() {
 // ════════════════════════════════════════════════════════════════════════════════
 // MODULE INIT — called once by app.js after partial is loaded
 // ════════════════════════════════════════════════════════════════════════════════
-let _tvInitDone = false;
-
 function initTagValuesModule() {
   if (_tvInitDone) return;
   _tvInitDone = true;
@@ -671,7 +670,13 @@ function initTagValuesModule() {
     // checklist state was already cleared on complete/abort; reload needed
   });
 
-  // ── Token disconnect ──────────────────────────────────────────────────────────
+  // ── Token connect / disconnect ────────────────────────────────────────────────
+  // On reconnect, force a refresh of the field picker so a different workspace's
+  // fields aren't shown stale.
+  window.addEventListener('pb:connected', () => {
+    _tvFields = [];
+    tvLoadFields();
+  });
   window.addEventListener('pb:disconnect', resetTagValuesState);
 }
 

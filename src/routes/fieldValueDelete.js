@@ -98,7 +98,7 @@ router.get('/fields', pbAuth, async (_req, res) => {
 router.post('/values', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId } = req.body;
-  if (!fieldId) return res.status(400).json({ error: 'Missing fieldId' });
+  if (!fieldId || !UUID_RE.test(fieldId)) return res.status(400).json({ error: 'Invalid or missing fieldId' });
   try {
     const valMap = await fetchFieldValues(fieldId, pbFetch, withRetry);
     const values = [...valMap.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -117,7 +117,7 @@ router.post('/values', pbAuth, async (req, res) => {
 router.post('/delete/all', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId } = req.body;
-  if (!fieldId) return res.status(400).json({ error: 'Missing fieldId' });
+  if (!fieldId || !UUID_RE.test(fieldId)) return res.status(400).json({ error: 'Invalid or missing fieldId' });
 
   const sse = startSSE(res);
   try {
@@ -167,8 +167,8 @@ router.post('/delete/all', pbAuth, async (req, res) => {
 router.post('/delete/by-csv', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, csvText, column } = req.body;
-  if (!fieldId || !csvText || !column) {
-    return res.status(400).json({ error: 'Missing fieldId, csvText, or column' });
+  if (!fieldId || !UUID_RE.test(fieldId) || !csvText || !column) {
+    return res.status(400).json({ error: 'Invalid or missing fieldId, csvText, or column' });
   }
 
   const sse = startSSE(res);
@@ -230,8 +230,8 @@ router.post('/delete/by-csv', pbAuth, async (req, res) => {
 router.post('/delete/by-diff', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, csvText, column } = req.body;
-  if (!fieldId || !csvText || !column) {
-    return res.status(400).json({ error: 'Missing fieldId, csvText, or column' });
+  if (!fieldId || !UUID_RE.test(fieldId) || !csvText || !column) {
+    return res.status(400).json({ error: 'Invalid or missing fieldId, csvText, or column' });
   }
 
   const sse = startSSE(res);
@@ -289,8 +289,8 @@ router.post('/delete/by-diff', pbAuth, async (req, res) => {
 router.post('/delete/by-ids', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, values } = req.body;
-  if (!fieldId || !Array.isArray(values) || !values.length) {
-    return res.status(400).json({ error: 'Missing fieldId or values' });
+  if (!fieldId || !UUID_RE.test(fieldId) || !Array.isArray(values) || !values.length) {
+    return res.status(400).json({ error: 'Invalid or missing fieldId or values' });
   }
 
   const sse = startSSE(res);

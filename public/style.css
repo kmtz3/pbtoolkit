@@ -2189,3 +2189,10 @@ select.ri-input {
   }
   .nm-cmp-nav-controls { margin-left: 0; }
 }
+
+/* === Utility: visually disable a control (opacity + ignore clicks) ===
+   Toggle this class on labels/wrappers instead of mutating inline styles. */
+.is-disabled-ctl {
+  opacity: 0.4;
+  pointer-events: none;
+}

@@ -123,7 +123,7 @@
                         Keep duplicates (only relink, don't delete)
                         <span class="info-icon" data-tip="Notes and users are still moved to the target company, but the duplicate company is kept. Useful when you want to review before deleting — you can later remove them via Companies → Delete by CSV using the surviving-UUIDs CSV available after the run.">i</span>
                       </label>
-                      <label class="checkbox-label" id="dc-archive-label" style="margin-left:20px;opacity:0.4;pointer-events:none;">
+                      <label class="checkbox-label is-disabled-ctl" id="dc-archive-label" style="margin-left:20px;">
                         <input type="checkbox" id="dc-archive-checkbox">
                         Archive kept duplicates
                         <span class="info-icon" data-tip="Sets archived=true on each kept duplicate via the v2 API. The Productboard UI does not expose company archive directly, but archived companies are filtered out of most default views — useful for hiding the leftovers without deleting them.">i</span>
@@ -445,7 +445,7 @@
                       Keep duplicates (only relink, don't delete)
                       <span class="info-icon" data-tip="Notes and users are still moved to the target company, but the duplicate company is kept. Useful when you want to review before deleting — you can later remove them via Companies → Delete by CSV using the surviving-UUIDs CSV available after the run.">i</span>
                     </label>
-                    <label class="checkbox-label" id="dcm-archive-label" style="margin-left:20px;opacity:0.4;pointer-events:none;">
+                    <label class="checkbox-label is-disabled-ctl" id="dcm-archive-label" style="margin-left:20px;">
                       <input type="checkbox" id="dcm-archive-checkbox">
                       Archive kept duplicates
                       <span class="info-icon" data-tip="Sets archived=true on each kept duplicate via the v2 API. The Productboard UI does not expose company archive directly, but archived companies are filtered out of most default views — useful for hiding the leftovers without deleting them.">i</span>

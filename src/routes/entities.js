@@ -791,19 +791,26 @@ router.post('/run', pbAuth, async (req, res) => {
 
       // Auto-create missing values pre-flight (before any row is processed)
       if (resolvedOptions.autoCreateFieldValues) {
-        const { parseEntityCsv: _parse } = require('../services/entities/csvParser');
+        // Parse each entity-type CSV at most once, no matter how many select fields reference it.
+        const rowsByType = new Map();
+        const getRows = (entityType, csvText) => {
+          if (!rowsByType.has(entityType)) {
+            rowsByType.set(entityType, parseEntityCsv(csvText).rows);
+          }
+          return rowsByType.get(entityType);
+        };
+
         for (const [fieldId, { isMulti }] of selectFieldIds) {
           const known = knownFieldValues.get(fieldId);
           if (!known) continue;
 
-          // Find the CSV column header(s) for this field across all entity types
           for (const [entityType, fileData] of Object.entries(files || {})) {
             if (!fileData?.csvText) continue;
             const cols = (mappings?.[entityType]?.columns) || {};
             const csvHeader = cols[`custom__${fieldId}`];
             if (!csvHeader) continue;
 
-            const { rows } = _parse(fileData.csvText);
+            const rows = getRows(entityType, fileData.csvText);
             const csvValues = collectCsvValues(rows, csvHeader, isMulti);
             const missing = findMissingValues(csvValues, known);
 

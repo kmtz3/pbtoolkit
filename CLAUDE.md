@@ -22,7 +22,7 @@ This is a JavaScript/HTML/CSS browser extension and web toolkit project (PBToolk
 | Key | Value |
 |---|---|
 | **Project name** | PBToolkit |
-| **Root directory** | `/Users/klaramartinez/pb-tools/PBToolkit` |
+| **Root directory** | `~/Projects/pb-tools/PBToolkit` |
 | **Entry point** | `src/server.js` |
 | **Port** | 8080 (default; override with `PORT` env var) |
 | **Runtime** | Node 18+, Express, no frontend framework |

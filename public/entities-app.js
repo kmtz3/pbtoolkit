@@ -838,7 +838,7 @@ function entImportShowComplete(data) {
 
   // Per-entity breakdown table
   const rows = perEntity.map((e) =>
-    `<tr><td>${ENT_LABELS[e.entityType] || e.entityType}</td>` +
+    `<tr><td>${esc(ENT_LABELS[e.entityType] || e.entityType)}</td>` +
     `<td>${e.created}</td><td>${e.updated}</td><td>${e.errors}</td></tr>`
   ).join('');
 
@@ -1422,7 +1422,7 @@ function entDelShowComplete(data) {
 
   const rows = perType.map((e) =>
     `<tr>
-      <td>${ENT_LABELS[e.type] || e.type}</td>
+      <td>${esc(ENT_LABELS[e.type] || e.type)}</td>
       <td>${e.total}</td>
       <td>${e.deleted}</td>
       <td>${e.skipped}</td>
@@ -1656,7 +1656,7 @@ function entDAShowResults(data) {
 
   const rows = perType.map((e) =>
     `<tr>
-      <td>${ENT_LABELS[e.type] || esc(e.type)}</td>
+      <td>${esc(ENT_LABELS[e.type] || e.type)}</td>
       <td>${e.total}</td>
       <td>${e.deleted}</td>
       <td>${e.skipped}</td>

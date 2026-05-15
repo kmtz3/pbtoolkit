@@ -14,7 +14,7 @@
   let _runCtrl         = null;  // AbortController for run SSE
   let _auditLog        = null;  // cumulative action log across all run segments
   let _pendingRun      = null;  // original toProcess list for current run (enables continue)
-  let _pendingRunOpts  = null;  // { keepDuplicates, renamePrefix } captured at run start
+  let _pendingRunOpts  = null;  // { keepDuplicates, archiveDuplicates } captured at run start
   let _logAppender     = null;
   let _fromRun         = false; // true if last error came from /run (enables back-to-preview)
   let _originsLoaded   = false;
@@ -59,8 +59,7 @@
     if (gate) gate.checked = false;
     const keepCb    = dc$('dc-keep-checkbox');    if (keepCb)    keepCb.checked    = false;
     const archiveCb = dc$('dc-archive-checkbox'); if (archiveCb) archiveCb.checked = false;
-    const archiveLabel = dc$('dc-archive-label');
-    if (archiveLabel) { archiveLabel.style.opacity = '0.4'; archiveLabel.style.pointerEvents = 'none'; }
+    dc$('dc-archive-label')?.classList.add('is-disabled-ctl');
     unlockScanConfig(false);
   }
 
@@ -926,8 +925,7 @@
     dcmHide('dcm-error-download-log');
     const keepCb    = dcm$('dcm-keep-checkbox');    if (keepCb)    keepCb.checked    = false;
     const archiveCb = dcm$('dcm-archive-checkbox'); if (archiveCb) archiveCb.checked = false;
-    const archiveLabel = dcm$('dcm-archive-label');
-    if (archiveLabel) { archiveLabel.style.opacity = '0.4'; archiveLabel.style.pointerEvents = 'none'; }
+    dcm$('dcm-archive-label')?.classList.add('is-disabled-ctl');
     dcmGo('idle');
   }
 
@@ -1706,8 +1704,7 @@
     // Merge mode: keep checkbox toggles archive row enablement, and refreshes preview banner if visible
     dcm$('dcm-keep-checkbox')?.addEventListener('change', (e) => {
       const enabled = e.target.checked;
-      const al = dcm$('dcm-archive-label');
-      if (al) { al.style.opacity = enabled ? '1' : '0.4'; al.style.pointerEvents = enabled ? 'auto' : 'none'; }
+      dcm$('dcm-archive-label')?.classList.toggle('is-disabled-ctl', !enabled);
       if (!enabled) {
         const cb = dcm$('dcm-archive-checkbox'); if (cb) cb.checked = false;
       }
@@ -1879,8 +1876,7 @@
     // Merge mode: keep checkbox toggles archive row enablement, and refreshes preview banner if visible
     dc$('dc-keep-checkbox')?.addEventListener('change', (e) => {
       const enabled = e.target.checked;
-      const al = dc$('dc-archive-label');
-      if (al) { al.style.opacity = enabled ? '1' : '0.4'; al.style.pointerEvents = enabled ? 'auto' : 'none'; }
+      dc$('dc-archive-label')?.classList.toggle('is-disabled-ctl', !enabled);
       if (!enabled) {
         const cb = dc$('dc-archive-checkbox'); if (cb) cb.checked = false;
       }

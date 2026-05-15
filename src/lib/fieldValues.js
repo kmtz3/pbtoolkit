@@ -9,6 +9,10 @@
  * matches "in progress" from a CSV cell.
  */
 
+const { formatCustomFieldValue } = require('./fieldFormat');
+const { extractCursor } = require('./pbClient');
+const { parseApiError } = require('./errorUtils');
+
 /**
  * Fetch all allowed values for a field.
  * Cursor-paginated; handles any field size.
@@ -46,10 +50,7 @@ async function fetchFieldValues(fieldId, pbFetch, withRetry) {
       map.set(name.toLowerCase().trim(), entry);
     }
 
-    const nextUrl = r.links?.next;
-    if (!nextUrl) break;
-    const m = String(nextUrl).match(/[?&]pageCursor=([^&]+)/);
-    cursor = m ? decodeURIComponent(m[1]) : null;
+    cursor = extractCursor(r.links?.next);
   } while (cursor);
 
   return map;
@@ -139,10 +140,143 @@ function filterStatusValuesByType(allStatusValues, entityType) {
   return filtered;
 }
 
+/**
+ * Filter a custom field value against the allowed set when knownFieldValues is provided.
+ * For select: returns the formatted value if known, undefined if unknown (caller skips).
+ * For multiselect/tags: filters items to only known values; returns undefined if none remain.
+ * For non-select types: always returns the formatted value unchanged.
+ *
+ * Shared by companies.js and users.js import paths.
+ */
+function filterSelectValue(rawVal, cf, knownFieldValues) {
+  const isSelect = cf.fieldType === 'select';
+  const isMulti  = cf.fieldType === 'multiselect' || cf.fieldType === 'tags';
+
+  if (!knownFieldValues || (!isSelect && !isMulti)) {
+    return formatCustomFieldValue(rawVal, cf.fieldType);
+  }
+
+  const known = knownFieldValues.get(cf.fieldId);
+  if (!known) return formatCustomFieldValue(rawVal, cf.fieldType); // no data — pass through
+
+  if (isSelect) {
+    const s = String(rawVal).trim();
+    return known.has(s.toLowerCase()) ? { name: s } : undefined;
+  }
+
+  // multiselect / tags — filter items
+  const parts = String(rawVal).split(',').map((x) => x.trim()).filter(Boolean);
+  const knownParts = parts.filter((p) => known.has(p.toLowerCase()));
+  if (!knownParts.length) return undefined;
+  return knownParts.map((n) => ({ name: n }));
+}
+
+/**
+ * Filter mapping.customFields[] down to the select/multiselect/tags entries.
+ */
+function getSelectFields(mapping) {
+  return (mapping?.customFields || []).filter(
+    (cf) => cf.fieldType === 'select' || cf.fieldType === 'multiselect' || cf.fieldType === 'tags'
+  );
+}
+
+/**
+ * Build warning messages for select-field values present in the CSV but not in PB.
+ * Used by /preview endpoints (companies, users).
+ *
+ * Returns an array of { field, message, isInfo? } warnings.
+ * If autoCreateFieldValues is true, missing values produce info-level warnings
+ * indicating they will be created on run.
+ */
+async function collectFieldValueWarnings(mapping, rows, pbFetch, withRetry, { autoCreateFieldValues = false } = {}) {
+  const selectFields = getSelectFields(mapping);
+  const warnings = [];
+  if (!selectFields.length) return warnings;
+
+  const results = await Promise.allSettled(
+    selectFields.map((cf) => fetchFieldValues(cf.fieldId, pbFetch, withRetry))
+  );
+
+  selectFields.forEach((cf, idx) => {
+    if (results[idx].status !== 'fulfilled') return;
+    const knownValues = results[idx].value;
+    const isMulti = cf.fieldType === 'multiselect' || cf.fieldType === 'tags';
+    const csvValues = collectCsvValues(rows, cf.csvColumn, isMulti);
+    const missing = findMissingValues(csvValues, knownValues);
+    if (!missing.length) return;
+    const fieldLabel = cf.name || cf.csvColumn;
+    if (autoCreateFieldValues) {
+      warnings.push({
+        field: fieldLabel,
+        message: `New value(s) will be created for "${fieldLabel}": ${missing.join(', ')}`,
+        isInfo: true,
+      });
+    } else {
+      const available = [...knownValues.values()].map((v) => v.name).sort();
+      warnings.push({
+        field: fieldLabel,
+        message: `Unknown "${fieldLabel}" value(s) — will be skipped: ${missing.join(', ')}. Available: ${available.join(', ')}`,
+      });
+    }
+  });
+
+  return warnings;
+}
+
+/**
+ * Pre-fetch allowed values for every mapped select field. When autoCreateFieldValues
+ * is true, create any values present in the CSV that don't yet exist in PB.
+ *
+ * @param {object}   mapping
+ * @param {object[]} rows
+ * @param {Function} pbFetch
+ * @param {Function} withRetry
+ * @param {object}   sse                Optional SSE helper (for progress + log)
+ * @param {object}   options            { autoCreateFieldValues: boolean }
+ * @returns {Promise<Map<string, Map>>} knownFieldValues: fieldId → Map<normalised_name, {id, name}>
+ */
+async function preflightFieldValues(mapping, rows, pbFetch, withRetry, sse, { autoCreateFieldValues = false } = {}) {
+  const knownFieldValues = new Map();
+  const selectFields = getSelectFields(mapping);
+  if (!selectFields.length) return knownFieldValues;
+
+  if (sse) sse.progress('Fetching allowed field values…', 2);
+  await Promise.all(selectFields.map(async (cf) => {
+    try {
+      knownFieldValues.set(cf.fieldId, await fetchFieldValues(cf.fieldId, pbFetch, withRetry));
+    } catch (_) { /* non-fatal */ }
+  }));
+
+  if (!autoCreateFieldValues) return knownFieldValues;
+
+  for (const cf of selectFields) {
+    const known = knownFieldValues.get(cf.fieldId);
+    if (!known) continue;
+    const isMulti = cf.fieldType === 'multiselect' || cf.fieldType === 'tags';
+    const csvValues = collectCsvValues(rows, cf.csvColumn, isMulti);
+    const missing = findMissingValues(csvValues, known);
+    for (const name of missing) {
+      try {
+        const created = await createFieldValue(cf.fieldId, name, pbFetch, withRetry);
+        known.set(name.toLowerCase().trim(), { id: created.id, name });
+        if (sse) sse.log('info', `Created field value "${name}" for "${cf.name || cf.csvColumn}"`);
+      } catch (err) {
+        if (sse) sse.log('warn', `Could not create field value "${name}": ${parseApiError(err)}`);
+      }
+    }
+  }
+
+  return knownFieldValues;
+}
+
 module.exports = {
   fetchFieldValues,
   createFieldValue,
   collectCsvValues,
   findMissingValues,
   filterStatusValuesByType,
+  filterSelectValue,
+  collectFieldValueWarnings,
+  preflightFieldValues,
+  getSelectFields,
 };
