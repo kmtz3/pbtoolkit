@@ -161,6 +161,10 @@
                     <input type="checkbox" id="users-imp-skip-invalid-owner" />
                     Skip owner if member does not exist <span class="info-icon" data-tip="When enabled, rows with an owner email that doesn't match a workspace member will have the owner field silently skipped instead of causing an API error">i</span>
                   </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="users-imp-auto-create-values" />
+                    Auto-create non-existing field values <span class="info-icon" data-tip="When enabled, unknown single/multi-select values will be created automatically before import. When disabled, unknown values are silently skipped.">i</span>
+                  </label>
                 </div>
               </div>
               <hr class="panel-divider mt-16" />

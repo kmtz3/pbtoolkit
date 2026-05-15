@@ -20,6 +20,11 @@ const { formatFieldValue } = require('../services/entities/exporter');
 const { schemaToType, normalizeSchema, EXCLUDED_FIELD_IDS } = require('../services/entities/configCache');
 const { formatCustomFieldValue, isMultiType } = require('../lib/fieldFormat');
 const { buildDomainToIdMap } = require('../lib/domainCache');
+const {
+  filterSelectValue,
+  collectFieldValueWarnings,
+  preflightFieldValues,
+} = require('../lib/fieldValues');
 
 const STANDARD_FIELD_IDS = new Set(['name', 'description', 'owner']);
 
@@ -108,6 +113,7 @@ const BASE_FIELDS = [
   { key: 'sourceUrl',     label: 'source_url' },
   { key: 'created_at',    label: 'created_at' },
   { key: 'updated_at',    label: 'updated_at' },
+  { key: 'pb_html_link',  label: 'pb_html_link' },
 ];
 
 /**
@@ -218,6 +224,8 @@ function buildExportCSV(companies, v1Map, customFields, domainFieldId) {
         row[col.key] = entity.createdAt ?? '';
       } else if (col.key === 'updated_at') {
         row[col.key] = entity.updatedAt ?? '';
+      } else if (col.key === 'pb_html_link') {
+        row[col.key] = entity.links?.html ?? '';
       } else if (col.key.startsWith('custom__')) {
         row[col.key] = formatFieldValue(fields[col.id], col.schema);
       } else {
@@ -306,10 +314,16 @@ router.post('/import/preview', pbAuth, async (req, res) => {
     }
   });
 
+  // ── Field value validation ──────────────────────────────────────────────────
+  const warnings = await collectFieldValueWarnings(mapping, rows, pbFetch, withRetry, {
+    autoCreateFieldValues: !!options.autoCreateFieldValues,
+  });
+
   res.json({
     valid: errors.length === 0,
     totalRows: rows.length,
     errors,
+    warnings,
   });
 });
 
@@ -323,10 +337,11 @@ router.post('/import/run', pbAuth, async (req, res) => {
 
   const { csvText, mapping, options = {} } = req.body;
   const {
-    multiSelectMode     = 'set',
-    bypassEmptyCells    = false,
-    bypassHtmlFormatter = false,
-    skipInvalidOwner    = false,
+    multiSelectMode        = 'set',
+    bypassEmptyCells       = false,
+    bypassHtmlFormatter    = false,
+    skipInvalidOwner       = false,
+    autoCreateFieldValues  = false,
   } = options;
   if (!csvText || !mapping) return res.status(400).json({ error: 'Missing csvText or mapping' });
 
@@ -353,6 +368,14 @@ router.post('/import/run', pbAuth, async (req, res) => {
         }
       } catch (_) { /* non-fatal */ }
     }
+
+    // ── Field value pre-flight ──────────────────────────────────────────────
+    // Fetch allowed values for every mapped select/multiselect/tags field.
+    // When autoCreateFieldValues is ON, create any missing values upfront.
+    // knownFieldValues is then used in createCompanyV2/patchCompanyV2 to skip unknown values.
+    const knownFieldValues = await preflightFieldValues(
+      mapping, rows, pbFetch, withRetry, sse, { autoCreateFieldValues }
+    );
 
     // Step 1: Resolve domain field id from config (or use frontend override)
     // Domain is a named system-ish field with id="domain" — not UUID-keyed
@@ -403,7 +426,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
         if (pbId && UUID_RE.test(pbId)) {
           // UUID present → v2 PATCH
           await withRetry(
-            () => patchCompanyV2(pbFetch, pbId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails }, domainFieldId),
+            () => patchCompanyV2(pbFetch, pbId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails, knownFieldValues }, domainFieldId),
             `patch company row ${rowNum}`
           );
           companyId = pbId;
@@ -413,7 +436,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
           // Domain match → v2 PATCH by cached id
           const existingId = domainCache[domain];
           await withRetry(
-            () => patchCompanyV2(pbFetch, existingId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails }, domainFieldId),
+            () => patchCompanyV2(pbFetch, existingId, row, mapping, { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter, memberEmails, knownFieldValues }, domainFieldId),
             `patch by domain row ${rowNum}`
           );
           companyId = existingId;
@@ -422,7 +445,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
         } else {
           // Neither → v2 POST (create)
           const created_ = await withRetry(
-            () => createCompanyV2(pbFetch, row, mapping, domainFieldId, bypassHtmlFormatter, memberEmails),
+            () => createCompanyV2(pbFetch, row, mapping, domainFieldId, bypassHtmlFormatter, memberEmails, knownFieldValues),
             `create company row ${rowNum}`
           );
           companyId = created_.id;
@@ -461,12 +484,13 @@ router.post('/import/run', pbAuth, async (req, res) => {
 });
 
 // Domain cache extracted to src/lib/domainCache.js — shared with users.js.
+// filterSelectValue / pre-flight helpers extracted to src/lib/fieldValues.js.
 
 /**
  * POST /v2/entities — create a new company with all fields inline.
  * Custom fields and standard fields sent in one request.
  */
-async function createCompanyV2(pbFetch, row, mapping, domainFieldId, bypassHtmlFormatter = false, memberEmails = new Set()) {
+async function createCompanyV2(pbFetch, row, mapping, domainFieldId, bypassHtmlFormatter = false, memberEmails = new Set(), knownFieldValues = null) {
   const fields = {
     name: cell(row, mapping.nameColumn),
   };
@@ -487,8 +511,10 @@ async function createCompanyV2(pbFetch, row, mapping, domainFieldId, bypassHtmlF
 
   for (const cf of mapping.customFields || []) {
     const rawVal = cell(row, cf.csvColumn);
-    if (rawVal !== '' && rawVal != null) {
-      fields[cf.fieldId] = formatCustomFieldValue(rawVal, cf.fieldType);
+    if (rawVal === '' || rawVal == null) continue;
+    const filteredVal = filterSelectValue(rawVal, cf, knownFieldValues);
+    if (filteredVal !== undefined) {
+      fields[cf.fieldId] = filteredVal;
     }
   }
 
@@ -510,7 +536,7 @@ async function createCompanyV2(pbFetch, row, mapping, domainFieldId, bypassHtmlF
  * are combined into a single PATCH request.
  */
 async function patchCompanyV2(pbFetch, companyId, row, mapping, options, domainFieldId) {
-  const { multiSelectMode = 'set', bypassEmptyCells = false, bypassHtmlFormatter = false, memberEmails = new Set() } = options || {};
+  const { multiSelectMode = 'set', bypassEmptyCells = false, bypassHtmlFormatter = false, memberEmails = new Set(), knownFieldValues = null } = options || {};
   const ops = [];
 
   const name = cell(row, mapping.nameColumn);
@@ -538,9 +564,10 @@ async function patchCompanyV2(pbFetch, companyId, row, mapping, options, domainF
     const rawVal = cell(row, cf.csvColumn);
     const isEmpty = rawVal === '' || rawVal == null;
     if (!isEmpty) {
-      const value = formatCustomFieldValue(rawVal, cf.fieldType);
+      const filteredVal = filterSelectValue(rawVal, cf, knownFieldValues);
+      if (filteredVal === undefined) continue; // entirely unknown — skip
       const opName = isMultiType(cf.fieldType) ? multiSelectMode : 'set';
-      ops.push({ op: opName, path: cf.fieldId, value });
+      ops.push({ op: opName, path: cf.fieldId, value: filteredVal });
     } else if (!bypassEmptyCells) {
       ops.push({ op: 'clear', path: cf.fieldId });
     }

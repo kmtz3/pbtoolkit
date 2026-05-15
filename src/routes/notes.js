@@ -55,13 +55,13 @@ const CSV_FIELDS = [
   'pb_id', 'type', 'title', 'content', 'display_url',
   'user_email', 'company_domain', 'owner_email', 'creator_email',
   'tags', 'source_origin', 'source_record_id', 'archived', 'processed',
-  'created_at', 'updated_at', 'linked_entities',
+  'created_at', 'updated_at', 'linked_entities', 'pb_html_link',
 ];
 const CSV_HEADERS = [
   'PB Note ID', 'Note Type', 'Title', 'Content', 'Display URL',
   'User Email', 'Company Domain', 'Owner Email', 'Creator Email',
   'Tags', 'Source Origin', 'Source Record ID', 'Archived', 'Processed',
-  'Created At', 'Updated At', 'Linked Entities',
+  'Created At', 'Updated At', 'Linked Entities', 'PB HTML Link',
 ];
 
 function isTruthy(val) {
@@ -228,6 +228,7 @@ function buildNoteRow(note, userCache, companyCache, sourceMap) {
     created_at: note.createdAt || '',
     updated_at: note.updatedAt || '',
     linked_entities: linkedEntities,
+    pb_html_link: note.links?.html || '',
   };
 }
 
@@ -425,7 +426,7 @@ async function buildMigrationCache(pbFetch, withRetry, fieldName = 'original_uui
   for (const type of types) {
     const entities = await fetchAllEntitiesPost(
       pbFetch, withRetry,
-      { data: { types: [type] } },
+      { data: { filter: { type: [type] } } },
       `fetch ${type} for migration cache`
     );
     for (const entity of entities) {

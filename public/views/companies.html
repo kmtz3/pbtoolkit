@@ -165,6 +165,10 @@
                     <input type="checkbox" id="imp-skip-invalid-owner" />
                     Skip owner if member does not exist <span class="info-icon" data-tip="When enabled, rows with an owner email that doesn't match a workspace member will have the owner field silently skipped instead of causing an API error">i</span>
                   </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="imp-auto-create-values" />
+                    Auto-create non-existing field values <span class="info-icon" data-tip="When enabled, unknown single/multi-select values will be created automatically before import. When disabled, unknown values are silently skipped.">i</span>
+                  </label>
                 </div>
               </div>
               <hr class="panel-divider mt-16" />
@@ -201,6 +205,18 @@
                   </table>
                 </div>
                 <button class="btn btn-secondary mt-12" id="btn-back-to-map2">← Fix &amp; re-map</button>
+              </div>
+              <div id="validate-warnings" class="hidden mt-12">
+                <div class="alert alert-warn">
+                  <span class="alert-icon">ℹ️</span>
+                  <span id="validate-warning-summary"></span>
+                </div>
+                <div class="result-scroll mt-12">
+                  <table class="results-table">
+                    <thead><tr><th>Row</th><th>Column</th><th>Warning</th></tr></thead>
+                    <tbody id="validate-warning-rows"></tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>

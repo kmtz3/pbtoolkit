@@ -287,14 +287,16 @@ async function runValidation() {
   $('import-step-validate').scrollIntoView({ behavior: 'smooth', block: 'start' });
   hide('validate-ok');
   hide('validate-errors');
+  hide('validate-warnings');
   setText('validate-ok-msg', '');
   $('validate-error-rows').innerHTML = '';
+  $('validate-warning-rows').innerHTML = '';
 
   try {
     const res = await fetch('/api/import/preview', {
       method: 'POST',
       headers: buildHeaders(),
-      body: JSON.stringify({ csvText: parsedCSV.raw, mapping, options: { skipInvalidOwner: $('imp-skip-invalid-owner')?.checked || false } }),
+      body: JSON.stringify({ csvText: parsedCSV.raw, mapping, options: { skipInvalidOwner: $('imp-skip-invalid-owner')?.checked || false, autoCreateFieldValues: $('imp-auto-create-values')?.checked || false } }),
     });
     const data = await res.json();
 
@@ -315,6 +317,22 @@ async function runValidation() {
         tbody.appendChild(tr);
       }
       show('validate-errors');
+    }
+
+    // Show warnings (non-blocking)
+    if (data.warnings && data.warnings.length > 0) {
+      setText('validate-warning-summary', `${data.warnings.length} warning(s) — these won't block the import.`);
+      const warnTbody = $('validate-warning-rows');
+      for (const w of data.warnings) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${w.row ?? '—'}</td>
+          <td><span class="col-tag">${esc(w.field || '')}</span></td>
+          <td class="${w.isInfo ? 'text-info' : ''}">${esc(w.message)}</td>
+        `;
+        warnTbody.appendChild(tr);
+      }
+      show('validate-warnings');
     }
   } catch (e) {
     setText('validate-error-summary', `Validation request failed: ${e.message}`);
@@ -353,9 +371,10 @@ function runImport() {
   const msMode = document.querySelector('input[name="imp-ms-mode"]:checked');
   const options = {
     multiSelectMode:     msMode ? msMode.value : 'set',
-    bypassEmptyCells:    $('imp-bypass-empty')?.checked           || false,
-    bypassHtmlFormatter: $('imp-bypass-html')?.checked            || false,
-    skipInvalidOwner:    $('imp-skip-invalid-owner')?.checked     || false,
+    bypassEmptyCells:       $('imp-bypass-empty')?.checked              || false,
+    bypassHtmlFormatter:    $('imp-bypass-html')?.checked               || false,
+    skipInvalidOwner:       $('imp-skip-invalid-owner')?.checked        || false,
+    autoCreateFieldValues:  $('imp-auto-create-values')?.checked        || false,
   };
 
   importController = subscribeSSE(

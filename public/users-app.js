@@ -297,7 +297,7 @@ async function runUsersValidation() {
     const res = await fetch('/api/users/import/preview', {
       method: 'POST',
       headers: buildHeaders(),
-      body: JSON.stringify({ csvText: usersParsedCSV.raw, mapping, options: { skipInvalidOwner: $('users-imp-skip-invalid-owner')?.checked || false } }),
+      body: JSON.stringify({ csvText: usersParsedCSV.raw, mapping, options: { skipInvalidOwner: $('users-imp-skip-invalid-owner')?.checked || false, autoCreateFieldValues: $('users-imp-auto-create-values')?.checked || false } }),
     });
     const data = await res.json();
 
@@ -333,7 +333,7 @@ async function runUsersValidation() {
         tr.innerHTML = `
           <td>${w.row ?? '—'}</td>
           <td><span class="col-tag">${esc(w.field || '')}</span></td>
-          <td>${esc(w.message)}</td>
+          <td class="${w.isInfo ? 'text-info' : ''}">${esc(w.message)}</td>
         `;
         warnTbody.appendChild(tr);
       }
@@ -369,9 +369,10 @@ function runUsersImport() {
   const msMode = document.querySelector('input[name="users-imp-ms-mode"]:checked');
   const options = {
     multiSelectMode:     msMode ? msMode.value : 'set',
-    bypassEmptyCells:    $('users-imp-bypass-empty')?.checked        || false,
-    bypassHtmlFormatter: $('users-imp-bypass-html')?.checked         || false,
-    skipInvalidOwner:    $('users-imp-skip-invalid-owner')?.checked  || false,
+    bypassEmptyCells:       $('users-imp-bypass-empty')?.checked           || false,
+    bypassHtmlFormatter:    $('users-imp-bypass-html')?.checked            || false,
+    skipInvalidOwner:       $('users-imp-skip-invalid-owner')?.checked     || false,
+    autoCreateFieldValues:  $('users-imp-auto-create-values')?.checked     || false,
   };
 
   usersImportController = subscribeSSE(

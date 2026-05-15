@@ -1,0 +1,287 @@
+        <!-- ══════════════════════════════════════════
+             TAG VALUES — Delete all
+        ═══════════════════════════════════════════ -->
+        <div id="view-tag-values-delete-all" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete all tag values <span class="badge badge-beta">Beta</span></h2>
+              <div class="panel-subtitle">Permanently delete every option from a tag or select field — removes values from the field's option list and unsets them from every entity that has them assigned.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Select a field</strong> — choose the tag or select field to clean up. Only UUID-keyed custom fields are listed (Tags, MultiSelect, SingleSelect). Status fields are not supported.</li>
+                  <li><strong>Confirm</strong> — type DELETE to enable the button.</li>
+                  <li><strong>Effect</strong> — every value is removed from the field's option list. Any entity that had the value assigned will have it silently unset (<code>force=true</code>).</li>
+                  <li><strong>No undo</strong> — deleted values cannot be recovered. Export your data before running if needed.</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div id="tv-da-idle">
+                <div class="field mb-20">
+                  <label for="tv-field-select-all">Field</label>
+                  <select id="tv-field-select-all" class="form-select" style="max-width:400px">
+                    <option value="">Loading fields…</option>
+                  </select>
+                  <div id="tv-da-field-hint" class="text-sm text-muted mt-4" style="display:none"></div>
+                </div>
+
+                <div class="alert alert-danger mb-16">
+                  <span class="alert-icon">⛔</span>
+                  <span><strong>This permanently removes every value from the selected field and unsets them from all entities.</strong> There is no undo.</span>
+                </div>
+
+                <label for="tv-da-confirm-input" class="text-sm text-muted mb-8" style="display:block">Type <strong>DELETE</strong> to enable the button.</label>
+                <input type="text" id="tv-da-confirm-input" placeholder="Type DELETE to confirm" autocomplete="off"
+                  style="display:block;width:100%;max-width:320px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-size:14px;margin-bottom:12px" />
+                <button class="btn btn-danger" id="btn-tv-da-run" disabled>⛔ Delete all values</button>
+              </div>
+
+              <div id="tv-da-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="tv-da-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="tv-da-progress-msg">Starting…</span>
+                  <span id="tv-da-progress-pct">0%</span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="btn-tv-da-stop">⏹ Stop</button>
+                <div id="tv-da-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header"><span>Live log</span></div>
+                  <div id="tv-da-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+
+              <div id="tv-da-results" class="hidden">
+                <div id="tv-da-summary"></div>
+                <button class="btn btn-secondary mt-16" id="btn-tv-da-again">← Start over</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-tag-values-delete-all -->
+
+        <!-- ══════════════════════════════════════════
+             TAG VALUES — Delete from CSV
+        ═══════════════════════════════════════════ -->
+        <div id="view-tag-values-delete-csv" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete tag values from CSV <span class="badge badge-beta">Beta</span></h2>
+              <div class="panel-subtitle">Delete specific field values by name — upload a CSV with the values you want to remove. Only values that match a CSV row are deleted.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>CSV format</strong> — one tag value name per row in a single column. A header row is expected (e.g. <code>tag_name</code>). Extra columns are ignored.</li>
+                  <li><strong>Matching</strong> — case-insensitive, trimmed. Values not found in the field are silently skipped.</li>
+                  <li><strong>Effect</strong> — matched values are removed from the field's option list and unset from all entities that had them assigned (<code>force=true</code>).</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div id="tv-csv-idle">
+                <div class="field mb-20">
+                  <label for="tv-field-select-csv">Field</label>
+                  <select id="tv-field-select-csv" class="form-select" style="max-width:400px">
+                    <option value="">Loading fields…</option>
+                  </select>
+                </div>
+
+                <div class="field mb-16">
+                  <label>CSV file <span class="label-hint">(one value name per row)</span></label>
+                  <div class="dropzone" id="tv-csv-dropzone">
+                    <input type="file" id="tv-csv-file-input" accept=".csv,text/csv" />
+                    <span class="dropzone-label">Drop CSV here or click to browse</span>
+                  </div>
+                </div>
+
+                <div id="tv-csv-column-wrap" class="field mb-20" style="display:none">
+                  <label for="tv-csv-column-select">Column containing tag names</label>
+                  <select id="tv-csv-column-select" class="form-select" style="max-width:280px"></select>
+                  <div id="tv-csv-subtitle" class="text-sm text-muted mt-4"></div>
+                </div>
+
+                <button class="btn btn-danger" id="btn-tv-csv-run" disabled>🗑 Delete from CSV</button>
+              </div>
+
+              <div id="tv-csv-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="tv-csv-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="tv-csv-progress-msg">Starting…</span>
+                  <span id="tv-csv-progress-pct">0%</span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="btn-tv-csv-stop">⏹ Stop</button>
+                <div id="tv-csv-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header"><span>Live log</span></div>
+                  <div id="tv-csv-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+
+              <div id="tv-csv-results" class="hidden">
+                <div id="tv-csv-summary"></div>
+                <button class="btn btn-secondary mt-16" id="btn-tv-csv-again">← Start over</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-tag-values-delete-csv -->
+
+        <!-- ══════════════════════════════════════════
+             TAG VALUES — Diff by CSV (delete all NOT in CSV)
+        ═══════════════════════════════════════════ -->
+        <div id="view-tag-values-delete-diff" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Diff by CSV <span class="badge badge-beta">Beta</span></h2>
+              <div class="panel-subtitle">Upload a CSV with the values you want to <strong>keep</strong> — everything else is deleted. Useful for pruning a field down to a canonical list.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>CSV format</strong> — one tag value name per row. Values listed in the CSV are <em>kept</em>. All others are deleted.</li>
+                  <li><strong>Matching</strong> — case-insensitive, trimmed. Values in the CSV that don't exist in the field are silently ignored.</li>
+                  <li><strong>Effect</strong> — unmatched values are removed from the field's option list and unset from all entities that had them assigned (<code>force=true</code>).</li>
+                  <li><strong>No undo</strong> — export your data first if you need a rollback option.</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div id="tv-diff-idle">
+                <div class="field mb-20">
+                  <label for="tv-field-select-diff">Field</label>
+                  <select id="tv-field-select-diff" class="form-select" style="max-width:400px">
+                    <option value="">Loading fields…</option>
+                  </select>
+                </div>
+
+                <div class="field mb-16">
+                  <label>CSV of values to <strong>keep</strong> <span class="label-hint">(one value name per row)</span></label>
+                  <div class="dropzone" id="tv-diff-dropzone">
+                    <input type="file" id="tv-diff-file-input" accept=".csv,text/csv" />
+                    <span class="dropzone-label">Drop CSV here or click to browse</span>
+                  </div>
+                </div>
+
+                <div id="tv-diff-column-wrap" class="field mb-20" style="display:none">
+                  <label for="tv-diff-column-select">Column containing tag names to keep</label>
+                  <select id="tv-diff-column-select" class="form-select" style="max-width:280px"></select>
+                  <div id="tv-diff-subtitle" class="text-sm text-muted mt-4"></div>
+                </div>
+
+                <button class="btn btn-danger" id="btn-tv-diff-run" disabled>⚠️ Delete values not in CSV</button>
+              </div>
+
+              <div id="tv-diff-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="tv-diff-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="tv-diff-progress-msg">Starting…</span>
+                  <span id="tv-diff-progress-pct">0%</span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="btn-tv-diff-stop">⏹ Stop</button>
+                <div id="tv-diff-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header"><span>Live log</span></div>
+                  <div id="tv-diff-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+
+              <div id="tv-diff-results" class="hidden">
+                <div id="tv-diff-summary"></div>
+                <button class="btn btn-secondary mt-16" id="btn-tv-diff-again">← Start over</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-tag-values-delete-diff -->
+
+        <!-- ══════════════════════════════════════════
+             TAG VALUES — Delete by selecting (checklist)
+        ═══════════════════════════════════════════ -->
+        <div id="view-tag-values-delete-pick" class="hidden">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Delete by selecting <span class="badge badge-beta">Beta</span></h2>
+              <div class="panel-subtitle">Load all values for a field and pick which ones to delete using a checklist.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>Select a field</strong> — choose which tag or select field to manage.</li>
+                  <li><strong>Load values</strong> — fetches all current values from Productboard.</li>
+                  <li><strong>Select</strong> — check values to delete. Use Select all / Invert / Deselect all to bulk-manage.</li>
+                  <li><strong>Delete selected</strong> — selected values are removed from the field and unset from all assigned entities (<code>force=true</code>).</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <!-- ── Idle: field picker + load button ── -->
+              <div id="tv-pick-idle">
+                <div class="field mb-20">
+                  <label for="tv-field-select-pick">Field</label>
+                  <select id="tv-field-select-pick" class="form-select" style="max-width:400px">
+                    <option value="">Loading fields…</option>
+                  </select>
+                </div>
+                <button class="btn btn-secondary" id="btn-tv-pick-load">Load values</button>
+                <div id="tv-pick-load-error" class="alert alert-danger hidden mt-12">
+                  <span class="alert-icon">⚠️</span>
+                  <span id="tv-pick-load-error-msg"></span>
+                </div>
+              </div>
+
+              <!-- ── Loaded: checklist ── -->
+              <div id="tv-pick-checklist-wrap" class="hidden">
+                <div class="field mb-8">
+                  <label for="tv-field-select-pick-2">Field</label>
+                  <select id="tv-field-select-pick-2" class="form-select" style="max-width:400px"></select>
+                </div>
+                <button class="btn btn-sm btn-ghost mt-4 mb-16" id="btn-tv-pick-reload">↺ Reload values</button>
+
+                <!-- Checklist controls -->
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                  <button class="btn btn-ghost btn-sm" id="btn-tv-pick-select-all">Select all</button>
+                  <button class="btn btn-ghost btn-sm" id="btn-tv-pick-invert">Invert selection</button>
+                  <button class="btn btn-ghost btn-sm" id="btn-tv-pick-deselect-all">Deselect all</button>
+                  <span id="tv-pick-count" class="text-sm text-muted" style="margin-left:4px">0 selected</span>
+                </div>
+
+                <!-- Scrollable checklist -->
+                <div class="checkbox-scroll-list" id="tv-pick-list" style="max-height:260px;margin-bottom:16px"></div>
+
+                <button class="btn btn-danger" id="btn-tv-pick-delete" disabled>🗑 Delete selected (0)</button>
+              </div>
+
+              <!-- ── Running ── -->
+              <div id="tv-pick-running" class="hidden">
+                <div class="progress-wrap">
+                  <div class="progress-bar" id="tv-pick-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="progress-label">
+                  <span id="tv-pick-progress-msg">Starting…</span>
+                  <span id="tv-pick-progress-pct">0%</span>
+                </div>
+                <button class="btn btn-danger btn-sm mt-8" id="btn-tv-pick-stop">⏹ Stop</button>
+                <div id="tv-pick-live-log" class="live-log hidden mt-16">
+                  <div class="live-log-header"><span>Live log</span></div>
+                  <div id="tv-pick-log-entries" class="live-log-scroll"></div>
+                </div>
+              </div>
+
+              <!-- ── Results ── -->
+              <div id="tv-pick-results" class="hidden">
+                <div id="tv-pick-summary"></div>
+                <button class="btn btn-secondary mt-16" id="btn-tv-pick-again">← Back to checklist</button>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /view-tag-values-delete-pick -->
