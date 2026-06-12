@@ -869,4 +869,137 @@ router.post('/companies/source-migration/v2-to-v1', pbAuth, async (_req, res) =>
   }
 });
 
+/**
+ * POST /api/companies/sf-migration/run
+ * SSE endpoint: swaps the Salesforce source record ID on companies.
+ * For each CSV row, patches:
+ *   - v1: sourceOrigin = 'salesforce', sourceRecordId = newSfId
+ *   - v2: metadata.source = { system: 'salesforce', recordId: newSfId }
+ *         + optionally: patch[{ op:'set', path:textFieldId, value:oldSfId }]
+ * Only source fields (and the optional text field) are written — all other
+ * company data is left unchanged.
+ *
+ * Body: { csvText, uuidColumn, newSfIdColumn, oldSfIdColumn?, textFieldId?, resumeFromRow? }
+ */
+router.post('/companies/sf-migration/run', pbAuth, async (req, res) => {
+  const { pbFetch, withRetry } = res.locals.pbClient;
+  const {
+    csvText,
+    uuidColumn,
+    newSfIdColumn,
+    oldSfIdColumn  = '',
+    textFieldId    = '',
+    resumeFromRow  = 0,
+  } = req.body;
+
+  if (!csvText || !uuidColumn || !newSfIdColumn) {
+    return res.status(400).json({ error: 'Missing csvText, uuidColumn, or newSfIdColumn' });
+  }
+
+  const startRow = Math.max(0, parseInt(resumeFromRow, 10) || 0);
+  const sse = startSSE(res);
+
+  try {
+    const { rows } = parseCSV(csvText);
+    const total = rows.length;
+
+    if (total === 0) {
+      sse.complete({ total: 0, migrated: 0, partial: 0, errors: 0, skipped: 0 });
+      return;
+    }
+
+    let migrated = 0;
+    let partial  = 0;
+    let errors   = 0;
+    let skipped  = 0;
+
+    if (startRow > 0) sse.progress(`Resuming from row ${startRow + 1} of ${total}…`, Math.round((startRow / total) * 100));
+
+    let lastCompletedRow = startRow;
+
+    for (let i = startRow; i < rows.length; i++) {
+      if (sse.isAborted()) break;
+
+      const row    = rows[i];
+      const pct    = Math.round(((i + 1) / total) * 100);
+      const uuid   = cell(row, uuidColumn)?.trim()    || '';
+      const newSfId = cell(row, newSfIdColumn)?.trim() || '';
+      const oldSfId = oldSfIdColumn ? (cell(row, oldSfIdColumn)?.trim() || '') : '';
+
+      if (!uuid || !UUID_RE.test(uuid)) {
+        skipped++;
+        sse.log('warn', `Row ${i + 1}: Skipped — missing or invalid UUID`, { row: i + 1 });
+        lastCompletedRow = i + 1;
+        sse.progress(`Processing row ${lastCompletedRow}/${total}…`, pct, { row: lastCompletedRow });
+        continue;
+      }
+
+      if (!newSfId) {
+        skipped++;
+        sse.log('warn', `Row ${i + 1}: Skipped — new Salesforce ID is empty (UUID: ${uuid})`, { uuid, row: i + 1 });
+        lastCompletedRow = i + 1;
+        sse.progress(`Processing row ${lastCompletedRow}/${total}…`, pct, { row: lastCompletedRow });
+        continue;
+      }
+
+      let v1Ok = false;
+      let v2Ok = false;
+
+      // v1 PATCH — source.origin + source.record_id
+      try {
+        await withRetry(
+          () => pbFetch('patch', `/companies/${uuid}`, {
+            data: { source: { origin: 'salesforce', record_id: newSfId } },
+          }),
+          `sf-migration v1 patch ${uuid}`
+        );
+        v1Ok = true;
+      } catch (err) {
+        sse.log('error', `Row ${i + 1}: v1 patch failed for ${uuid} — ${parseApiError(err)}`, { uuid, row: i + 1 });
+      }
+
+      // v2 PATCH — metadata.source + optional text field for old ID
+      try {
+        const v2Data = {
+          metadata: { source: { system: 'salesforce', recordId: newSfId } },
+        };
+        if (textFieldId && oldSfId) {
+          v2Data.patch = [{ op: 'set', path: textFieldId, value: oldSfId }];
+        }
+        await withRetry(
+          () => pbFetch('patch', `/v2/entities/${uuid}`, { data: v2Data }),
+          `sf-migration v2 patch ${uuid}`
+        );
+        v2Ok = true;
+      } catch (err) {
+        sse.log('error', `Row ${i + 1}: v2 patch failed for ${uuid} — ${parseApiError(err)}`, { uuid, row: i + 1 });
+      }
+
+      if (v1Ok && v2Ok) {
+        migrated++;
+      } else if (v1Ok || v2Ok) {
+        partial++;
+        sse.log('warn', `Row ${i + 1}: Partial update for ${uuid} (v1:${v1Ok ? 'ok' : 'fail'} v2:${v2Ok ? 'ok' : 'fail'})`, { uuid, row: i + 1 });
+      } else {
+        errors++;
+      }
+
+      lastCompletedRow = i + 1;
+      sse.progress(`Processing row ${lastCompletedRow}/${total}…`, pct, { row: lastCompletedRow });
+
+      // Periodic checkpoint every 1000 rows (frontend also tracks via progress.detail.row)
+      if (lastCompletedRow % 1000 === 0) sse.checkpoint(lastCompletedRow);
+    }
+
+    const stopped = sse.isAborted();
+    if (!stopped) sse.progress('Migration complete!', 100);
+
+    sse.complete({ total, migrated, partial, errors, skipped, stopped });
+  } catch (err) {
+    sse.error(parseApiError(err));
+  } finally {
+    sse.done();
+  }
+});
+
 module.exports = router;
