@@ -99,7 +99,7 @@ async function tvLoadFields() {
     if (!r.ok) throw new Error(data.error || 'Failed to load fields');
     _tvFields = data.fields || [];
   } catch (err) {
-    showAlert('Failed to load tag fields: ' + err.message);
+    showAlert('Failed to load fields: ' + err.message);
     _tvFields = [];
   }
   TV_FIELD_PICKER_IDS.forEach((id) => {
@@ -555,7 +555,15 @@ function tvStartDeletePick() {
 function initTagValuesModule() {
   if (_tvInitDone) return;
   _tvInitDone = true;
+  try {
+    _initTagValuesModuleBody();
+  } catch (e) {
+    _tvInitDone = false;
+    throw e;
+  }
+}
 
+function _initTagValuesModuleBody() {
   // Load fields immediately
   requireToken(tvLoadFields);
 

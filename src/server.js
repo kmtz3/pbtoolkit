@@ -105,12 +105,15 @@ app.get('/api/config', (_req, res) => {
   });
 });
 
+const isLocalhost = (req) => req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1';
+
 // Burst limiter: max 10 requests per second per IP
 const burstLimiter = rateLimit({
   windowMs: 1000,
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: isLocalhost,
   message: { error: 'Too many requests in a short period, please slow down.' },
 });
 
@@ -120,6 +123,7 @@ const sustainedLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: isLocalhost,
   message: { error: 'Rate limit exceeded. Try again later.' },
 });
 
@@ -128,6 +132,7 @@ const speedLimiter = slowDown({
   windowMs: 15 * 60 * 1000,
   delayAfter: 50,
   delayMs: (hits) => hits * 200,
+  skip: isLocalhost,
 });
 
 if (process.env.NODE_ENV !== 'test') {

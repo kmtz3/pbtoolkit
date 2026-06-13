@@ -101,7 +101,7 @@ const BASE_FIELDS = [
   { key: 'linked_components',       label: 'linked_components' },
   { key: 'linked_products',         label: 'linked_products' },
   { key: 'linked_subfeatures',      label: 'linked_subfeatures' },
-  { key: 'sourceSystem',             label: 'source_system' },
+  { key: 'sourceSystem',             label: 'source_origin' },
   { key: 'sourceRecordId',           label: 'source_record_id' },
   { key: 'sourceUrl',                label: 'source_url' },
   { key: 'created_at',              label: 'created_at' },
@@ -601,7 +601,13 @@ async function createUser(pbFetch, row, mapping, bypassHtmlFormatter, memberEmai
     }
   }
 
-  const payload = { data: { type: 'user', fields } };
+  const sourceOrigin   = cell(row, mapping.sourceOriginCol);
+  const sourceRecordId = cell(row, mapping.sourceRecordCol);
+  const metadata = (sourceOrigin || sourceRecordId)
+    ? { source: { system: sourceOrigin || null, recordId: sourceRecordId || null } }
+    : undefined;
+
+  const payload = { data: { type: 'user', fields, ...(metadata && { metadata }) } };
   const response = await pbFetch('post', '/v2/entities', payload);
   return response.data;
 }
@@ -653,9 +659,18 @@ async function patchUser(pbFetch, userId, row, mapping, options) {
     }
   }
 
-  if (ops.length) {
+  const sourceOrigin   = cell(row, mapping.sourceOriginCol);
+  const sourceRecordId = cell(row, mapping.sourceRecordCol);
+  const metadata = (sourceOrigin || sourceRecordId)
+    ? { source: { system: sourceOrigin || null, recordId: sourceRecordId || null } }
+    : undefined;
+
+  if (ops.length || metadata) {
     await pbFetch('patch', `/v2/entities/${userId}`, {
-      data: { patch: ops },
+      data: {
+        ...(ops.length && { patch: ops }),
+        ...(metadata && { metadata }),
+      },
     });
   }
 }

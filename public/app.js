@@ -422,7 +422,9 @@ async function navigateTo(tool, view, { pushState = true, replace = false } = {}
     : DEFAULT_VIEWS[tool];
 
   const toolChanged = _currentTool !== tool;
-  if (toolChanged) await loadTool(tool);
+  if (toolChanged) {
+    try { await loadTool(tool); } catch (e) { console.error('loadTool failed:', e); }
+  }
   if (_currentView !== resolvedView) showView(resolvedView);
   updatePageMeta(tool);
 

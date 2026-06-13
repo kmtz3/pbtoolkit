@@ -126,7 +126,8 @@ function createClient(token, useEu = false) {
         const status = err.status || 0;
         const is429 = status === 429;
         const is5xx = status >= 500 && status < 600;
-        const retryable = is429 || is5xx;
+        const isNetworkErr = status === 0; // fetch threw before receiving a response
+        const retryable = is429 || is5xx || isNetworkErr;
 
         if (!retryable || i === maxAttempts - 1) throw err;
 

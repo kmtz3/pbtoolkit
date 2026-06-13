@@ -105,15 +105,13 @@ const BASE_FIELDS = [
   { key: 'domain',         label: 'domain' },
   { key: 'description',    label: 'description' },
   { key: 'owner_email',    label: 'owner_email' },
-  { key: 'archived',      label: 'archived' },
-  { key: 'sourceOrigin',       label: 'source_origin' },
-  { key: 'sourceRecordId',     label: 'source_record_id' },
-  { key: 'sourceSystem',   label: 'source_system' },
-  { key: 'sourceRecordV2', label: 'source_record_id_v2' },
-  { key: 'sourceUrl',     label: 'source_url' },
-  { key: 'created_at',    label: 'created_at' },
-  { key: 'updated_at',    label: 'updated_at' },
-  { key: 'pb_html_link',  label: 'pb_html_link' },
+  { key: 'archived',       label: 'archived' },
+  { key: 'sourceOrigin',   label: 'source_origin' },
+  { key: 'sourceRecordId', label: 'source_record_id' },
+  { key: 'sourceUrl',      label: 'source_url' },
+  { key: 'created_at',     label: 'created_at' },
+  { key: 'updated_at',     label: 'updated_at' },
+  { key: 'pb_html_link',   label: 'pb_html_link' },
 ];
 
 /**
@@ -144,10 +142,22 @@ router.post('/export', pbAuth, async (_req, res) => {
     const domainFieldId = customFields.find((f) => f.name.toLowerCase() === 'domain')?.id || null;
     sse.progress(`Found ${customFields.length} custom fields`, 10);
 
-    // Step 2: Fetch all companies via v2 GET (returns fields inline, including UUID-keyed custom fields)
-    sse.progress('Fetching companies…', 15);
-    const companies = await fetchAllPages('/v2/entities?type[]=company', 'fetch companies');
-    sse.progress(`Fetched ${companies.length} companies`, 50);
+    // Step 2: Fetch all companies via v2 — inline loop for live progress
+    sse.progress('Fetching companies… (0 so far)', 15);
+    const companies = [];
+    let v2Next = '/v2/entities?type[]=company';
+    let v2Page = 0;
+    while (v2Next) {
+      const r = await withRetry(() => pbFetch('get', v2Next), 'fetch companies v2');
+      if (r.data?.length) companies.push(...r.data);
+      v2Next = r.links?.next || null;
+      v2Page++;
+      if (v2Page % 10 === 0 || !v2Next) {
+        const pct = 15 + Math.min(70, Math.round((companies.length / 100000) * 72));
+        sse.progress(`Fetching companies… (${companies.length.toLocaleString()} so far)`, pct);
+      }
+    }
+    sse.progress(`Fetched ${companies.length.toLocaleString()} companies`, 85);
 
     if (companies.length === 0) {
       sse.complete({ csv: '', filename: 'companies.csv', count: 0, message: 'No companies found in workspace.' });
@@ -155,22 +165,9 @@ router.post('/export', pbAuth, async (_req, res) => {
       return;
     }
 
-    // Step 3: Fetch source + domain data via v1 paginated list (~N/100 calls instead of N)
-    // TODO: remove v1 enrichment once PB fixes v2 metadata bug (source always null in v2)
-    sse.progress('Fetching source data via v1 list…', 55);
-    const v1Map = {};
-    for (const c of await fetchAllPages('/companies', 'fetch v1 companies list')) {
-      v1Map[c.id] = {
-        domain:         c.domain         || '',
-        sourceOrigin:   c.sourceOrigin   || '',
-        sourceRecordId: c.sourceRecordId || '',
-      };
-    }
-    sse.progress('Source data fetched', 85);
-
-    // Step 5: Build CSV
+    // Step 3: Build CSV
     sse.progress('Building CSV…', 90);
-    const csv = buildExportCSV(companies, v1Map, customFields, domainFieldId);
+    const csv = buildExportCSV(companies, customFields, domainFieldId);
 
     const date = new Date().toISOString().slice(0, 10);
     const filename = `companies-${date}.csv`;
@@ -185,7 +182,7 @@ router.post('/export', pbAuth, async (_req, res) => {
   }
 });
 
-function buildExportCSV(companies, v1Map, customFields, domainFieldId) {
+function buildExportCSV(companies, customFields, domainFieldId) {
   const customCols = customFields
     .filter((f) => f.id !== domainFieldId) // exclude domain UUID — already in BASE_FIELDS
     .map((f) => ({
@@ -199,20 +196,15 @@ function buildExportCSV(companies, v1Map, customFields, domainFieldId) {
 
   const rows = companies.map((entity) => {
     const fields = entity.fields || {};
-    const v1 = v1Map[entity.id] || {};
     const row = {};
     for (const col of cols) {
       if (col.key === 'id') {
         row[col.key] = entity.id ?? '';
       } else if (col.key === 'domain') {
-        row[col.key] = v1.domain ?? '';
+        row[col.key] = (domainFieldId ? fields[domainFieldId] : null) ?? fields.domain ?? '';
       } else if (col.key === 'sourceOrigin') {
-        row[col.key] = v1.sourceOrigin ?? '';
-      } else if (col.key === 'sourceRecordId') {
-        row[col.key] = v1.sourceRecordId ?? '';
-      } else if (col.key === 'sourceSystem') {
         row[col.key] = entity.metadata?.source?.system ?? '';
-      } else if (col.key === 'sourceRecordV2') {
+      } else if (col.key === 'sourceRecordId') {
         row[col.key] = entity.metadata?.source?.recordId ?? '';
       } else if (col.key === 'sourceUrl') {
         row[col.key] = entity.metadata?.source?.url ?? '';
@@ -840,8 +832,10 @@ router.post('/companies/source-migration/v2-to-v1', pbAuth, async (_req, res) =>
         await withRetry(
           () => pbFetch('patch', `/companies/${entity.id}`, {
             data: {
-              sourceOrigin:   sourceSystem   || null,
-              sourceRecordId: sourceRecordId || null,
+              source: {
+                origin:    sourceSystem   || null,
+                record_id: sourceRecordId || null,
+              },
             },
           }),
           `patch company ${entity.id} v1 source`
