@@ -56,6 +56,9 @@ function startSSE(res) {
     /** Send an error event */
     error: (message, detail = null) => send('error', { message, detail }),
 
+    /** Send a resume checkpoint with the last completed row index */
+    checkpoint: (row) => send('checkpoint', { row }),
+
     /** End the SSE stream */
     done: () => res.end(),
 

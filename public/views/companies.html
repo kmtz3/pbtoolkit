@@ -496,3 +496,183 @@
           </div>
 
         </div><!-- /view-companies-source-migration -->
+
+        <!-- ── SALESFORCE INSTANCE MIGRATION ── -->
+        <div id="view-companies-sf-migration" class="hidden">
+
+          <!-- Step 1: Upload -->
+          <div class="panel" id="sfm-step-upload">
+            <div class="panel-header">
+              <h2 class="panel-title">Salesforce Instance Migration</h2>
+              <div class="panel-subtitle">Swap Salesforce source record IDs on companies — patches both the v1 <code>sourceRecordId</code> and v2 <code>metadata.source.recordId</code> fields.</div>
+              <details class="howto">
+                <summary>How to use</summary>
+                <ul>
+                  <li><strong>CSV format</strong> — your CSV must have a PB company UUID column and a New Salesforce ID column. An Old Salesforce ID column is optional.</li>
+                  <li><strong>What it patches</strong> — for each row, sets <code>sourceRecordId</code> (v1) and <code>metadata.source.recordId</code> (v2) to the new Salesforce ID. Both source system fields are set to <code>salesforce</code>. All other company data is left unchanged.</li>
+                  <li><strong>Old ID archival</strong> — if you map an Old Salesforce ID column and enable "Move old ID to a text field", the old value is written to a text custom field of your choice for reference.</li>
+                  <li><strong>Preview first</strong> — use the Preview step to check which rows will be migrated before running.</li>
+                </ul>
+              </details>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="dropzone" id="sfm-dropzone">
+                <span class="dropzone-icon">📄</span>
+                <div class="dropzone-label">Drop a CSV file here</div>
+                <div class="dropzone-hint">or click to browse</div>
+              </div>
+              <input type="file" id="sfm-file-input" accept=".csv" class="hidden" />
+              <!-- Placeholder — keeps sfm-resume-banner/row/total IDs alive for JS hide() calls -->
+              <div id="sfm-resume-banner" class="hidden">
+                <span id="sfm-resume-row"></span><span id="sfm-resume-total"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 2: Map columns -->
+          <div class="panel mt-16 hidden" id="sfm-step-map">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="panel-title">Map columns</h3>
+                  <div class="panel-subtitle" id="sfm-row-count"></div>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-sfm-reupload">↩ Re-upload</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div class="mb-16">
+                <label class="label-bold">PB Company UUID <span class="badge badge-danger">required</span>
+                  <span class="info-icon" data-tip="The Productboard company UUID. Use Companies → Export to get a CSV with the pb_id column.">i</span>
+                </label>
+                <div class="text-sm text-muted mb-4">Column containing the Productboard company UUID</div>
+                <select id="sfm-uuid-col" style="width:100%;max-width:320px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:14px"></select>
+              </div>
+
+              <div class="mb-16">
+                <label class="label-bold">New Salesforce ID <span class="badge badge-danger">required</span>
+                  <span class="info-icon" data-tip="The Salesforce Account ID from the new instance. Written to both v1 and v2 source fields.">i</span>
+                </label>
+                <div class="text-sm text-muted mb-4">Column containing the new Salesforce Account ID</div>
+                <select id="sfm-new-id-col" style="width:100%;max-width:320px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:14px"></select>
+              </div>
+
+              <div class="mb-4">
+                <label class="label-bold">Old Salesforce ID <span class="badge badge-muted">optional</span>
+                  <span class="info-icon" data-tip="The old Salesforce Account ID from the previous instance. Mapping this column enables the archival option below.">i</span>
+                </label>
+                <div class="text-sm text-muted mb-4">Column containing the old Salesforce Account ID</div>
+                <select id="sfm-old-id-col" style="width:100%;max-width:320px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:14px"></select>
+              </div>
+
+              <!-- Old ID archival — visible only when old ID column is mapped -->
+              <div id="sfm-old-id-options" class="hidden">
+                <hr class="panel-divider mt-16 mb-16" />
+                <label class="checkbox-row">
+                  <input type="checkbox" id="sfm-move-old-id" />
+                  Move old Salesforce ID to a text field
+                  <span class="info-icon" data-tip="Writes the old Salesforce ID into a text custom field on each company so you can verify the migration later.">i</span>
+                </label>
+
+                <div id="sfm-text-field-section" class="hidden mt-12">
+                  <label class="text-sm text-muted mb-4" style="display:block">Destination text field</label>
+                  <select id="sfm-text-field-select" style="width:100%;max-width:320px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:14px" disabled>
+                    <option value="">Loading…</option>
+                  </select>
+                  <div id="sfm-fields-error" class="text-sm text-danger mt-4 hidden"></div>
+                </div>
+              </div>
+
+              <!-- Checkpoint notice — shown when resuming a previous run -->
+              <div id="sfm-checkpoint-notice" class="hidden mt-16">
+                <div class="alert alert-warn" style="align-items:center;gap:12px;">
+                  <span class="alert-icon">⏸</span>
+                  <span>Checkpoint found — run will resume from row <strong id="sfm-checkpoint-row"></strong>. Map your columns and click Preview to continue.</span>
+                  <button class="btn btn-ghost btn-sm" id="btn-sfm-checkpoint-discard" style="margin-left:auto;flex-shrink:0;">Start from row 1</button>
+                </div>
+              </div>
+
+              <hr class="panel-divider mt-20" />
+              <button class="btn btn-primary mt-16" id="btn-sfm-preview">Preview rows →</button>
+
+            </div>
+          </div>
+
+          <!-- Step 3: Preview -->
+          <div class="panel mt-16 hidden" id="sfm-step-preview">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="panel-title">Preview</h3>
+                  <div class="panel-subtitle" id="sfm-preview-subtitle"></div>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-sfm-back-to-map">← Back to mapping</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+              <div class="result-scroll">
+                <table class="results-table">
+                  <thead id="sfm-preview-thead"></thead>
+                  <tbody id="sfm-preview-tbody"></tbody>
+                </table>
+              </div>
+              <div id="sfm-preview-more" class="text-sm text-muted mt-8 hidden"></div>
+              <div id="sfm-preview-warn" class="alert alert-warn hidden mt-12">
+                <span class="alert-icon">⚠️</span>
+                <span id="sfm-preview-warn-msg"></span>
+              </div>
+              <hr class="panel-divider mt-16" />
+              <button class="btn btn-primary mt-16" id="btn-sfm-run">🔀 Run migration</button>
+            </div>
+          </div>
+
+          <!-- Step 4: Run -->
+          <div class="panel mt-16 hidden" id="sfm-step-run">
+            <div class="panel-header">
+              <div class="flex items-center justify-between">
+                <h3 class="panel-title" id="sfm-run-title">Migrating…</h3>
+                <button class="btn btn-danger btn-sm hidden" id="btn-sfm-stop">⏹ Stop</button>
+              </div>
+            </div>
+            <hr class="panel-divider mt-12" />
+            <div class="panel-body">
+
+              <div class="progress-wrap">
+                <div class="progress-bar" id="sfm-progress-bar" style="width:0%"></div>
+              </div>
+              <div class="progress-label mt-4">
+                <span id="sfm-progress-msg">Starting…</span>
+                <span id="sfm-progress-pct">0%</span>
+              </div>
+
+              <div id="sfm-summary-box" class="hidden mt-16"></div>
+
+              <!-- Resume prompt — shown after Stop, hidden on complete/error -->
+              <div id="sfm-resume-prompt" class="hidden mt-16">
+                <div class="alert alert-warn" style="align-items:center;gap:12px;">
+                  <span class="alert-icon">⏸</span>
+                  <span>Stopped at row <strong id="sfm-resume-prompt-row"></strong>. Resume from where you left off?</span>
+                  <div style="display:flex;gap:8px;margin-left:auto;flex-shrink:0;">
+                    <button class="btn btn-primary btn-sm" id="btn-sfm-resume-run">▶ Resume</button>
+                    <button class="btn btn-ghost btn-sm" id="btn-sfm-new-run">Start over</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="sfm-live-log" class="live-log hidden mt-16">
+                <div class="live-log-header">
+                  <span>Live log</span>
+                  <span id="sfm-log-counts" class="live-log-counts"></span>
+                  <button id="btn-sfm-download-log" class="btn btn-ghost btn-sm hidden" style="margin-left:auto">↓ Download log</button>
+                </div>
+                <div id="sfm-log-entries" class="live-log-scroll"></div>
+              </div>
+
+            </div>
+          </div>
+
+        </div><!-- /view-companies-sf-migration -->

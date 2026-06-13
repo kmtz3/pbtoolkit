@@ -36,6 +36,10 @@ function isSelectType(displayType) {
   return t === 'tags' || t === 'multiselect' || t === 'singleselect';
 }
 
+function isValidFieldId(id) {
+  return UUID_RE.test(id) || id === 'tags';
+}
+
 async function deleteValue(pbFetch, withRetry, fieldId, valueId) {
   await withRetry(
     () => pbFetch('delete', `/v2/entities/fields/${encodeURIComponent(fieldId)}/values/${encodeURIComponent(valueId)}?force=true`),
@@ -46,9 +50,9 @@ async function deleteValue(pbFetch, withRetry, fieldId, valueId) {
 function collectSelectFields(entry, entityType, fieldMap) {
   for (const [id, f] of Object.entries(entry.fields || {})) {
     if (id.includes('.') || EXCLUDED_FIELD_IDS.has(id) || STANDARD_FIELD_IDS.has(id)) continue;
-    if (!UUID_RE.test(id)) continue;
+    if (!UUID_RE.test(id) && id !== 'tags') continue;
     const schema = normalizeSchema(f.schema);
-    const displayType = schemaToType(schema);
+    const displayType = id === 'tags' ? 'Tags' : schemaToType(schema);
     if (!isSelectType(displayType)) continue;
     if (fieldMap.has(id)) {
       const existing = fieldMap.get(id);
@@ -86,7 +90,11 @@ router.get('/fields', pbAuth, async (_req, res) => {
     collectSelectFields(r.data || {}, 'company', fieldMap);
   } catch (_) { /* non-fatal */ }
 
-  const fields = [...fieldMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const fields = [...fieldMap.values()].sort((a, b) => {
+    if (a.id === 'tags') return -1;
+    if (b.id === 'tags') return 1;
+    return a.name.localeCompare(b.name);
+  });
   res.json({ fields });
 });
 
@@ -98,7 +106,7 @@ router.get('/fields', pbAuth, async (_req, res) => {
 router.post('/values', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId } = req.body;
-  if (!fieldId || !UUID_RE.test(fieldId)) return res.status(400).json({ error: 'Invalid or missing fieldId' });
+  if (!fieldId || !isValidFieldId(fieldId)) return res.status(400).json({ error: 'Invalid or missing fieldId' });
   try {
     const valMap = await fetchFieldValues(fieldId, pbFetch, withRetry);
     const values = [...valMap.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -117,7 +125,7 @@ router.post('/values', pbAuth, async (req, res) => {
 router.post('/delete/all', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId } = req.body;
-  if (!fieldId || !UUID_RE.test(fieldId)) return res.status(400).json({ error: 'Invalid or missing fieldId' });
+  if (!fieldId || !isValidFieldId(fieldId)) return res.status(400).json({ error: 'Invalid or missing fieldId' });
 
   const sse = startSSE(res);
   try {
@@ -167,7 +175,7 @@ router.post('/delete/all', pbAuth, async (req, res) => {
 router.post('/delete/by-csv', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, csvText, column } = req.body;
-  if (!fieldId || !UUID_RE.test(fieldId) || !csvText || !column) {
+  if (!fieldId || !isValidFieldId(fieldId) || !csvText || !column) {
     return res.status(400).json({ error: 'Invalid or missing fieldId, csvText, or column' });
   }
 
@@ -230,7 +238,7 @@ router.post('/delete/by-csv', pbAuth, async (req, res) => {
 router.post('/delete/by-diff', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, csvText, column } = req.body;
-  if (!fieldId || !UUID_RE.test(fieldId) || !csvText || !column) {
+  if (!fieldId || !isValidFieldId(fieldId) || !csvText || !column) {
     return res.status(400).json({ error: 'Invalid or missing fieldId, csvText, or column' });
   }
 
@@ -289,7 +297,7 @@ router.post('/delete/by-diff', pbAuth, async (req, res) => {
 router.post('/delete/by-ids', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, values } = req.body;
-  if (!fieldId || !UUID_RE.test(fieldId) || !Array.isArray(values) || !values.length) {
+  if (!fieldId || !isValidFieldId(fieldId) || !Array.isArray(values) || !values.length) {
     return res.status(400).json({ error: 'Invalid or missing fieldId or values' });
   }
 

@@ -422,7 +422,9 @@ async function navigateTo(tool, view, { pushState = true, replace = false } = {}
     : DEFAULT_VIEWS[tool];
 
   const toolChanged = _currentTool !== tool;
-  if (toolChanged) await loadTool(tool);
+  if (toolChanged) {
+    try { await loadTool(tool); } catch (e) { console.error('loadTool failed:', e); }
+  }
   if (_currentView !== resolvedView) showView(resolvedView);
   updatePageMeta(tool);
 
@@ -725,7 +727,7 @@ function showView(view, { updateUrl = false } = {}) {
 
   [
     'export', 'import',
-    'companies-delete-csv', 'companies-delete-all', 'companies-source-migration',
+    'companies-delete-csv', 'companies-delete-all', 'companies-source-migration', 'companies-sf-migration',
     'notes-export', 'notes-import', 'notes-delete-csv', 'notes-delete-all', 'notes-migrate',
     'entities-templates', 'entities-export', 'entities-import', 'entities-delete',
     'member-activity-export',
@@ -768,7 +770,7 @@ function buildHeaders(t = token, eu = useEu) {
   return h;
 }
 
-function subscribeSSE(url, body, { onProgress, onComplete, onError, onLog = null, onAbort = null }) {
+function subscribeSSE(url, body, { onProgress, onComplete, onError, onLog = null, onAbort = null, onCheckpoint = null }) {
   // SSE over POST: read the response body as a stream and parse SSE frames manually
   const ctrl = new AbortController();
   const headers = buildHeaders();
@@ -811,10 +813,11 @@ function subscribeSSE(url, body, { onProgress, onComplete, onError, onLog = null
         if (!dataLine) continue;
         try {
           const data = JSON.parse(dataLine);
-          if (eventType === 'progress')       onProgress(data);
-          else if (eventType === 'complete')  onComplete(data);
-          else if (eventType === 'error')     onError(data.message);
-          else if (eventType === 'log' && onLog) onLog(data);
+          if (eventType === 'progress')                    onProgress(data);
+          else if (eventType === 'complete')               onComplete(data);
+          else if (eventType === 'error')                  onError(data.message);
+          else if (eventType === 'log' && onLog)           onLog(data);
+          else if (eventType === 'checkpoint' && onCheckpoint) onCheckpoint(data);
         } catch (_) {}
       }
     }

@@ -14,6 +14,13 @@ let csmV1V2Ctrl = null;
 let csmV2V1Ctrl = null;
 let clearImportDropzone = null;
 let clearDeleteDropzone = null;
+let sfmParsedCSV        = null;
+let sfmTextFields       = [];
+let sfmCurrentMapping   = null;
+let sfmController       = null;
+let clearSfmDropzone    = null;
+let sfmCheckpointKey    = null;
+let sfmResumeFromRow    = 0;
 
 // Called by app.js disconnect handler
 function resetCompaniesState() {
@@ -35,6 +42,19 @@ function resetCompaniesState() {
   ['csm-v1v2-idle', 'csm-v2v1-idle'].forEach((id) => {
     const el = $(id); if (el) el.classList.remove('hidden');
   });
+  sfmParsedCSV = null;
+  sfmTextFields = [];
+  sfmCurrentMapping = null;
+  sfmController = null;
+  sfmCheckpointKey = null;
+  sfmResumeFromRow = 0;
+  if (clearSfmDropzone) clearSfmDropzone();
+  ['sfm-step-map', 'sfm-step-preview', 'sfm-step-run'].forEach((id) => {
+    const el = $(id); if (el) el.classList.add('hidden');
+  });
+  hide('sfm-resume-banner');
+  hide('sfm-resume-prompt');
+  hide('sfm-checkpoint-notice');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -773,6 +793,360 @@ function setCompaniesDeleteAllProgress(msg, pct) {
 }
 
 // ══════════════════════════════════════════════════════════
+// SF INSTANCE MIGRATION
+// ══════════════════════════════════════════════════════════
+
+const SFM_UUID_RE    = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SFM_PREVIEW_MAX = 10;
+
+const sfmAppendLogEntry = makeLogAppender('sfm-live-log', 'sfm-log-entries', 'sfm-log-counts', 'company');
+
+function sfmCsvFingerprint(filename, size, text) {
+  // Stable key: filename + size + first data line (not headers, not content hash — fast enough)
+  const firstLine = text.split('\n').slice(0, 2).join('|');
+  return `sfm-checkpoint:${filename}:${size}:${firstLine}`;
+}
+
+function sfmLoadCSV(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const text = e.target.result;
+    const rowCount = countCSVDataRows(text);
+    if (rowCount === 0) { alert('CSV file appears empty or has no data rows.'); return; }
+    sfmParsedCSV = { raw: text, headers: parseCSVHeaders(text), rowCount };
+
+    // Check for a saved checkpoint matching this exact file
+    sfmCheckpointKey = sfmCsvFingerprint(file.name, file.size, text);
+    const saved = sfmLoadCheckpoint(sfmCheckpointKey);
+    if (saved && saved.row > 0 && saved.row < rowCount) {
+      sfmResumeFromRow = saved.row;
+    } else {
+      sfmResumeFromRow = 0;
+    }
+
+    sfmShowMapStep();
+  };
+  reader.readAsText(file);
+}
+
+function sfmSaveCheckpoint(key, row) {
+  try { localStorage.setItem(key, JSON.stringify({ row })); } catch (_) {}
+}
+
+function sfmLoadCheckpoint(key) {
+  try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; }
+}
+
+function sfmClearCheckpoint(key) {
+  if (key) try { localStorage.removeItem(key); } catch (_) {}
+}
+
+function sfmShowMapStep() {
+  hide('sfm-step-preview');
+  hide('sfm-step-run');
+  setText('sfm-row-count', `${sfmParsedCSV.rowCount} rows · ${sfmParsedCSV.headers.length} columns`);
+  sfmBuildSelects();
+  if (sfmResumeFromRow > 0) {
+    setText('sfm-checkpoint-row', sfmResumeFromRow.toLocaleString());
+    show('sfm-checkpoint-notice');
+  } else {
+    hide('sfm-checkpoint-notice');
+  }
+  show('sfm-step-map');
+}
+
+function sfmBuildSelects() {
+  const headers = sfmParsedCSV.headers;
+  const reqOpt  = '<option value="">— required —</option>';
+  const skipOpt = '<option value="">(⇢ skip)</option>';
+  const colOpts = headers.map((h) => `<option value="${esc(h)}">${esc(h)}</option>`).join('');
+
+  $('sfm-uuid-col').innerHTML   = reqOpt  + colOpts;
+  $('sfm-new-id-col').innerHTML = reqOpt  + colOpts;
+  $('sfm-old-id-col').innerHTML = skipOpt + colOpts;
+
+  const hints = {
+    'sfm-uuid-col':   ['pb_id', 'id', 'uuid', 'company_id', 'company id'],
+    'sfm-new-id-col': ['new_salesforce_id', 'new_sf_id', 'new_sfid', 'new salesforce id', 'new_source_record_id'],
+    'sfm-old-id-col': ['old_salesforce_id', 'old_sf_id', 'old_sfid', 'old salesforce id', 'old_source_record_id', 'source_record_id'],
+  };
+  for (const [selId, candidates] of Object.entries(hints)) {
+    const sel = $(selId);
+    if (!sel) continue;
+    for (const c of candidates) {
+      const match = headers.find((h) => h.toLowerCase() === c);
+      if (match) { sel.value = match; break; }
+    }
+  }
+  sfmUpdateOldIdToggle();
+}
+
+function sfmUpdateOldIdToggle() {
+  const hasOldId  = !!$('sfm-old-id-col')?.value;
+  const section   = $('sfm-old-id-options');
+  if (!section) return;
+
+  if (hasOldId) {
+    section.classList.remove('hidden');
+  } else {
+    section.classList.add('hidden');
+    const cb = $('sfm-move-old-id');
+    if (cb) cb.checked = false;
+    sfmUpdateTextFieldToggle();
+  }
+}
+
+function sfmUpdateTextFieldToggle() {
+  const checked = $('sfm-move-old-id')?.checked;
+  const section = $('sfm-text-field-section');
+  if (!section) return;
+
+  if (checked) {
+    section.classList.remove('hidden');
+    if (sfmTextFields.length === 0) requireToken(sfmLoadTextFields);
+  } else {
+    section.classList.add('hidden');
+  }
+}
+
+async function sfmLoadTextFields() {
+  const sel = $('sfm-text-field-select');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Loading…</option>';
+  sel.disabled  = true;
+  hide('sfm-fields-error');
+
+  try {
+    const res = await fetch('/api/fields', { headers: buildHeaders() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    sfmTextFields = (data.fields || []).filter((f) => f.type === 'text');
+
+    if (sfmTextFields.length === 0) {
+      sel.innerHTML = '<option value="">No text fields found</option>';
+    } else {
+      sel.innerHTML = '<option value="">— select a text field —</option>' +
+        sfmTextFields.map((f) => `<option value="${esc(f.id)}">${esc(f.name)}</option>`).join('');
+      sel.disabled = false;
+    }
+  } catch (e) {
+    setText('sfm-fields-error', `Failed to load fields: ${e.message}`);
+    show('sfm-fields-error');
+    sel.innerHTML = '<option value="">Error loading fields</option>';
+  }
+}
+
+function sfmBuildPreview() {
+  const uuidCol    = $('sfm-uuid-col')?.value    || '';
+  const newIdCol   = $('sfm-new-id-col')?.value  || '';
+  const oldIdCol   = $('sfm-old-id-col')?.value  || '';
+  const moveOldId  = $('sfm-move-old-id')?.checked;
+  const textFieldId = moveOldId ? ($('sfm-text-field-select')?.value || '') : '';
+
+  if (!uuidCol)  { showAlert('Please select the PB Company UUID column.'); return; }
+  if (!newIdCol) { showAlert('Please select the New Salesforce ID column.'); return; }
+  if (moveOldId && !textFieldId) {
+    showAlert('Please select a text field for the old Salesforce ID, or uncheck the option.');
+    return;
+  }
+
+  sfmCurrentMapping = { uuidCol, newIdCol, oldIdCol, textFieldId };
+  const rows        = sfmParseRows(sfmParsedCSV.raw, uuidCol, newIdCol, oldIdCol);
+  const validCount  = rows.filter((r) => r.status === 'ready').length;
+  const skipCount   = rows.length - validCount;
+
+  setText('sfm-preview-subtitle',
+    `${validCount} rows ready to migrate${skipCount > 0 ? ` · ${skipCount} will be skipped` : ''}`);
+  sfmRenderPreviewTable(rows, !!oldIdCol);
+
+  if (skipCount > 0) {
+    setText('sfm-preview-warn-msg',
+      `${skipCount} row(s) will be skipped — check that UUID and New Salesforce ID columns are correctly mapped.`);
+    show('sfm-preview-warn');
+  } else {
+    hide('sfm-preview-warn');
+  }
+
+  // Update Run button label to make resume intent explicit
+  const runBtn = $('btn-sfm-run');
+  if (sfmResumeFromRow > 0) {
+    runBtn.textContent = `▶ Resume from row ${sfmResumeFromRow.toLocaleString()}`;
+  } else {
+    runBtn.innerHTML = '🔀 Run migration';
+  }
+
+  hide('sfm-step-run');
+  show('sfm-step-preview');
+  $('sfm-step-preview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function sfmParseRows(raw, uuidCol, newIdCol, oldIdCol) {
+  const headers  = parseCSVHeaders(raw);
+  const uuidIdx  = headers.indexOf(uuidCol);
+  const newIdIdx = headers.indexOf(newIdCol);
+  const oldIdIdx = oldIdCol ? headers.indexOf(oldIdCol) : -1;
+
+  const lines = cleanCSVText(raw).trim().split('\n').slice(1).filter((l) => l.trim());
+  return lines.map((line) => {
+    const cols  = line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+    const get   = (idx) => idx >= 0 ? (cols[idx]?.trim().replace(/^"|"$/g, '') || '') : '';
+
+    const uuid  = get(uuidIdx);
+    const newId = get(newIdIdx);
+    const oldId = get(oldIdIdx);
+
+    let status = 'ready';
+    if (!uuid || !SFM_UUID_RE.test(uuid)) status = 'skip-uuid';
+    else if (!newId) status = 'skip-empty';
+
+    return { uuid, newId, oldId, status };
+  });
+}
+
+function sfmRenderPreviewTable(rows, showOldId) {
+  const previewRows = rows.slice(0, SFM_PREVIEW_MAX);
+
+  $('sfm-preview-thead').innerHTML = `<tr>
+    <th>PB UUID</th>
+    ${showOldId ? '<th>Old Salesforce ID</th>' : ''}
+    <th>New Salesforce ID</th>
+    <th>Status</th>
+  </tr>`;
+
+  const tbody = $('sfm-preview-tbody');
+  tbody.innerHTML = '';
+  for (const row of previewRows) {
+    const badge = row.status === 'ready'
+      ? '<span class="badge badge-ok">✓ Ready</span>'
+      : row.status === 'skip-uuid'
+        ? '<span class="badge badge-danger">Skip — invalid UUID</span>'
+        : '<span class="badge badge-warn">Skip — empty new ID</span>';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="font-mono text-sm">${esc(row.uuid || '—')}</td>
+      ${showOldId ? `<td class="font-mono text-sm">${esc(row.oldId || '—')}</td>` : ''}
+      <td class="font-mono text-sm">${esc(row.newId || '—')}</td>
+      <td>${badge}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  const moreEl = $('sfm-preview-more');
+  if (rows.length > SFM_PREVIEW_MAX) {
+    moreEl.textContent = `…and ${rows.length - SFM_PREVIEW_MAX} more row(s) (not shown)`;
+    show('sfm-preview-more');
+  } else {
+    hide('sfm-preview-more');
+  }
+}
+
+function sfmStartRun(fromRow) {
+  if (!sfmParsedCSV || !sfmCurrentMapping) return;
+
+  const resumeRow = typeof fromRow === 'number' ? fromRow : sfmResumeFromRow;
+  let lastRowSeen = resumeRow;
+
+  hide('sfm-step-preview');
+  hide('sfm-resume-banner');
+  show('sfm-step-run');
+  $('sfm-step-run').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  const titleMsg = resumeRow > 0 ? `Resuming from row ${resumeRow.toLocaleString()}…` : 'Migrating…';
+  setText('sfm-run-title', titleMsg);
+  sfmSetProgress('Starting…', 0);
+  $('sfm-summary-box').innerHTML = '';
+  hide('sfm-summary-box');
+  hide('sfm-resume-prompt');
+  sfmAppendLogEntry.reset();
+  hide('btn-sfm-download-log');
+  show('btn-sfm-stop');
+
+  sfmController = subscribeSSE(
+    '/api/companies/sf-migration/run',
+    {
+      csvText:        sfmParsedCSV.raw,
+      uuidColumn:     sfmCurrentMapping.uuidCol,
+      newSfIdColumn:  sfmCurrentMapping.newIdCol,
+      oldSfIdColumn:  sfmCurrentMapping.oldIdCol,
+      textFieldId:    sfmCurrentMapping.textFieldId,
+      resumeFromRow:  resumeRow,
+    },
+    {
+      onProgress: ({ message, percent, detail }) => {
+        sfmSetProgress(message, percent);
+        if (detail?.row) lastRowSeen = detail.row;
+      },
+      onLog:        (entry) => sfmAppendLogEntry(entry),
+      onCheckpoint: ({ row }) => sfmSaveCheckpoint(sfmCheckpointKey, row),
+
+      onComplete: (data) => {
+        sfmClearCheckpoint(sfmCheckpointKey);
+        sfmResumeFromRow = 0;
+        hide('btn-sfm-stop');
+        hide('sfm-resume-prompt');
+        sfmSetProgress(data.stopped ? 'Migration stopped' : 'Migration complete', 100);
+        setText('sfm-run-title', data.stopped ? 'Migration stopped' : 'Migration complete');
+        sfmRenderSummary(data);
+        show('btn-sfm-download-log');
+      },
+
+      onError: (msg) => {
+        hide('btn-sfm-stop');
+        hide('sfm-resume-prompt');
+        setText('sfm-run-title', 'Migration failed');
+        $('sfm-summary-box').innerHTML = `
+          <div class="alert alert-danger">
+            <span class="alert-icon">⚠️</span>
+            <span>${esc(msg)}</span>
+          </div>`;
+        show('sfm-summary-box');
+        show('btn-sfm-download-log');
+      },
+
+      onAbort: () => {
+        // Save checkpoint using last row we received before connection closed
+        if (lastRowSeen > resumeRow) sfmSaveCheckpoint(sfmCheckpointKey, lastRowSeen);
+        sfmResumeFromRow = lastRowSeen;
+        hide('btn-sfm-stop');
+        setText('sfm-run-title', 'Migration stopped');
+        sfmSetProgress('Stopped by user', 100);
+        sfmController = null;
+        show('btn-sfm-download-log');
+        if (sfmResumeFromRow > 0) {
+          setText('sfm-resume-prompt-row', sfmResumeFromRow.toLocaleString());
+          show('sfm-resume-prompt');
+        }
+      },
+    }
+  );
+}
+
+function sfmSetProgress(msg, pct) {
+  setText('sfm-progress-msg', msg);
+  setText('sfm-progress-pct', `${pct}%`);
+  $('sfm-progress-bar').style.width = `${Math.min(100, pct)}%`;
+}
+
+function sfmRenderSummary({ total, migrated, partial, errors, skipped, stopped }) {
+  const hasIssues  = errors > 0 || partial > 0 || stopped;
+  const alertClass = hasIssues ? 'alert-warn' : 'alert-ok';
+  const icon       = hasIssues ? '⚠️' : '✅';
+  const parts = [`${migrated} migrated`];
+  if (partial > 0) parts.push(`${partial} partial (one API call failed)`);
+  if (errors  > 0) parts.push(`${errors} error(s)`);
+  if (skipped > 0) parts.push(`${skipped} skipped`);
+  if (stopped)     parts.push('stopped by user');
+  parts.push(`${total} rows total`);
+
+  $('sfm-summary-box').innerHTML = `
+    <div class="alert ${alertClass}">
+      <span class="alert-icon">${icon}</span>
+      <span>${parts.join(' · ')}</span>
+    </div>`;
+  show('sfm-summary-box');
+}
+
+// ══════════════════════════════════════════════════════════
 // MODULE INIT — called once by app.js after partial is loaded
 // ══════════════════════════════════════════════════════════
 let _companiesInitDone = false;
@@ -903,6 +1277,53 @@ function initCompaniesModule() {
     show('companies-delete-all-idle');
   });
 
+  // ── SF Instance Migration ────────────────────────────────
+  ({ clear: clearSfmDropzone } = wireDropzone(
+    $('sfm-dropzone'), $('sfm-file-input'),
+    (file) => sfmLoadCSV(file),
+    () => {
+      sfmParsedCSV = null;
+      hide('sfm-step-map');
+      hide('sfm-step-preview');
+      hide('sfm-step-run');
+    }
+  ));
+  $('btn-sfm-reupload').addEventListener('click', () => {
+    sfmParsedCSV = null;
+    sfmCurrentMapping = null;
+    if (clearSfmDropzone) clearSfmDropzone();
+    hide('sfm-step-map');
+    hide('sfm-step-preview');
+    hide('sfm-step-run');
+  });
+  $('sfm-old-id-col').addEventListener('change', sfmUpdateOldIdToggle);
+  $('sfm-move-old-id').addEventListener('change', sfmUpdateTextFieldToggle);
+  $('btn-sfm-preview').addEventListener('click', sfmBuildPreview);
+  $('btn-sfm-back-to-map').addEventListener('click', () => {
+    hide('sfm-step-preview');
+    show('sfm-step-map');
+  });
+  $('btn-sfm-run').addEventListener('click', () => requireToken(sfmStartRun));
+  $('btn-sfm-resume-run').addEventListener('click', () => requireToken(() => sfmStartRun(sfmResumeFromRow)));
+  $('btn-sfm-new-run').addEventListener('click', () => {
+    sfmClearCheckpoint(sfmCheckpointKey);
+    sfmResumeFromRow = 0;
+    hide('sfm-resume-prompt');
+    sfmStartRun(0);
+  });
+  $('btn-sfm-checkpoint-discard').addEventListener('click', () => {
+    sfmClearCheckpoint(sfmCheckpointKey);
+    sfmResumeFromRow = 0;
+    hide('sfm-checkpoint-notice');
+    $('btn-sfm-run').innerHTML = '🔀 Run migration';
+  });
+  $('btn-sfm-stop').addEventListener('click', () => {
+    if (sfmController) { sfmController.abort(); sfmController = null; }
+  });
+  $('btn-sfm-download-log').addEventListener('click', () => {
+    downloadLogCsv(sfmAppendLogEntry, 'sf-migration');
+  });
+
   // ── Mapping persistence ──────────────────────────────────
   // (mappingChangeListenerAdded guards added in loadAndBuildCustomFieldTable)
 }
@@ -914,5 +1335,10 @@ window.addEventListener('pb:connected', () => {
   // If the mapper is open and custom fields failed to load (no token), reload now
   if (parsedCSV && $('import-step-map') && !$('import-step-map').classList.contains('hidden')) {
     loadAndBuildCustomFieldTable();
+  }
+  // If the SF migration text-field section is visible but fields never loaded, retry now
+  const sfmSection = $('sfm-text-field-section');
+  if (sfmSection && !sfmSection.classList.contains('hidden') && sfmTextFields.length === 0) {
+    sfmLoadTextFields();
   }
 });

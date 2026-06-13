@@ -4,12 +4,12 @@
         <div id="view-tag-values-delete-all" class="hidden">
           <div class="panel">
             <div class="panel-header">
-              <h2 class="panel-title">Delete all tag values <span class="badge badge-beta">Beta</span></h2>
-              <div class="panel-subtitle">Permanently delete every option from a tag or select field — removes values from the field's option list and unsets them from every entity that has them assigned.</div>
+              <h2 class="panel-title">Delete all values <span class="badge badge-beta">Beta</span></h2>
+              <div class="panel-subtitle">Permanently delete every option from a select field — removes values from the field's option list and unsets them from every entity that has them assigned.</div>
               <details class="howto">
                 <summary>How to use</summary>
                 <ul>
-                  <li><strong>Select a field</strong> — choose the tag or select field to clean up. Only UUID-keyed custom fields are listed (Tags, MultiSelect, SingleSelect). Status fields are not supported.</li>
+                  <li><strong>Select a field</strong> — choose the field to clean up. Tags, MultiSelect, and SingleSelect fields are listed. Status fields are not supported.</li>
                   <li><strong>Confirm</strong> — type DELETE to enable the button.</li>
                   <li><strong>Effect</strong> — every value is removed from the field's option list. Any entity that had the value assigned will have it silently unset (<code>force=true</code>).</li>
                   <li><strong>No undo</strong> — deleted values cannot be recovered. Export your data before running if needed.</li>
@@ -69,12 +69,12 @@
         <div id="view-tag-values-delete-csv" class="hidden">
           <div class="panel">
             <div class="panel-header">
-              <h2 class="panel-title">Delete tag values from CSV <span class="badge badge-beta">Beta</span></h2>
+              <h2 class="panel-title">Delete values from CSV <span class="badge badge-beta">Beta</span></h2>
               <div class="panel-subtitle">Delete specific field values by name — upload a CSV with the values you want to remove. Only values that match a CSV row are deleted.</div>
               <details class="howto">
                 <summary>How to use</summary>
                 <ul>
-                  <li><strong>CSV format</strong> — one tag value name per row in a single column. A header row is expected (e.g. <code>tag_name</code>). Extra columns are ignored.</li>
+                  <li><strong>CSV format</strong> — one value name per row in a single column. A header row is expected (e.g. <code>value_name</code>). Extra columns are ignored.</li>
                   <li><strong>Matching</strong> — case-insensitive, trimmed. Values not found in the field are silently skipped.</li>
                   <li><strong>Effect</strong> — matched values are removed from the field's option list and unset from all entities that had them assigned (<code>force=true</code>).</li>
                 </ul>
@@ -95,12 +95,14 @@
                   <label>CSV file <span class="label-hint">(one value name per row)</span></label>
                   <div class="dropzone" id="tv-csv-dropzone">
                     <input type="file" id="tv-csv-file-input" accept=".csv,text/csv" />
-                    <span class="dropzone-label">Drop CSV here or click to browse</span>
+                    <span class="dropzone-icon">📄</span>
+                    <div class="dropzone-label">Drop a CSV file here</div>
+                    <div class="dropzone-hint">or click to browse</div>
                   </div>
                 </div>
 
                 <div id="tv-csv-column-wrap" class="field mb-20" style="display:none">
-                  <label for="tv-csv-column-select">Column containing tag names</label>
+                  <label for="tv-csv-column-select">Column containing value names</label>
                   <select id="tv-csv-column-select" class="form-select" style="max-width:280px"></select>
                   <div id="tv-csv-subtitle" class="text-sm text-muted mt-4"></div>
                 </div>
@@ -143,7 +145,7 @@
               <details class="howto">
                 <summary>How to use</summary>
                 <ul>
-                  <li><strong>CSV format</strong> — one tag value name per row. Values listed in the CSV are <em>kept</em>. All others are deleted.</li>
+                  <li><strong>CSV format</strong> — one value name per row. Values listed in the CSV are <em>kept</em>. All others are deleted.</li>
                   <li><strong>Matching</strong> — case-insensitive, trimmed. Values in the CSV that don't exist in the field are silently ignored.</li>
                   <li><strong>Effect</strong> — unmatched values are removed from the field's option list and unset from all entities that had them assigned (<code>force=true</code>).</li>
                   <li><strong>No undo</strong> — export your data first if you need a rollback option.</li>
@@ -165,12 +167,14 @@
                   <label>CSV of values to <strong>keep</strong> <span class="label-hint">(one value name per row)</span></label>
                   <div class="dropzone" id="tv-diff-dropzone">
                     <input type="file" id="tv-diff-file-input" accept=".csv,text/csv" />
-                    <span class="dropzone-label">Drop CSV here or click to browse</span>
+                    <span class="dropzone-icon">📄</span>
+                    <div class="dropzone-label">Drop a CSV file here</div>
+                    <div class="dropzone-hint">or click to browse</div>
                   </div>
                 </div>
 
                 <div id="tv-diff-column-wrap" class="field mb-20" style="display:none">
-                  <label for="tv-diff-column-select">Column containing tag names to keep</label>
+                  <label for="tv-diff-column-select">Column containing values to keep</label>
                   <select id="tv-diff-column-select" class="form-select" style="max-width:280px"></select>
                   <div id="tv-diff-subtitle" class="text-sm text-muted mt-4"></div>
                 </div>
@@ -213,7 +217,7 @@
               <details class="howto">
                 <summary>How to use</summary>
                 <ul>
-                  <li><strong>Select a field</strong> — choose which tag or select field to manage.</li>
+                  <li><strong>Select a field</strong> — choose which select field to manage.</li>
                   <li><strong>Load values</strong> — fetches all current values from Productboard.</li>
                   <li><strong>Select</strong> — check values to delete. Use Select all / Invert / Deselect all to bulk-manage.</li>
                   <li><strong>Delete selected</strong> — selected values are removed from the field and unset from all assigned entities (<code>force=true</code>).</li>

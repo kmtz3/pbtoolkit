@@ -182,8 +182,10 @@ function usersAutoDetectMappings() {
     'users-map-desc':          ['description', 'desc'],
     'users-map-owner':         ['owner', 'owner_email', 'owner email'],
     'users-map-archived':      ['archived', 'is_archived'],
-    'users-map-parent-id':     ['parent_company_id', 'company_id', 'company id'],
-    'users-map-parent-domain': ['parent_company_domain', 'company_domain', 'company domain'],
+    'users-map-parent-id':      ['parent_company_id', 'company_id', 'company id'],
+    'users-map-parent-domain':  ['parent_company_domain', 'company_domain', 'company domain'],
+    'users-map-source-origin':  ['source_origin', 'sourceorigin', 'source origin'],
+    'users-map-source-record':  ['source_record_id', 'sourcerecordid', 'source record id'],
   };
 
   for (const [selectId, candidates] of Object.entries(hints)) {
@@ -262,6 +264,28 @@ function buildUsersRelationshipFields() {
   ];
 
   for (const f of relFields) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        ${f.label} <span class="info-icon" data-tip="${esc(f.hint)}">i</span>
+      </td>
+      <td><span class="badge badge-muted">${f.displayType}</span></td>
+      <td>${buildUsersColumnSelect(f.id, true)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  const sourceGroupTr = document.createElement('tr');
+  sourceGroupTr.className = 'mapping-group-row';
+  sourceGroupTr.innerHTML = '<td colspan="3" class="mapping-group-label">Source</td>';
+  tbody.appendChild(sourceGroupTr);
+
+  const sourceFields = [
+    { id: 'users-map-source-origin', label: 'Source Origin',    displayType: 'Text', hint: 'e.g. salesforce — written to metadata.source.system' },
+    { id: 'users-map-source-record', label: 'Source Record ID', displayType: 'Text', hint: 'Written to metadata.source.recordId' },
+  ];
+
+  for (const f of sourceFields) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>
@@ -434,6 +458,8 @@ function buildUsersMapping() {
     archivedColumn:            $('users-map-archived')?.value        || null,
     parentCompanyIdColumn:     $('users-map-parent-id')?.value       || null,
     parentCompanyDomainColumn: $('users-map-parent-domain')?.value   || null,
+    sourceOriginCol:           $('users-map-source-origin')?.value   || null,
+    sourceRecordCol:           $('users-map-source-record')?.value   || null,
 
     customFields: usersCustomFields
       .map((f) => ({
@@ -469,8 +495,10 @@ function restoreUsersMapping() {
     'users-map-desc':          saved.descColumn,
     'users-map-owner':         saved.ownerColumn,
     'users-map-archived':      saved.archivedColumn,
-    'users-map-parent-id':     saved.parentCompanyIdColumn,
-    'users-map-parent-domain': saved.parentCompanyDomainColumn,
+    'users-map-parent-id':      saved.parentCompanyIdColumn,
+    'users-map-parent-domain':  saved.parentCompanyDomainColumn,
+    'users-map-source-origin':  saved.sourceOriginCol,
+    'users-map-source-record':  saved.sourceRecordCol,
   };
   for (const [id, value] of Object.entries(baseMap)) {
     const sel = $(id);
