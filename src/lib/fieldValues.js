@@ -77,6 +77,26 @@ async function createFieldValue(fieldId, name, pbFetch, withRetry) {
 }
 
 /**
+ * Rename an existing value for a select-type field.
+ *
+ * @param {string}   fieldId   UUID of the field
+ * @param {string}   valueId   UUID of the value to rename
+ * @param {string}   name      New name for the value
+ * @param {Function} pbFetch
+ * @param {Function} withRetry
+ * @returns {Promise<{id: string, name: string}>}
+ */
+async function renameFieldValue(fieldId, valueId, name, pbFetch, withRetry) {
+  const r = await withRetry(
+    () => pbFetch('patch', `/v2/entities/fields/${encodeURIComponent(fieldId)}/values/${encodeURIComponent(valueId)}`, {
+      data: { fields: { name } },
+    }),
+    `rename field value ${valueId}`
+  );
+  return { id: r.data.id, name: r.data.fields?.name || name };
+}
+
+/**
  * Collect all distinct non-empty values from CSV rows for a given column.
  * For multi-select fields, splits each cell by comma.
  *
@@ -272,6 +292,7 @@ async function preflightFieldValues(mapping, rows, pbFetch, withRetry, sse, { au
 module.exports = {
   fetchFieldValues,
   createFieldValue,
+  renameFieldValue,
   collectCsvValues,
   findMissingValues,
   filterStatusValuesByType,

@@ -153,7 +153,7 @@ app.use('/api/members-teams-mgmt', membersTeamsMgmtRouter);
 app.use('/api/feedback', feedbackRouter);
 app.use('/api/notes-merge', notesMergeRouter);
 app.use('/api/companies-duplicate-cleanup', companiesDuplicateCleanupRouter);
-app.use('/api/tag-values', fieldValueDeleteRouter);
+app.use('/api/field-values', fieldValueDeleteRouter);
 
 // Static pages
 app.get('/privacy', (_req, res) => {

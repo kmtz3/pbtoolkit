@@ -221,10 +221,10 @@
             <div class="tool-card-desc">Find and merge duplicate companies — relink notes and user associations to the canonical record, then delete the duplicates.</div>
             <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
           </div>
-          <div class="tool-card" data-tool="tag-values">
+          <div class="tool-card" data-tool="field-values">
             <span class="tool-card-icon">🏷</span>
-            <div class="tool-card-name">Field Values</div>
-            <div class="tool-card-desc">Bulk-delete select field values — remove all, delete from CSV, diff by CSV, or pick interactively from a checklist.</div>
+            <div class="tool-card-name">Manage Values</div>
+            <div class="tool-card-desc">Create, rename, and bulk-delete select field values — live editor, remove all, delete from CSV, diff by CSV, or pick interactively.</div>
             <div class="tool-card-footer"><span class="badge badge-beta">Beta</span></div>
           </div>
           <div class="tool-card tool-card-soon">
@@ -373,18 +373,22 @@
         </div>
 
         <!-- Tag Values nav items -->
-        <div id="sidebar-tag-values" class="hidden">
-          <button class="nav-item active" data-view="tag-values-delete-all" id="nav-tv-delete-all">
+        <div id="sidebar-field-values" class="hidden">
+          <span class="nav-group-label">Manage Values</span>
+          <button class="nav-item active" data-view="field-values-live-edit" id="nav-fv-live-edit">Live editor</button>
+
+          <span class="nav-group-label">Delete Values</span>
+          <button class="nav-item" data-view="field-values-delete-pick" id="nav-fv-delete-pick">
+            <span class="icon">☑️</span> Delete by selecting
+          </button>
+          <button class="nav-item" data-view="field-values-delete-all" id="nav-fv-delete-all">
             <span class="icon">⚠️</span> Delete all
           </button>
-          <button class="nav-item" data-view="tag-values-delete-csv" id="nav-tv-delete-csv">
+          <button class="nav-item" data-view="field-values-delete-csv" id="nav-fv-delete-csv">
             <span class="icon">🗑</span> Delete from CSV
           </button>
-          <button class="nav-item" data-view="tag-values-delete-diff" id="nav-tv-delete-diff">
+          <button class="nav-item" data-view="field-values-delete-diff" id="nav-fv-delete-diff">
             <span class="icon">↔️</span> Diff by CSV
-          </button>
-          <button class="nav-item" data-view="tag-values-delete-pick" id="nav-tv-delete-pick">
-            <span class="icon">☑️</span> Delete by selecting
           </button>
         </div>
 
@@ -466,7 +470,7 @@
 <script src="members-teams-mgmt-app.js"></script>
 <script src="notes-merge-app.js"></script>
 <script src="companies-duplicate-cleanup-app.js"></script>
-<script src="tag-values-app.js"></script>
+<script src="field-values-app.js"></script>
 
 <!-- ── REPORT ISSUE MODAL ── -->
 <div class="ri-overlay hidden" id="ri-overlay">

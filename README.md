@@ -87,6 +87,7 @@ To disconnect, click **Disconnect** in the top-right corner. This clears the ses
 | Team Membership | ✅ Live | Export and bulk-import team assignments via CSV diff preview |
 | Teams Management | ✅ Live | Export, create/update, and delete teams via CSV |
 | Users | ✅ Live | Export, import, and delete workspace users with custom fields |
+| Manage Values | ✅ Beta | Create, rename, and bulk-delete select field values (Tags, MultiSelect, SingleSelect) — live editor, delete all, delete from CSV, delete by diff, or pick interactively |
 
 ---
 

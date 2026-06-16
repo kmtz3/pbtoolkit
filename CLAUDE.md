@@ -118,6 +118,7 @@ PBToolkit/                         ← project root (git repo)
 │   │   ├── constants.js           ← shared constants: UUID_RE
 │   │   ├── errorUtils.js          ← shared helpers: parseApiError()
 │   │   ├── fieldFormat.js         ← shared custom-field formatting for v2 entity imports
+│   │   ├── fieldValues.js         ← field value helpers: fetchFieldValues(), createFieldValue(), renameFieldValue()
 │   │   └── domainCache.js         ← shared company domain cache (domain→id and id→domain lookups)
 │   ├── middleware/
 │   │   └── pbAuth.js              ← Express middleware: validates x-pb-token, attaches pbClient to res.locals
@@ -134,7 +135,8 @@ PBToolkit/                         ← project root (git repo)
 │   │   ├── users.js               ← GET/POST /api/users/* (export, import/preview, import/run, delete)
 │   │   ├── feedback.js            ← POST /api/feedback (bug report → PB note or Brevo email fallback)
 │   │   ├── notesMerge.js          ← POST /api/notes-merge/scan + /run + /scan-empty + /delete-empty (SSE)
-│   │   └── companiesDuplicateCleanup.js ← GET /api/companies-duplicate-cleanup/origins + POST /scan + /preview-csv + /run (SSE)
+│   │   ├── companiesDuplicateCleanup.js ← GET /api/companies-duplicate-cleanup/origins + POST /scan + /preview-csv + /run (SSE)
+│   │   └── fieldValueDelete.js    ← GET /api/field-values/fields + POST /api/field-values/values + POST /api/field-values/delete/* (SSE)
 │   └── services/
 │       ├── teamCache.js           ← shared team+member session cache (used by teamMembership + membersTeamsMgmt)
 │       └── entities/
@@ -150,17 +152,18 @@ PBToolkit/                         ← project root (git repo)
 │           └── importCoordinator.js ← runImport() — Phase 4
 └── public/                        ← served as static files
     ├── index.html                 ← shell only — module views loaded as partials (~453 lines)
-    ├── app.js                     ← shared utilities: auth, DOM helpers, SSE, makeLogAppender, renderImportComplete, loadPartial() (~989 lines)
-    ├── companies-app.js           ← companies module frontend JS; exposes initCompaniesModule() (~884 lines)
-    ├── notes-app.js               ← notes module frontend JS; exposes initNotesModule() (~787 lines)
-    ├── notes-merge-app.js         ← merge duplicate notes module frontend JS; exposes initNotesMergeModule() (~981 lines)
-    ├── entities-app.js            ← entities module frontend JS; exposes initEntitiesModule() (~1621 lines)
-    ├── member-activity-app.js     ← member activity module frontend JS; exposes initMemberActivityModule() (~321 lines)
-    ├── team-membership-app.js     ← team membership module frontend JS; exposes initTeamMembershipModule() (~648 lines)
+    ├── app.js                     ← shared utilities: auth, DOM helpers, SSE, makeLogAppender, renderImportComplete, loadPartial() (~1133 lines)
+    ├── companies-app.js           ← companies module frontend JS; exposes initCompaniesModule() (~1344 lines)
+    ├── notes-app.js               ← notes module frontend JS; exposes initNotesModule() (~804 lines)
+    ├── notes-merge-app.js         ← merge duplicate notes module frontend JS; exposes initNotesMergeModule() (~1295 lines)
+    ├── entities-app.js            ← entities module frontend JS; exposes initEntitiesModule() (~1913 lines)
+    ├── member-activity-app.js     ← member activity module frontend JS; exposes initMemberActivityModule() (~322 lines)
+    ├── team-membership-app.js     ← team membership module frontend JS; exposes initTeamMembershipModule() (~639 lines)
     ├── teams-crud-app.js          ← teams CRUD module frontend JS; exposes initTeamsCrudModule() (~872 lines)
     ├── members-teams-mgmt-app.js  ← live team editor frontend JS; exposes initMembersTeamsMgmtModule() (~696 lines)
-    ├── users-app.js               ← users module frontend JS; exposes initUsersModule() (~768 lines)
+    ├── users-app.js               ← users module frontend JS; exposes initUsersModule() (~810 lines)
     ├── companies-duplicate-cleanup-app.js ← merge duplicate companies frontend JS; exposes initCompaniesDuplicateCleanupModule() — contains two submodules: dc (merge by scan) and dcm (merge from CSV)
+    ├── tag-values-app.js          ← manage values module frontend JS; exposes initTagValuesModule() (~961 lines)
     ├── views/                     ← HTML partials, one per submodule group (lazy-loaded into #view-area on first navigation)
     │   ├── companies.html
     │   ├── notes.html
@@ -171,7 +174,8 @@ PBToolkit/                         ← project root (git repo)
     │   ├── teams-crud.html
     │   ├── members-teams-mgmt.html
     │   ├── users.html
-    │   └── companies-duplicate-cleanup.html
+    │   ├── companies-duplicate-cleanup.html
+    │   └── tag-values.html
     ├── csv-utils.js               ← frontend CSV utilities (papaparse wrappers for browser)
     ├── privacy.html               ← GDPR privacy policy page (served at /privacy)
     └── style.css                  ← CSS custom properties design system
@@ -204,6 +208,7 @@ A single module may combine multiple backend route files and frontend JS files u
 | Notes | `/api/notes` | `routes/notes.js` |
 | Merge Duplicate Notes | `/api/notes-merge` | `routes/notesMerge.js` + `public/notes-merge-app.js` |
 | Merge Duplicate Companies | `/api/companies-duplicate-cleanup` | `routes/companiesDuplicateCleanup.js` + `public/companies-duplicate-cleanup-app.js` — two submodules: **Merge by scan** (`dc` prefix) and **Merge from CSV** (`dcm` prefix). CSV submodule uses `POST /preview-csv` (SSE) to fetch counts, then reuses `POST /run` for the merge. |
+| Manage Values | `/api/field-values` | `routes/fieldValueDelete.js` + `public/tag-values-app.js` — five submodules: **Live editor** (create/rename/delete values interactively), **Delete by pick** (checkbox selection), **Delete all**, **Delete from CSV**, **Delete by diff** (keep only CSV values). Supported field types: Tags, MultiSelect, SingleSelect. |
 | Entities | `/api/entities` | `routes/entities.js` + `services/entities/*` |
 | Member Activity | `/api/member-activity` | `routes/memberActivity.js` + `public/member-activity-app.js` |
 | Teams | `/api/teams-crud`, `/api/team-membership`, `/api/members-teams-mgmt` | `routes/teamsCrud.js` + `routes/teamMembership.js` + `routes/membersTeamsMgmt.js` + `services/teamCache.js` |
@@ -373,8 +378,9 @@ SERVER_URL=http://localhost:8080
 | `/test-token` | Read token from `.claude/.env`, hit `GET /api/validate`, report pass/fail |
 | `/test-api` | Run all read-only endpoints and print a status table |
 | `/dev` | Start the dev server with `npm run dev` |
-| `/pre-staging-audit` | Run consistency + security agents on all files changed vs `main`; prints a combined report with a PASS / BLOCK verdict |
+| `/pre-staging-audit` | Run consistency, security, and docs-drift checks on all files changed vs `main`; auto-applies doc edits and prints a combined report with a PASS / BLOCK verdict |
 | `/commit` | Bump semver in `package.json` (MAJOR/MINOR/PATCH based on changes), then commit with a descriptive message |
+| `/sync-docs` | Audit `CLAUDE.md`, `IMPLEMENTATION.md`, and `README.md` for drift against changed source files; applies precise edits for High/Medium severity drift. Pass `full` (`/sync-docs full`) to scan the entire codebase — use after many undocumented commits |
 
 ### Agents
 

@@ -1,12 +1,12 @@
 /**
  * Field value delete routes
  *
- * GET  /api/tag-values/fields            → list all select-type custom fields across all entity types
- * POST /api/tag-values/values            → list all values for a given field
- * POST /api/tag-values/delete/all        → delete every value from a field (SSE)
- * POST /api/tag-values/delete/by-csv     → delete values whose name appears in a CSV column (SSE)
- * POST /api/tag-values/delete/by-diff    → delete values whose name does NOT appear in a CSV column (SSE)
- * POST /api/tag-values/delete/by-ids     → delete specific values by { id, name } pairs (SSE)
+ * GET  /api/field-values/fields            → list all select-type custom fields across all entity types
+ * POST /api/field-values/values            → list all values for a given field
+ * POST /api/field-values/delete/all        → delete every value from a field (SSE)
+ * POST /api/field-values/delete/by-csv     → delete values whose name appears in a CSV column (SSE)
+ * POST /api/field-values/delete/by-diff    → delete values whose name does NOT appear in a CSV column (SSE)
+ * POST /api/field-values/delete/by-ids     → delete specific values by { id, name } pairs (SSE)
  *
  * All deletions use ?force=true so the value is removed from the field's option list
  * AND unset from every entity that currently has it assigned.
@@ -21,7 +21,7 @@ const { startSSE } = require('../lib/sse');
 const { parseApiError } = require('../lib/errorUtils');
 const { UUID_RE } = require('../lib/constants');
 const { pbAuth } = require('../middleware/pbAuth');
-const { fetchFieldValues } = require('../lib/fieldValues');
+const { fetchFieldValues, createFieldValue, renameFieldValue } = require('../lib/fieldValues');
 const {
   EXCLUDED_FIELD_IDS,
   STANDARD_FIELD_IDS,
@@ -64,7 +64,7 @@ function collectSelectFields(entry, entityType, fieldMap) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/tag-values/fields
+// GET /api/field-values/fields
 // Discovers all Tags / MultiSelect / SingleSelect custom fields across every
 // entity type and company, de-duplicated by field UUID.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ router.get('/fields', pbAuth, async (_req, res) => {
       url = r.links?.next || null;
     }
   } catch (err) {
-    console.error('tag-values/fields entity configs:', err.message);
+    console.error('field-values/fields entity configs:', err.message);
   }
 
   // Company (separate endpoint — not included in the paginated list)
@@ -99,7 +99,7 @@ router.get('/fields', pbAuth, async (_req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/tag-values/values
+// POST /api/field-values/values
 // Body: { fieldId }
 // Returns all allowed values for a field as [{ id, name }], sorted by name.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,13 +112,13 @@ router.post('/values', pbAuth, async (req, res) => {
     const values = [...valMap.values()].sort((a, b) => a.name.localeCompare(b.name));
     res.json({ values });
   } catch (err) {
-    console.error('tag-values/values:', err.message);
+    console.error('field-values/values:', err.message);
     res.status(err.status || 500).json({ error: parseApiError(err) });
   }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/tag-values/delete/all
+// POST /api/field-values/delete/all
 // Body: { fieldId }
 // Fetches all values for the field then deletes them one-by-one with force=true.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ router.post('/delete/all', pbAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/tag-values/delete/by-csv
+// POST /api/field-values/delete/by-csv
 // Body: { fieldId, csvText, column }
 // Deletes values whose name (case-insensitive) appears in the given CSV column.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ router.post('/delete/by-csv', pbAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/tag-values/delete/by-diff
+// POST /api/field-values/delete/by-diff
 // Body: { fieldId, csvText, column }
 // Keeps values whose name (case-insensitive) appears in the CSV column;
 // deletes everything else.
@@ -290,7 +290,7 @@ router.post('/delete/by-diff', pbAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/tag-values/delete/by-ids
+// POST /api/field-values/delete/by-ids
 // Body: { fieldId, values: [{ id, name }] }
 // Deletes the explicitly provided value IDs (from the pick-mode checklist).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -328,6 +328,70 @@ router.post('/delete/by-ids', pbAuth, async (req, res) => {
     sse.error(parseApiError(err));
   } finally {
     sse.done();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/field-values/create
+// Body: { fieldId, names: string[] }
+// Creates one or more new values for a select-type field.
+// Returns { created: [{id, name}], errors: [{name, error}] }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/create', pbAuth, async (req, res) => {
+  const { pbFetch, withRetry } = res.locals.pbClient;
+  const { fieldId, names } = req.body;
+  if (!fieldId || !isValidFieldId(fieldId) || !Array.isArray(names) || !names.length) {
+    return res.status(400).json({ error: 'Invalid or missing fieldId or names' });
+  }
+  const created = [], errors = [];
+  for (const name of names) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) continue;
+    try {
+      const v = await createFieldValue(fieldId, trimmed, pbFetch, withRetry);
+      created.push(v);
+    } catch (err) {
+      errors.push({ name: trimmed, error: parseApiError(err) });
+    }
+  }
+  res.json({ created, errors });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/field-values/rename
+// Body: { fieldId, valueId, name }
+// Renames a single value in-place (assignments are preserved).
+// ─────────────────────────────────────────────────────────────────────────────
+router.patch('/rename', pbAuth, async (req, res) => {
+  const { pbFetch, withRetry } = res.locals.pbClient;
+  const { fieldId, valueId, name } = req.body;
+  if (!fieldId || !isValidFieldId(fieldId) || !valueId || !(name || '').trim()) {
+    return res.status(400).json({ error: 'Invalid or missing fieldId, valueId, or name' });
+  }
+  try {
+    const v = await renameFieldValue(fieldId, valueId, name.trim(), pbFetch, withRetry);
+    res.json(v);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: parseApiError(err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/field-values/delete/one
+// Body: { fieldId, valueId }
+// Deletes a single value without SSE — used by the live editor for per-row deletion.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/delete/one', pbAuth, async (req, res) => {
+  const { pbFetch, withRetry } = res.locals.pbClient;
+  const { fieldId, valueId } = req.body;
+  if (!fieldId || !isValidFieldId(fieldId) || !valueId) {
+    return res.status(400).json({ error: 'Invalid or missing fieldId or valueId' });
+  }
+  try {
+    await deleteValue(pbFetch, withRetry, fieldId, valueId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: parseApiError(err) });
   }
 });
 
