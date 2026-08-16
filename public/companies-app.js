@@ -10,8 +10,6 @@ let mappingChangeListenerAdded = false;
 let lastExportCSV = null;
 let lastExportFilename = 'companies.csv';
 let companyExportCtrl = null;
-let csmV1V2Ctrl = null;
-let csmV2V1Ctrl = null;
 let clearImportDropzone = null;
 let clearDeleteDropzone = null;
 let sfmParsedCSV        = null;
@@ -33,14 +31,6 @@ function resetCompaniesState() {
   resetExport();
   ['import-step-map', 'import-step-options', 'import-step-validate', 'import-step-run', 'import-summary-box'].forEach((id) => {
     const el = $(id); if (el) el.classList.add('hidden');
-  });
-  csmV1V2Ctrl = null;
-  csmV2V1Ctrl = null;
-  ['csm-v1v2-running', 'csm-v1v2-results', 'csm-v2v1-running', 'csm-v2v1-results'].forEach((id) => {
-    const el = $(id); if (el) el.classList.add('hidden');
-  });
-  ['csm-v1v2-idle', 'csm-v2v1-idle'].forEach((id) => {
-    const el = $(id); if (el) el.classList.remove('hidden');
   });
   sfmParsedCSV = null;
   sfmTextFields = [];
@@ -519,82 +509,6 @@ function restoreCompaniesMapping() {
     }
   }
 }
-
-// ══════════════════════════════════════════════════════════
-// COMPANIES — Source Migration
-// ══════════════════════════════════════════════════════════
-
-function csmSetProgress(prefix, message, percent) {
-  const msg = $(`${prefix}-progress-msg`);
-  const pct = $(`${prefix}-progress-pct`);
-  const bar = $(`${prefix}-progress-bar`);
-  if (msg) msg.textContent = message;
-  if (pct) pct.textContent = `${percent}%`;
-  if (bar) bar.style.width = `${percent}%`;
-}
-
-function csmRenderSummary(prefix, { total, migrated, skippedEmpty, skippedNotFound, errors }) {
-  const el = $(`${prefix}-summary`);
-  if (!el) return;
-  const hasErrors = errors > 0;
-  const alertClass = hasErrors ? 'alert-warn' : 'alert-ok';
-  const icon = hasErrors ? '⚠️' : '✅';
-  el.innerHTML = `
-    <div class="alert ${alertClass}">
-      <span class="alert-icon">${icon}</span>
-      <span>
-        ${migrated} migrated · ${skippedEmpty} skipped (no source data) · ${skippedNotFound} not found in target · ${errors} error(s)
-        <br><span class="text-muted">${total} companies scanned total</span>
-      </span>
-    </div>
-  `;
-}
-
-function startCsmMigration(direction) {
-  const prefix   = direction === 'v1v2' ? 'csm-v1v2' : 'csm-v2v1';
-  const endpoint = direction === 'v1v2'
-    ? '/api/companies/source-migration/v1-to-v2'
-    : '/api/companies/source-migration/v2-to-v1';
-
-  hide(`${prefix}-idle`);
-  hide(`${prefix}-results`);
-  show(`${prefix}-running`);
-  show(`${prefix}-live-log`);
-  $(`${prefix}-log-entries`).innerHTML = '';
-  csmSetProgress(prefix, 'Starting…', 0);
-
-  const ctrl = subscribeSSE(endpoint, {}, {
-    onProgress: ({ message, percent }) => csmSetProgress(prefix, message, percent),
-    onLog: (entry) => {
-      const entries = $(`${prefix}-log-entries`);
-      const e = document.createElement('div');
-      e.className = `log-entry ${entry.level}`;
-      e.innerHTML = `<span class="log-msg">${esc(entry.message)}</span>`;
-      entries.appendChild(e);
-      entries.scrollTop = entries.scrollHeight;
-      show(`${prefix}-live-log`);
-    },
-    onComplete: (data) => {
-      hide(`${prefix}-running`);
-      show(`${prefix}-results`);
-      csmRenderSummary(prefix, data);
-    },
-    onError: (msg) => {
-      hide(`${prefix}-running`);
-      show(`${prefix}-results`);
-      const el = $(`${prefix}-summary`);
-      if (el) el.innerHTML = `<div class="alert alert-danger"><span class="alert-icon">⛔</span><span>${msg}</span></div>`;
-    },
-    onAbort: () => {
-      hide(`${prefix}-running`);
-      show(`${prefix}-idle`);
-    },
-  });
-
-  if (direction === 'v1v2') csmV1V2Ctrl = ctrl;
-  else csmV2V1Ctrl = ctrl;
-}
-
 
 // ══════════════════════════════════════════════════════════
 // COMPANIES — Delete from CSV
@@ -1204,26 +1118,6 @@ function initCompaniesModule() {
   });
   $('btn-import-download-log').addEventListener('click', () => {
     downloadLogCsv(appendLogEntry, 'companies-import');
-  });
-
-  // ── Source migration ──────────────────────────────────────
-  $('btn-csm-v1v2-run').addEventListener('click', () => requireToken(startCsmV1V2));
-  $('btn-stop-csm-v1v2').addEventListener('click', () => {
-    if (csmV1V2Ctrl) { csmV1V2Ctrl.abort(); csmV1V2Ctrl = null; }
-  });
-  $('btn-csm-v1v2-again').addEventListener('click', () => {
-    hide('csm-v1v2-running');
-    hide('csm-v1v2-results');
-    show('csm-v1v2-idle');
-  });
-  $('btn-csm-v2v1-run').addEventListener('click', () => requireToken(startCsmV2V1));
-  $('btn-stop-csm-v2v1').addEventListener('click', () => {
-    if (csmV2V1Ctrl) { csmV2V1Ctrl.abort(); csmV2V1Ctrl = null; }
-  });
-  $('btn-csm-v2v1-again').addEventListener('click', () => {
-    hide('csm-v2v1-running');
-    hide('csm-v2v1-results');
-    show('csm-v2v1-idle');
   });
 
   // ── Delete from CSV ───────────────────────────────────────

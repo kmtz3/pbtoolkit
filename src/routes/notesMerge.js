@@ -16,26 +16,27 @@
  *   2. Merge tags (addItems — idempotent)
  *   3. Merge product hierarchy links (POST relationships, 422 skip)
  *   4. Reconcile state (processed > unprocessed > archived)
- *   5. Add secondary owners as followers (v1 POST /notes/{id}/user-followers)
- *   5a. [Optional — transferFollowers] Add existing followers fetched from secondary notes
- *       (v1 GET /notes/{id}/user-followers fetched during scan, applied here during run)
+ *   5. Add secondary owners as followers on the target (owner-cycling — see below)
  *   6. Preserve user relationship if target only has company and a secondary has user
  *   7. Delete secondary notes
  *
- * TODO (v1 sunset ~6 months from 2026-04-03):
- *   Steps 5 and 5a both rely on v1 follower endpoints. When v1 is retired:
- *   - Step 5: Replace with the v2 owner-cycling hack (PATCH target owner per secondary
- *     owner, wait ~5s each, restore original — each person cycled accumulates as follower).
- *     Cost: 2× PATCH + ~5s sleep per secondary owner.
- *   - Step 5a: GET /notes/{id}/user-followers has no v2 equivalent yet.
- *     Push PB API PM to add a native v2 followers endpoint before v1 is removed.
+ * Follower transfer (step 5) — v1 retired, no v2 follower-write API exists.
+ * Verified workaround: PATCH the target's `owner` field to each new follower's email in
+ * turn (3s apart), then restore the target's real owner (or clear it) as the final step.
+ * Confirmed live: cycling owner through N members adds each as a permanent follower
+ * without removing previously-added ones, and clearing/changing owner afterward does
+ * NOT remove them as a follower. There is no v2 API to read a note's existing follower
+ * list at all, so only secondary owners (not secondaries' other followers) can be
+ * transferred — that's a hard capability loss from the v1 followers endpoint.
  */
 
 const express = require('express');
-const { extractCursor, paginateOffset } = require('../lib/pbClient');
+const { extractCursor } = require('../lib/pbClient');
 const { startSSE } = require('../lib/sse');
 const { parseApiError } = require('../lib/errorUtils');
 const { pbAuth } = require('../middleware/pbAuth');
+const { buildIdToDomainMap } = require('../lib/domainCache');
+const { buildIdToEmailMap } = require('../lib/userCache');
 
 const router = express.Router();
 
@@ -115,50 +116,11 @@ function selectTarget(notes, targetMode) {
 // Cache builders
 // ---------------------------------------------------------------------------
 
-async function buildUserCache(pbFetch, withRetry) {
-  const map = new Map();
-  await paginateOffset(pbFetch, withRetry, '/users', (data) => {
-    for (const u of data) { if (u.id && u.email) map.set(u.id, u.email); }
-  });
-  return map;
-}
-
-async function buildCompanyCache(pbFetch, withRetry) {
-  const map = new Map();
-  await paginateOffset(pbFetch, withRetry, '/companies', (data) => {
-    for (const c of data) { if (c.id && c.domain) map.set(c.id, c.domain); }
-  });
-  return map;
-}
-
-/** Build UUID→{origin,record_id} map from v1 /notes for source enrichment. */
-async function buildSourceMap(pbFetch, withRetry) {
-  const map = new Map();
-  let cursor = null;
-  const limit = 100;
-  const MAX_PAGES = 1000;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    let url = `/notes?pageLimit=${limit}`;
-    if (cursor) url += `&pageCursor=${encodeURIComponent(cursor)}`;
-    const r = await withRetry(() => pbFetch('get', url), `fetch v1 notes source page ${page + 1}`);
-    if (!r.data?.length) break;
-    for (const note of r.data) {
-      if (note.id) map.set(note.id, {
-        origin:    note.source?.origin    || null,
-        record_id: note.source?.record_id || null,
-      });
-    }
-    cursor = r.pageCursor || null;
-    if (!cursor) break;
-  }
-  return map;
-}
-
 // ---------------------------------------------------------------------------
 // Preview builder
 // ---------------------------------------------------------------------------
 
-function buildNotePreview(note, userMap, companyMap, sourceMap) {
+function buildNotePreview(note, userMap, companyMap) {
   const f   = note.fields || {};
   const rel = getNoteCustomerRel(note);
 
@@ -166,21 +128,13 @@ function buildNotePreview(note, userMap, companyMap, sourceMap) {
   let customerCompany = '';
   if (rel?.target) {
     const { id, type } = rel.target;
-    if (type === 'user')    customerEmail   = userMap.get(id)    || id;
-    if (type === 'company') customerCompany = companyMap.get(id) || id;
+    if (type === 'user')    customerEmail   = userMap[id]?.email  || id;
+    if (type === 'company') customerCompany = companyMap[id]?.domain || id;
   }
 
-  // Source: v2 metadata first, then v1 source map
   const metaSrc = note.metadata?.source || {};
-  let sourceOrigin   = metaSrc.system    || f.source?.origin                   || '';
-  let sourceRecordId = metaSrc.recordId  || f.source?.id || f.source?.recordId || '';
-  if (!sourceOrigin && sourceMap) {
-    const v1 = sourceMap.get(note.id);
-    if (v1) {
-      sourceOrigin   = v1.origin    || '';
-      sourceRecordId = sourceRecordId || v1.record_id || '';
-    }
-  }
+  const sourceOrigin   = metaSrc.system   || '';
+  const sourceRecordId = metaSrc.recordId || '';
 
   const rawContent = typeof f.content === 'object' ? JSON.stringify(f.content) : (f.content || '');
 
@@ -199,7 +153,6 @@ function buildNotePreview(note, userMap, companyMap, sourceMap) {
     source_record_id: sourceRecordId,
     state:            getNoteState(note),
     created_at:       note.createdAt   || '',
-    existing_followers: [], // populated during scan when transferFollowers=true (v1 GET /notes/{id}/user-followers)
   };
 }
 
@@ -209,8 +162,8 @@ function buildNotePreview(note, userMap, companyMap, sourceMap) {
 
 router.post('/scan', pbAuth, async (req, res) => {
   const sse = startSSE(res);
-  const { pbFetch, withRetry } = res.locals.pbClient;
-  const { createdFrom, createdTo, looseMatch = false, targetMode = 'newest', transferFollowers = false } = req.body || {};
+  const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
+  const { createdFrom, createdTo, looseMatch = false, targetMode = 'newest' } = req.body || {};
 
   try {
     // Phase 1: Fetch all v2 notes
@@ -235,10 +188,9 @@ router.post('/scan', pbAuth, async (req, res) => {
     sse.progress(`Fetched ${notes.length} notes. Building lookup caches…`, 35);
 
     // Phase 2: Build caches in parallel
-    const [userMap, companyMap, sourceMap] = await Promise.all([
-      buildUserCache(pbFetch, withRetry),
-      buildCompanyCache(pbFetch, withRetry),
-      buildSourceMap(pbFetch, withRetry),
+    const [userMap, companyMap] = await Promise.all([
+      buildIdToEmailMap(fetchAllPages, 'fetch users for notes-merge scan'),
+      buildIdToDomainMap(fetchAllPages, 'fetch companies for notes-merge scan'),
     ]);
 
     sse.progress('Detecting duplicates…', 75);
@@ -270,7 +222,7 @@ router.post('/scan', pbAuth, async (req, res) => {
         const allSameExact = looseNotes.every(n => buildGroupKey(n, false) === firstExact);
         if (!allSameExact) {
           // Different titles — partial matches, show for information only
-          partialMatchGroups.push(looseNotes.map(n => buildNotePreview(n, userMap, companyMap, sourceMap)));
+          partialMatchGroups.push(looseNotes.map(n => buildNotePreview(n, userMap, companyMap)));
         }
       }
     }
@@ -292,43 +244,9 @@ router.post('/scan', pbAuth, async (req, res) => {
 
       groups.push({
         groupId:     `g-${target.id}`,
-        target:      buildNotePreview(target,    userMap, companyMap, sourceMap),
-        secondaries: secondaries.map(n => buildNotePreview(n, userMap, companyMap, sourceMap)),
+        target:      buildNotePreview(target,    userMap, companyMap),
+        secondaries: secondaries.map(n => buildNotePreview(n, userMap, companyMap)),
       });
-    }
-
-    // Phase 6: Fetch existing followers
-    // Target followers are always fetched — needed to render the before/after diff in the compare modal.
-    // Secondary followers are only fetched when transferFollowers=true (adds one call per secondary).
-    // TODO: Uses v1 GET /notes/{id}/user-followers — revisit when v1 is retired (~6 months from 2026-04-03)
-    if (groups.length > 0) {
-      const secondariesToFetch = transferFollowers ? groups.flatMap(g => g.secondaries) : [];
-      const total   = groups.length + secondariesToFetch.length;
-      let   fetched = 0;
-
-      for (const group of groups) {
-        if (sse.isAborted()) break;
-        try {
-          const r = await withRetry(() => pbFetch('get', `/notes/${group.target.id}/user-followers`), `fetch followers target ${group.target.id}`);
-          group.target.existing_followers = (r.data || []).map(u => u.email).filter(Boolean);
-        } catch (err) {
-          console.warn(`[notesMerge/scan] Could not fetch followers for target ${group.target.id}:`, parseApiError(err));
-        }
-        fetched++;
-        sse.progress(`Fetching followers… (${fetched}/${total})`, Math.round(80 + (fetched / total) * 18));
-      }
-
-      for (const sec of secondariesToFetch) {
-        if (sse.isAborted()) break;
-        try {
-          const r = await withRetry(() => pbFetch('get', `/notes/${sec.id}/user-followers`), `fetch followers secondary ${sec.id}`);
-          sec.existing_followers = (r.data || []).map(u => u.email).filter(Boolean);
-        } catch (err) {
-          console.warn(`[notesMerge/scan] Could not fetch followers for secondary ${sec.id}:`, parseApiError(err));
-        }
-        fetched++;
-        sse.progress(`Fetching followers… (${fetched}/${total})`, Math.round(80 + (fetched / total) * 18));
-      }
     }
 
     sse.progress(`Found ${groups.length} duplicate group(s).`, 100);
@@ -359,7 +277,7 @@ router.post('/scan', pbAuth, async (req, res) => {
 router.post('/run', pbAuth, async (req, res) => {
   const sse = startSSE(res);
   const { pbFetch, withRetry } = res.locals.pbClient;
-  const { groups = [], transferFollowers = false } = req.body || {};
+  const { groups = [] } = req.body || {};
 
   const runId    = `${new Date().toISOString().slice(0, 10)}-${Math.random().toString(36).slice(2, 8)}`;
   const auditLog = [];
@@ -441,26 +359,44 @@ router.post('/run', pbAuth, async (req, res) => {
           auditEntry.stateChange = { from: target.state || 'unprocessed', to: highestState };
         }
 
-        // Step 5: Add secondary owners as followers via v1
-        // Step 5a: Also add existing followers from secondary notes when transferFollowers=true
-        // TODO: Both use v1 follower endpoints — revisit when v1 is retired (~6 months from 2026-04-03)
+        // Step 5: Add secondary owners as followers on the target via owner-cycling.
+        // No v2 follower-write API exists — PATCHing `owner` to each email in turn adds
+        // that person as a permanent follower (verified live), then the target's real
+        // owner is restored (or cleared) as the final step. ~3s between each PATCH.
         const targetOwnerEmail = target.owner_email || '';
         const followerEmailSet = new Set(
           secondaries.map(s => s.owner_email).filter(e => e && e !== targetOwnerEmail)
         );
-        if (transferFollowers) {
-          for (const s of secondaries) {
-            for (const email of (s.existing_followers || [])) {
-              if (email && email !== targetOwnerEmail) followerEmailSet.add(email);
+        if (followerEmailSet.size > 0) {
+          const setOwner = (email) => withRetry(() => pbFetch('patch', `/v2/notes/${target.id}`, {
+            data: { patch: [{ op: 'set', path: 'owner', value: { email } } ] },
+          }), `cycle owner ${email} on ${target.id}`);
+
+          let cycled = 0;
+          for (const email of followerEmailSet) {
+            if (sse.isAborted()) break;
+            try {
+              await setOwner(email);
+              auditEntry.followersAdded.push(email);
+            } catch (followerErr) {
+              sse.log('warn', `Add follower ${email} failed: ${parseApiError(followerErr)}`);
             }
+            cycled++;
+            sse.log('info', `Transferring followers on ${target.id}… (${cycled}/${followerEmailSet.size})`);
+            await new Promise((r) => setTimeout(r, 3000));
           }
-        }
-        for (const email of followerEmailSet) {
+
+          // Restore the target's real owner (or clear it if it never had one).
           try {
-            await withRetry(() => pbFetch('post', `/notes/${target.id}/user-followers`, [{ email }]), `add follower ${email}`);
-            auditEntry.followersAdded.push(email);
-          } catch (followerErr) {
-            sse.log('warn', `Add follower ${email} failed: ${parseApiError(followerErr)}`);
+            if (targetOwnerEmail) {
+              await setOwner(targetOwnerEmail);
+            } else {
+              await withRetry(() => pbFetch('patch', `/v2/notes/${target.id}`, {
+                data: { patch: [{ op: 'clear', path: 'owner' }] },
+              }), `clear owner on ${target.id}`);
+            }
+          } catch (restoreErr) {
+            sse.log('warn', `Could not restore target owner after follower transfer on ${target.id}: ${parseApiError(restoreErr)}`);
           }
         }
 
@@ -522,7 +458,7 @@ router.post('/run', pbAuth, async (req, res) => {
 
 router.post('/scan-empty', pbAuth, async (req, res) => {
   const sse = startSSE(res);
-  const { pbFetch, withRetry } = res.locals.pbClient;
+  const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
   const { createdFrom, createdTo } = req.body || {};
 
   try {
@@ -548,8 +484,8 @@ router.post('/scan-empty', pbAuth, async (req, res) => {
     sse.progress(`Fetched ${notes.length} notes. Building caches…`, 55);
 
     const [userMap, companyMap] = await Promise.all([
-      buildUserCache(pbFetch, withRetry),
-      buildCompanyCache(pbFetch, withRetry),
+      buildIdToEmailMap(fetchAllPages, 'fetch users for notes-merge scan-empty'),
+      buildIdToDomainMap(fetchAllPages, 'fetch companies for notes-merge scan-empty'),
     ]);
 
     sse.progress('Detecting empty notes…', 85);
@@ -565,8 +501,8 @@ router.post('/scan-empty', pbAuth, async (req, res) => {
       let customerCompany = '';
       if (rel?.target) {
         const { id, type } = rel.target;
-        if (type === 'user')    customerEmail   = userMap.get(id)    || id;
-        if (type === 'company') customerCompany = companyMap.get(id) || id;
+        if (type === 'user')    customerEmail   = userMap[id]?.email      || id;
+        if (type === 'company') customerCompany = companyMap[id]?.domain || id;
       }
 
       emptyNotes.push({

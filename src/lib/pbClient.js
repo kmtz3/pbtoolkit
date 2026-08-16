@@ -80,14 +80,12 @@ function createClient(token, useEu = false) {
 
     const url = path.startsWith('http') ? path : `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
 
-    const isV2 = path.includes('/v2/');
     const opts = {
       method: method.toUpperCase(),
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        ...(!isV2 && { 'X-Version': '1' }),
       },
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
@@ -194,33 +192,6 @@ async function fetchAllEntitiesPost(pbFetch, withRetry, body, label) {
   return items;
 }
 
-/**
- * Fetch all pages of an offset-paginated v1 API endpoint.
- * Stops when a page returns fewer items than the limit.
- * @param {Function} pbFetch   - bound pbFetch from createClient
- * @param {Function} withRetry - bound withRetry from createClient
- * @param {string}   basePath  - path without pagination params, e.g. '/users'
- * @param {Function} onPage    - callback(data: object[], pageIndex: number) called per page
- * @param {number}   [limit]   - page size (default 100)
- */
-async function paginateOffset(pbFetch, withRetry, basePath, onPage, limit = 100) {
-  let offset = 0;
-  let pageIndex = 0;
-  const sep = basePath.includes('?') ? '&' : '?';
-  while (true) {
-    const r = await withRetry(
-      () => pbFetch('get', `${basePath}${sep}pageLimit=${limit}&pageOffset=${offset}`),
-      `${basePath} offset ${offset}`
-    );
-    const data = r.data || [];
-    if (!data.length) break;
-    await onPage(data, pageIndex);
-    if (data.length < limit) break;
-    offset += limit;
-    pageIndex++;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Team membership helpers — thin wrappers around fetchAllPages.
 // Used by src/routes/teamMembership.js.
@@ -260,4 +231,4 @@ function listTeamMembers(client, teamId) {
   );
 }
 
-module.exports = { createClient, extractCursor, fetchAllEntitiesPost, paginateOffset, listTeams, listMembers, listTeamMembers };
+module.exports = { createClient, extractCursor, fetchAllEntitiesPost, listTeams, listMembers, listTeamMembers };

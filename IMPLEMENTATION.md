@@ -335,7 +335,6 @@ The frontend omits the `x-pb-token` header when `authMethod === 'oauth'` (token 
 
 | Method | Body shape |
 |---|---|
-| POST v1 (create) | `pbFetch('post', '/resource', body)` — v1 endpoints (e.g. `POST /notes`) send body directly, no wrapper |
 | POST v2 (create) | `pbFetch('post', '/v2/entities', { data: { type, fields, metadata? } })` — v2 entity creates use a `data` wrapper with `type` + `fields` |
 | PATCH (update) | `pbFetch('patch', '/resource/id', { data: body })` — **must** wrap in `data` |
 | PUT (custom field value) | `pbFetch('put', '/companies/{id}/custom-fields/{fid}/value', { data: { type, value } })` |
@@ -345,32 +344,16 @@ The frontend omits the `x-pb-token` header when `authMethod === 'oauth'` (token 
 
 ### Pagination
 
-**v1 endpoints** use offset pagination. The pattern:
+Productboard API v1 was fully retired for this workspace (every v1 path now returns `410 Gone` — confirmed live 2026-08-14). All pagination is now cursor-based via `response.links?.next` and the `extractCursor()` helper in `pbClient.js`. `paginateOffset()` (the old v1 offset-pagination helper) has been removed.
 
 ```js
-let offset = 0;
-const limit = 100;
-let hasMore = true;
-
-while (hasMore) {
-  const response = await withRetry(
-    () => pbFetch('get', `/resource?pageLimit=${limit}&pageOffset=${offset}`),
-    `fetch label offset ${offset}`
-  );
-
+let cursor = null;
+do {
+  const url = cursor ? `${basePath}?pageCursor=${encodeURIComponent(cursor)}` : basePath;
+  const response = await withRetry(() => pbFetch('get', url), `fetch label`);
   if (response.data?.length) items.push(...response.data);
-
-  // Some endpoints use pagination object, some use links.next
-  if (response.pagination) {
-    const { offset: off, limit: lim, total } = response.pagination;
-    hasMore = (off + lim) < (total ?? 0);
-  } else {
-    hasMore = !!(response.links?.next);
-  }
-
-  offset += limit;
-  if (items.length >= 10000) break; // safety cap
-}
+  cursor = extractCursor(response.links?.next);
+} while (cursor);
 ```
 
 ### Error extraction from PB responses
@@ -632,13 +615,13 @@ pb-member-activity_2026-03-01_2026-03-14_role-maker_team-frontend.csv
 
 ## Known quirks and gotchas
 
-- **v2 POST uses a `data` wrapper** — `POST /v2/entities` sends `{ data: { type: 'company', fields, metadata? } }`. The v1 `/companies` endpoint did not need the wrapper, but v2 does. Verify body shape for each new resource type.
+- **v2 POST uses a `data` wrapper** — `POST /v2/entities` sends `{ data: { type: 'company', fields, metadata? } }`. Verify body shape for each new resource type.
 
 - ~~**v2 list/search returns domain under a UUID key, single GET normalises to `"domain"`**~~ — **Resolved (2026-04-03)**: PB fixed the API. `GET /v2/entities?type[]=company` now returns domain under the standard `"domain"` key. The UUID discovery loop was removed from `domainCache.js`.
 
-- **V1 and v2 company lists are separate** — `GET /companies` (v1) only returns companies that were originally created via v1. Companies created via `POST /v2/entities` (including all PBToolkit-imported companies) do not appear in v1 and can only be retrieved via `GET /v2/entities?type[]=company`.
+- ~~**V1 and v2 company lists are separate**~~ — **Moot (2026-08-16)**: Productboard API v1 was fully retired for this workspace (410 Gone on every v1 path). `GET /v2/entities?type[]=company` is now the only company list and covers everything, legacy-created or not.
 
-- **Source fields are v2 `metadata.source`** — `sourceOriginCol` maps to `metadata.source.system` and `sourceRecordCol` to `metadata.source.recordId`. The v1 `source.origin`/`source.record_id` fields are separate and are not written by the import. Export includes both v1 and v2 source columns (v1 columns are marked as deprecated in the CSV header).
+- **Source fields are v2 `metadata.source`** — `sourceOriginCol` maps to `metadata.source.system` and `sourceRecordCol` to `metadata.source.recordId`. This is the only source of truth now — v1 is retired, so there's nothing left to fall back to.
 
 - **`parseCSVHeaders` in `app.js` is a naive implementation** — it splits on `,` and strips quotes. It is only used to populate the mapping dropdowns; the actual parsing for import uses `papaparse` on the server. If headers contain quoted commas, the frontend display may be slightly off but the import will still be correct.
 
@@ -676,7 +659,7 @@ Custom fields and standard fields are included in the same v2 create/patch call 
 
 Builds a `{ 'domain.com' → companyUUID }` map before import runs, used for step 2 above.
 
-**Why v2 list, not v1:** Companies created via `POST /v2/entities` (PBToolkit import) do NOT appear in v1 `GET /companies` — v1 and v2 have separate company lists. A v1-only cache misses all PBToolkit-imported companies.
+**Why v2 list, not v1:** v1 is fully retired for this workspace — `GET /v2/entities?type[]=company` is the only company list and covers everything.
 
 **Resolved (2026-04-03):** PB fixed the API — `domain` is now a standard string key in `GET /v2/entities?type[]=company` list responses. The UUID discovery loop and individual GET calls were removed from `domainCache.js`. Domain is now read directly from `entity.fields.domain` in list responses.
 
@@ -698,7 +681,7 @@ Mapping shape:
 ### companies.js — delete pipeline
 
 - **by-csv**: parses UUID column from uploaded CSV, deletes each UUID via `DELETE /v2/entities/{id}`. 404s warned and skipped.
-- **delete-all**: paginates `GET /companies` (v1) to collect all IDs, then deletes via `DELETE /v2/entities/{id}`. 404s counted as success.
+- **delete-all**: paginates `GET /v2/entities?type[]=company` to collect all IDs, then deletes via `DELETE /v2/entities/{id}`. 404s counted as success.
 
 ---
 
@@ -717,54 +700,51 @@ All Notes routes live in `src/routes/notes.js`.
 | `/api/notes/delete/all` | POST | SSE | Delete every note in workspace |
 | `/api/notes/migrate-prep` | POST | JSON | Transform CSV for cross-workspace migration |
 
-### Productboard API conventions for notes
+### Productboard API conventions for notes (v1 retired — v2 only)
 
-| Operation | API | Endpoint | Body wrapper |
-|---|---|---|---|
-| List notes (with relationships inline) | v2 | `GET /v2/notes` | none |
-| Create note | v1 | `POST /notes` | **none** |
-| Update note | v1 | `PATCH /notes/{id}` | **none** |
-| Backfill archived/processed/creator/owner | v2 | `PATCH /v2/notes/{id}` | `{ data: { patch: [...] } }` |
-| Link to hierarchy entity | v2 | `POST /v2/notes/{id}/relationships` | `{ data: { type: 'link', target: { id, type: 'link' } } }` |
-| Delete note | v2 | `DELETE /v2/notes/{id}` | none (returns 204) |
-| Search by source.recordId | v2 | `GET /v2/notes?source[recordId]=X` | none |
-| List users (for export cache) | v1 | `GET /users?pageLimit=100&pageOffset=N` | none |
-| List notes (v1, for source enrichment) | v1 | `GET /notes?pageLimit=100&pageCursor=X` | cursor from `response.pageCursor` |
+| Operation | Endpoint | Body wrapper |
+|---|---|---|
+| List notes (with relationships inline) | `GET /v2/notes` | none |
+| Create note (atomic — fields + metadata.source + relationships in one call) | `POST /v2/notes` | `{ data: { type, fields, metadata?, relationships? } }` |
+| Update note | `PATCH /v2/notes/{id}` | `{ data: { fields: {...} } }` or `{ data: { patch: [...] } }` |
+| Set/replace customer relationship | `PUT /v2/notes/{id}/relationships/customer` | `{ data: { target: { id, type } } }` |
+| Link to hierarchy entity | `POST /v2/notes/{id}/relationships` | `{ data: { type: 'link', target: { id, type: 'link' } } }` |
+| Delete note | `DELETE /v2/notes/{id}` | none (returns 204) |
+| Search by source.recordId | `GET /v2/notes?source[recordId]=X` | none |
+| List users (for export/customer cache) | `GET /v2/entities?type[]=user` | none |
+| List companies (for export/customer cache) | `GET /v2/entities?type[]=company` | none |
+| Create/list tag values (shared field-value resource, field id `"tags"`) | `GET`/`POST /v2/entities/fields/tags/values` | `{ data: { fields: { name } } }` on create |
 
-### v2 pagination vs v1 pagination
-
-- **v2 cursor**: extracted from `response.links?.next` URL using `extractCursor()` helper
-- **v1 cursor**: read directly from `response.pageCursor`
+Pagination is cursor-based throughout: extracted from `response.links?.next` via `extractCursor()`.
 
 ### Export pipeline
 
 1. Paginate `GET /v2/notes` — each note includes `relationships` inline (no per-note calls needed)
-2. Build user UUID → email cache from `GET /users`
-3. Build company UUID → domain cache from `GET /companies`
-4. Build v1 source map from `GET /notes` — fills gaps where `fields.source.origin` is missing in v2
-5. Transform each note → CSV row using `buildNoteRow()`, then `generateCSV()`
+2. Build user UUID → email cache via `buildIdToEmailMap()` (`lib/userCache.js`)
+3. Build company UUID → domain cache via `buildIdToDomainMap()` (`lib/domainCache.js`)
+4. Transform each note → CSV row using `buildNoteRow()`, then `generateCSV()`
 
 **Key field paths in v2 response:**
 - `note.fields.name` — title
-- `note.fields.displayUrl` — display URL
-- `note.fields.source.origin` / `note.fields.source.id` — source data
 - `note.fields.owner.email` / `note.fields.creator.email` — direct emails (no UUID lookup needed)
+- `note.metadata.source.system` / `note.metadata.source.recordId` — source (the only source of truth; there is no v1 to fall back to)
 - `note.relationships` — array of `{ type: 'customer'|'link', target: { id, type, links } }`
 - Customer relationship target is UUID only — resolved via user/company caches
 
 ### Import pipeline (per row)
 
-1. Match: `pb_id` present → UPDATE directly; `ext_id` present → `GET /v2/notes?source[recordId]=ext_id` → UPDATE if found, else CREATE; neither → CREATE
-2. CREATE via v1 `POST /notes` (no wrapper). Owner rejection → retry without owner, set `ownerRejected = true`
-3. UPDATE via v1 `PATCH /notes/{id}` (no wrapper). Same owner retry pattern
-4. Backfill via v2 `PATCH /v2/notes/{id}` for: `archived`, `processed`, `creator`, `owner` (when ownerRejected). On 404: retry up to 3× with 1s delay (v1→v2 propagation)
-5. Hierarchy links via `POST /v2/notes/{id}/relationships`. In migration mode, map old UUID → new UUID via `original_uuid` custom field on entities
+1. Match: `pb_id` present → UPDATE; neither → CREATE
+2. Resolve `user_email`/`company_domain` → a v2 user/company entity UUID, **creating a new entity if the email/domain isn't already known** (`resolveOrCreateUser`/`resolveOrCreateCompany` in `notes.js`)
+3. Resolve tag names against the shared `"tags"` field-value set, creating any that don't exist yet (`resolveTags`, using `lib/fieldValues.js`)
+4. CREATE: single atomic `POST /v2/notes` with `fields` + `metadata.source` (create-only — source is immutable) + `relationships: [customerRel]`. UPDATE: `PATCH /v2/notes/{id}` with `fields`, then `PUT .../relationships/customer` separately if the customer changed.
+5. **Member-field fallback**: if `owner`/`creator` isn't a valid active workspace member, PB rejects that one field (`validation.referenceNotFound`, `source.pointer` ending in `/owner` or `/creator`) — retried once with that field stripped rather than failing the whole row.
+6. **Propagation-delay fallback**: a user/company entity created moments earlier in the same import can briefly 404 when referenced in the note's `relationships` — retried with backoff (~1.5s increments, a few attempts) before the customer link is dropped (not the whole note).
+7. Hierarchy links via `POST /v2/notes/{id}/relationships`. In migration mode, map old UUID → new UUID via `original_uuid` custom field on entities
 
 ### Content format
 
 - simple notes: `fields.content` is a plain string
 - conversation notes: `fields.content` is an array of message objects → **JSON.stringify** in CSV
-- On import: if content column is a JSON string starting with `[`, it is sent as-is to v1 (v1 accepts JSON string for conversation content)
 
 ---
 
@@ -785,7 +765,7 @@ Routes in `src/routes/notesMerge.js`. Frontend JS in `public/notes-merge-app.js`
 
 - **Matching key**: `title\x00content\x00customerId` (exact match) or `\x00content\x00customerId` (loose match). Notes with no content or no customer relationship are excluded.
 - **Groups of 100+**: flagged in `stats.oversizedGroups`, not auto-merged.
-- **v1 follower endpoints**: both `POST /notes/{id}/user-followers` (add follower) and `GET /notes/{id}/user-followers` (fetch existing followers) are v1 APIs with no v2 equivalent yet. Needs revisiting when v1 is retired (~2026-10). See TODO comments in `notesMerge.js`.
+- **Follower transfer (owner-cycling)**: v1's follower endpoints are gone and v2 has no follower-write API at all. Verified workaround: `PATCH` the target note's `owner` field to each new follower's email in turn (~3s apart — confirmed live that this reliably adds each as a permanent follower without removing previously-added ones), then restore the target's real owner (or clear it) as the final step. There is no v2 way to *read* a note's existing follower list, so only secondary-note owners can be transferred — a secondary's other followers are unrecoverable via API. See the header comment in `notesMerge.js` for the full writeup.
 - **State priority**: `processed(0) > unprocessed(1) > archived(2)` — mirrored as `NM_STATE_PRIORITY` in `notes-merge-app.js` (intentional duplication; no shared import between server and browser).
 - **Audit log**: each `/run` response includes a `runId` + `auditLog` array with per-group details (tags added, links added, followers added, notes deleted, errors).
 

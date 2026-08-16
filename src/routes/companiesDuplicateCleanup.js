@@ -71,7 +71,7 @@ function setCachedOrigins(token, origins) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /origins — return distinct non-null sourceOrigin values across v2 + v1
+// GET /origins — return distinct non-null sourceOrigin values (v2 only — v1 retired)
 // ---------------------------------------------------------------------------
 
 router.get('/origins', pbAuth, async (req, res) => {
@@ -85,8 +85,7 @@ router.get('/origins', pbAuth, async (req, res) => {
 
   const { pbFetch, withRetry } = res.locals.pbClient;
   try {
-    const originsSet    = new Set();
-    const missingV2Ids  = new Set(); // company IDs where v2 source is null — need v1 fallback
+    const originsSet = new Set();
 
     // v2: metadata.source.system
     let cursor = null;
@@ -98,33 +97,9 @@ router.get('/origins', pbAuth, async (req, res) => {
       for (const c of (r.data || [])) {
         const sys = c.metadata?.source?.system;
         if (sys) originsSet.add(sys);
-        else if (c.id) missingV2Ids.add(c.id);
       }
       cursor = extractCursor(r.links?.next);
     } while (cursor);
-
-    // v1 fallback: sourceOrigin for companies whose v2 source was null.
-    // Stops as soon as all missing IDs have been back-filled (mirrors /scan behaviour).
-    if (missingV2Ids.size > 0) {
-      let offset = 0;
-      let filled = 0;
-      const PAGE = 100;
-      while (filled < missingV2Ids.size) {
-        const r = await withRetry(
-          () => pbFetch('get', `/companies?pageLimit=${PAGE}&pageOffset=${offset}`),
-          `fetch v1 companies for origins offset=${offset}`
-        );
-        const batch = r.data || [];
-        for (const c of batch) {
-          if (c.id && missingV2Ids.has(c.id) && c.sourceOrigin) {
-            originsSet.add(c.sourceOrigin);
-            filled++;
-          }
-        }
-        if (batch.length < PAGE) break;
-        offset += PAGE;
-      }
-    }
 
     const origins = [...originsSet].sort();
     setCachedOrigins(token, origins);
@@ -164,10 +139,10 @@ router.get('/origins', pbAuth, async (req, res) => {
 //   origin company (preferring 'salesforce'); if all are null, first in list.
 //   The frontend allows the user to swap the target.
 //
-// Source origin strategy (v2-first, v1-fallback):
-//   1. Fetch all companies from v2 entities → domain + id + metadata.source.system
-//   2. If any company has metadata.source.system = null, fetch v1 /companies for those
-//      ids only and back-fill sourceOrigin from v1 (covers the legacy metadata migration gap)
+// Source origin strategy (v2-only — v1 retired):
+//   Fetch all companies from v2 entities → domain + id + metadata.source.system/recordId.
+//   A null metadata.source just means the company has no recorded source; there is no
+//   fallback to backfill it from anymore.
 // ---------------------------------------------------------------------------
 
 // Normalize a company name for duplicate matching.
@@ -219,42 +194,7 @@ router.post('/scan', pbAuth, async (req, res) => {
       recordIdMap[c.id] = c.metadata?.source?.recordId  || null;
     }
 
-    // ── Step 2: v1 fallback for ids where v2 source is null ──────────────
-    const missingSourceIds = new Set(Object.entries(sourceMap).filter(([, v]) => v === null).map(([k]) => k));
-
-    if (missingSourceIds.size > 0 && !sse.isAborted()) {
-      sse.progress(`Fetching source origin from v1 API for ${missingSourceIds.size} compan${missingSourceIds.size === 1 ? 'y' : 'ies'}…`, 40);
-
-      // v1 doesn't support filtering by id, so paginate and collect what we need
-      let offset = 0;
-      const PAGE = 100;
-      let filled = 0;
-      while (missingSourceIds.size > filled && !sse.isAborted()) {
-        const r = await withRetry(
-          () => pbFetch('get', `/companies?pageLimit=${PAGE}&pageOffset=${offset}`),
-          `fetch v1 companies offset=${offset}`
-        );
-        const batch = r.data || [];
-        for (const c of batch) {
-          if (c.id && missingSourceIds.has(c.id)) {
-            sourceMap[c.id] = c.sourceOrigin || null;
-            // Only fall back to v1 sourceRecordId if v2 recordId was also null
-            if (!recordIdMap[c.id]) recordIdMap[c.id] = c.sourceRecordId || null;
-            filled++;
-          }
-        }
-        if (batch.length < PAGE) break;
-        offset += PAGE;
-      }
-
-      sse.log('info', `Back-filled source data for ${filled} compan${filled === 1 ? 'y' : 'ies'} from v1 API`);
-    } else if (missingSourceIds.size === 0) {
-      sse.log('info', 'All source origins resolved from v2 — v1 fallback not needed');
-    }
-
-    if (sse.isAborted()) { sse.complete({ domainRecords: [], skippedRows: [], totalDomains: 0, totalDuplicates: 0, stopped: true }); return; }
-
-    // ── Step 3: Group by domain ───────────────────────────────────────────
+    // ── Step 2: Group by domain ───────────────────────────────────────────
     sse.progress('Detecting duplicates…', 75);
 
     // Build name map from v2 fields
@@ -518,47 +458,6 @@ router.post('/preview-csv', pbAuth, async (req, res) => {
       } catch {
         companyDetails[id] = { id, name: null, domain: null, sourceOrigin: null, sourceRecordId: null, notFound: true };
       }
-    }
-
-    if (sse.isAborted()) { sse.complete({ domainRecords: [], totalDomains: 0, totalDuplicates: 0 }); return; }
-
-    // ── Step 3.5: v1 fallback for companies where v2 source is null ──────────
-    // v2 metadata.source.system is null for companies whose source was only
-    // recorded in v1 (legacy migration gap). Paginate v1 and back-fill.
-    const missingSourceIds = new Set(
-      Object.values(companyDetails)
-        .filter(c => !c.notFound && c.sourceOrigin === null)
-        .map(c => c.id)
-    );
-
-    if (missingSourceIds.size > 0 && !sse.isAborted()) {
-      sse.progress(`Fetching source data from v1 API for ${missingSourceIds.size} compan${missingSourceIds.size !== 1 ? 'ies' : 'y'}…`, 45);
-
-      // v1 doesn't support filtering by id, so paginate and collect what we need
-      let offset = 0;
-      const PAGE = 100;
-      let filled = 0;
-      while (filled < missingSourceIds.size && !sse.isAborted()) {
-        const r = await withRetry(
-          () => pbFetch('get', `/companies?pageLimit=${PAGE}&pageOffset=${offset}`),
-          `v1 source fallback offset=${offset}`
-        );
-        const batch = r.data || [];
-        for (const c of batch) {
-          if (c.id && missingSourceIds.has(c.id)) {
-            companyDetails[c.id].sourceOrigin   = c.sourceOrigin   || null;
-            // Only use v1 sourceRecordId if v2 recordId was also null
-            if (!companyDetails[c.id].sourceRecordId) {
-              companyDetails[c.id].sourceRecordId = c.sourceRecordId || null;
-            }
-            filled++;
-          }
-        }
-        if (batch.length < PAGE) break;
-        offset += PAGE;
-      }
-
-      sse.log('info', `Back-filled source data for ${filled} compan${filled !== 1 ? 'ies' : 'y'} from v1 API`);
     }
 
     if (sse.isAborted()) { sse.complete({ domainRecords: [], totalDomains: 0, totalDuplicates: 0 }); return; }

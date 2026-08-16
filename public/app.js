@@ -312,7 +312,7 @@ const DEFAULT_VIEWS = {
 };
 
 const TOOL_VIEWS = {
-  companies:         ['export', 'import', 'companies-delete-csv', 'companies-delete-all', 'companies-source-migration', 'users-export', 'users-import', 'users-delete-csv', 'users-delete-all'],
+  companies:         ['export', 'import', 'companies-delete-csv', 'companies-delete-all', 'users-export', 'users-import', 'users-delete-csv', 'users-delete-all'],
   notes:             ['notes-export', 'notes-import', 'notes-delete-csv', 'notes-delete-all', 'notes-migrate'],
   entities:          ['entities-templates', 'entities-export', 'entities-import', 'entities-delete'],
   'member-activity': ['member-activity-export'],
@@ -727,7 +727,7 @@ function showView(view, { updateUrl = false } = {}) {
 
   [
     'export', 'import',
-    'companies-delete-csv', 'companies-delete-all', 'companies-source-migration', 'companies-sf-migration',
+    'companies-delete-csv', 'companies-delete-all', 'companies-sf-migration',
     'notes-export', 'notes-import', 'notes-delete-csv', 'notes-delete-all', 'notes-migrate',
     'entities-templates', 'entities-export', 'entities-import', 'entities-delete',
     'member-activity-export',

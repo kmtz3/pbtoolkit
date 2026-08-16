@@ -255,16 +255,14 @@ function noteWithCustomer(id, customerType, customerId) {
 
 // ── GET /origins ──────────────────────────────────────────────────────────────
 
-test('origins: returns merged v2 + v1 sources, deduplicated and sorted', async () => {
+test('origins: returns distinct v2 sources, deduplicated and sorted (v1 retired — no fallback)', async () => {
   reset({
     v2Companies: [
       company(PRIMARY_ID,  'acme.com', 'salesforce'),
-      company(HB_ID,  'beta.com', null),          // v2 source null — v1 fallback needed
+      company(HB_ID,  'beta.com', null),          // v2 source null — no v1 to fall back to anymore
       company(HB2_ID, 'beta.com', 'salesforce'),  // already has v2 source
     ],
-    v1Companies: [
-      { id: HB_ID, sourceOrigin: 'hubspot' },     // back-fills HB_ID
-    ],
+    v1Companies: [],
   });
 
   const res = await request(app)
@@ -272,7 +270,7 @@ test('origins: returns merged v2 + v1 sources, deduplicated and sorted', async (
     .set('x-pb-token', 'token-origins-merge');
 
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body.origins, ['hubspot', 'salesforce']);
+  assert.deepEqual(res.body.origins, ['salesforce']);
 });
 
 test('origins: second call with same token is served from cache (no extra API calls)', async () => {
@@ -473,17 +471,15 @@ test('scan: domain+name — fuzzy match groups Acme Inc and ACME, INC.', async (
   assert.equal(completeFuzzy.domainRecords[0].primaryId, PRIMARY_ID);
 });
 
-test('scan: v1 fallback fills null v2 source origins', async () => {
-  // HB_ID has null v2 source — v1 back-fills it as hubspot
-  // Combined with PRIMARY_ID (salesforce) they form a valid duplicate pair
+test('scan: null v2 source origin stays null (v1 retired — no fallback)', async () => {
+  // HB_ID has null v2 source and there's no v1 to back-fill it from anymore.
+  // Combined with PRIMARY_ID (salesforce) they still form a valid duplicate pair.
   reset({
     v2Companies: [
       company(PRIMARY_ID, 'acme.com', 'salesforce'),
       company(HB_ID, 'acme.com', null),
     ],
-    v1Companies: [
-      { id: HB_ID, sourceOrigin: 'hubspot' },
-    ],
+    v1Companies: [],
   });
 
   const res = await request(app)
@@ -495,12 +491,12 @@ test('scan: v1 fallback fills null v2 source origins', async () => {
   assert.equal(complete.domainRecords.length, 1);
   assert.equal(complete.domainRecords[0].primaryId,  PRIMARY_ID);
   assert.equal(complete.domainRecords[0].duplicates[0].id, HB_ID);
-  assert.equal(complete.domainRecords[0].duplicates[0].sourceOrigin, 'hubspot',
-    'v1-back-filled sourceOrigin should appear in the duplicate entry');
+  assert.equal(complete.domainRecords[0].duplicates[0].sourceOrigin, null,
+    'sourceOrigin should stay null — no v1 API to back-fill it from');
 
-  // Verify v1 API was called
+  // Verify no v1 API call was made
   const v1Calls = mockCalls.filter(c => c.path === '/companies');
-  assert.ok(v1Calls.length >= 1, 'Should have called v1 API for fallback');
+  assert.equal(v1Calls.length, 0, 'Should NOT call the retired v1 API');
 });
 
 test('scan: missing token returns 400', async () => {

@@ -10,7 +10,7 @@
  *   Body: { csvText, mapping }
  *
  * POST /api/notes/import/run
- *   Import notes via v1 API with v2 backfill. SSE stream.
+ *   Import notes via v2 API. SSE stream.
  *   Body: { csvText, mapping, migrationMode }
  *
  * POST /api/notes/delete/by-csv
@@ -25,25 +25,32 @@
  *   Body: { csvText, sourceOriginName }
  *   Returns: { csv, count }
  *
- * --- API conventions ---
+ * --- API conventions (v1 retired — v2 only) ---
  * v2 list:       GET  /v2/notes           cursor from response.links.next
- * v1 list:       GET  /notes              cursor from response.pageCursor
- * v1 create:     POST /notes              no wrapper
- * v1 update:     PATCH /notes/{id}        { data: { ... } }
- * v2 backfill:   PATCH /v2/notes/{id}     { data: { patch: [...] } }
+ * v2 create:     POST /v2/notes           { data: { type, fields, metadata?, relationships? } }
+ * v2 update:     PATCH /v2/notes/{id}     { data: { fields: {...} } }  or  { data: { patch: [...] } }
+ * v2 customer:   PUT  /v2/notes/{id}/relationships/customer  { data: { target: { id, type } } }
  * v2 relate:     POST  /v2/notes/{id}/relationships  { data: { type, target } }
  * v2 delete:     DELETE /v2/notes/{id}    204 response
  * v2 search:     POST /v2/notes/search       { data: { filter: { ... } } }
+ *
+ * Tags are a shared field-value resource (field id "tags") — same create/list
+ * endpoints as entity custom select fields, see lib/fieldValues.js.
+ * Note relationships require a user/company UUID, not an email/domain string —
+ * unknown emails/domains are resolved by creating a new user/company entity.
  */
 
 const express = require('express');
-const { extractCursor, fetchAllEntitiesPost, paginateOffset } = require('../lib/pbClient');
+const { extractCursor, fetchAllEntitiesPost } = require('../lib/pbClient');
 const { parseCSV, generateCSV, cell } = require('../lib/csvUtils');
 const { startSSE } = require('../lib/sse');
 const { parseApiError } = require('../lib/errorUtils');
 const { UUID_RE } = require('../lib/constants');
 const { pbAuth } = require('../middleware/pbAuth');
 const { normalizeSchema } = require('../services/entities/configCache');
+const { buildDomainToIdMap, buildIdToDomainMap } = require('../lib/domainCache');
+const { buildEmailToIdMap, buildIdToEmailMap } = require('../lib/userCache');
+const { fetchFieldValues, createFieldValue } = require('../lib/fieldValues');
 
 const router = express.Router();
 
@@ -66,13 +73,6 @@ const CSV_HEADERS = [
 
 function isTruthy(val) {
   return val === true || val === 'TRUE' || val === 'true' || val === '1' || val === 1;
-}
-
-function normalizeUrl(url) {
-  if (!url) return '';
-  const s = String(url).trim();
-  if (!s) return '';
-  return /^https?:\/\//i.test(s) ? s : 'https://' + s;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,62 +116,8 @@ function buildExportFilename(createdFrom, createdTo) {
   return `notes-export-to-${createdTo.slice(0, 10)}.csv`;
 }
 
-/** Build UUID→email map from v1 /users endpoint. */
-async function buildUserCache(pbFetch, withRetry) {
-  const map = new Map();
-  await paginateOffset(pbFetch, withRetry, '/users', (data) => {
-    for (const u of data) {
-      if (u.id && u.email) map.set(u.id, u.email);
-    }
-  });
-  return map;
-}
-
-/** Build UUID→domain map from /companies endpoint. */
-async function buildCompanyCache(pbFetch, withRetry) {
-  const map = new Map();
-  await paginateOffset(pbFetch, withRetry, '/companies', (data) => {
-    for (const c of data) {
-      if (c.id && c.domain) map.set(c.id, c.domain);
-    }
-  });
-  return map;
-}
-
-/** Build UUID→{origin,record_id} map from v1 /notes endpoint. Used for source enrichment. */
-async function buildV1SourceMap(pbFetch, withRetry) {
-  const map = new Map();
-  let cursor = null;
-  const limit = 100;
-  const MAX_PAGES = 1000;
-  let page = 0;
-
-  while (page < MAX_PAGES) {
-    let url = `/notes?pageLimit=${limit}`;
-    if (cursor) url += `&pageCursor=${encodeURIComponent(cursor)}`;
-
-    const r = await withRetry(() => pbFetch('get', url), `fetch v1 notes source page ${page + 1}`);
-    if (!r.data?.length) break;
-
-    for (const note of r.data) {
-      if (note.id) {
-        map.set(note.id, {
-          origin: note.source?.origin || null,
-          record_id: note.source?.record_id || null,
-        });
-      }
-    }
-
-    cursor = r.pageCursor || null;
-    if (!cursor) break;
-    page++;
-  }
-
-  return map;
-}
-
 /** Transform a single v2 note object to a CSV row object. */
-function buildNoteRow(note, userCache, companyCache, sourceMap) {
+function buildNoteRow(note, userCache, companyCache) {
   const f = note.fields || {};
   const rels = Array.isArray(note.relationships?.data) ? note.relationships.data : [];
 
@@ -181,8 +127,8 @@ function buildNoteRow(note, userCache, companyCache, sourceMap) {
   let companyDomain = '';
   if (customerRel?.target) {
     const { id, type } = customerRel.target;
-    if (type === 'user') userEmail = userCache.get(id) || '';
-    else if (type === 'company') companyDomain = companyCache.get(id) || '';
+    if (type === 'user') userEmail = userCache[id]?.email || '';
+    else if (type === 'company') companyDomain = companyCache[id]?.domain || '';
   }
 
   // Linked entity UUIDs
@@ -191,17 +137,10 @@ function buildNoteRow(note, userCache, companyCache, sourceMap) {
     .map((r) => r.target.id)
     .join(',');
 
-  // Source: prefer metadata.source (new v2), fall back to fields.source (deprecated), then v1 map
+  // Source: metadata.source (v2 native)
   const metaSrc = note.metadata?.source || {};
-  let sourceOrigin = metaSrc.system || f.source?.origin || '';
-  let sourceRecordId = metaSrc.recordId || f.source?.id || f.source?.recordId || '';
-  if (!sourceOrigin && sourceMap) {
-    const v1 = sourceMap.get(note.id);
-    if (v1) {
-      if (v1.origin) sourceOrigin = v1.origin;
-      if (!sourceRecordId && v1.record_id) sourceRecordId = v1.record_id;
-    }
-  }
+  const sourceOrigin   = metaSrc.system   || '';
+  const sourceRecordId = metaSrc.recordId || '';
 
   // Content: serialize arrays as JSON (conversation / opportunity types)
   let content = f.content || '';
@@ -215,7 +154,7 @@ function buildNoteRow(note, userCache, companyCache, sourceMap) {
     type: note.type || 'textNote',
     title: f.name || '',
     content,
-    display_url: f.displayUrl || f.display_url || '',
+    display_url: '', // no v2 field for this — kept as a column for CSV/import compatibility
     user_email: userEmail,
     company_domain: companyDomain,
     owner_email: f.owner?.email || '',
@@ -236,137 +175,203 @@ function buildNoteRow(note, userCache, companyCache, sourceMap) {
 // Import helpers
 // ---------------------------------------------------------------------------
 
-/** Build v1 create/update payload from a CSV row (using mapping). */
-function buildV1Payload(row, mapping, isCreate) {
+/**
+ * Extract the failing field name from a v2 validation error's JSON body
+ * (source.pointer, e.g. "/data/fields/owner" → "owner"). Returns null if
+ * the error isn't a parseable field-validation error.
+ */
+function extractFailedFieldPath(err) {
+  const msg = err.message || '';
+  const jsonMatch = msg.match(/\{[\s\S]*"errors"[\s\S]*\}/);
+  if (!jsonMatch) return null;
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    const pointer = parsed.errors?.[0]?.source?.pointer || '';
+    return pointer.split('/').pop() || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Resolve a user's email to a v2 user entity UUID, creating the user if not
+ * already known. Mutates emailToId in place so repeat emails within the same
+ * import reuse the cached id instead of creating duplicates.
+ */
+async function resolveOrCreateUser(pbFetch, withRetry, emailToId, email) {
+  const key = email.toLowerCase().trim();
+  if (emailToId[key]) return emailToId[key];
+  const r = await withRetry(
+    () => pbFetch('post', '/v2/entities', { data: { type: 'user', fields: { email, name: email } } }),
+    `create user ${email}`
+  );
+  const id = r.data?.id || r.id;
+  emailToId[key] = id;
+  return id;
+}
+
+/** Resolve a company domain to a v2 company entity UUID, creating it if not already known. */
+async function resolveOrCreateCompany(pbFetch, withRetry, domainToId, domain) {
+  const key = domain.toLowerCase().trim();
+  if (domainToId[key]) return domainToId[key];
+  const r = await withRetry(
+    () => pbFetch('post', '/v2/entities', { data: { type: 'company', fields: { domain, name: domain } } }),
+    `create company ${domain}`
+  );
+  const id = r.data?.id || r.id;
+  domainToId[key] = id;
+  return id;
+}
+
+/**
+ * Resolve tag names to the shared "tags" field-value set, creating any that
+ * don't exist yet. tagCache is a normalised-name → { id, name } Map seeded from
+ * lib/fieldValues.js's fetchFieldValues('tags', ...).
+ */
+async function resolveTags(pbFetch, withRetry, tagCache, tagNames) {
+  const result = [];
+  for (const name of tagNames) {
+    const key = name.toLowerCase().trim();
+    if (!key) continue;
+    if (!tagCache.has(key)) {
+      try {
+        const created = await createFieldValue('tags', name, pbFetch, withRetry);
+        tagCache.set(key, created);
+      } catch (_) {
+        continue; // could not create — skip this tag rather than fail the whole row
+      }
+    }
+    result.push({ name: tagCache.get(key).name });
+  }
+  return result;
+}
+
+/** Build the v2 `fields` object (name/content/owner/creator/archived/processed/tags) from a CSV row. */
+function buildNoteFieldsV2(row, mapping, resolvedTags) {
   const get = (col) => cell(row, col);
 
-  const title = get(mapping.titleColumn);
-  const content = get(mapping.contentColumn);
-  const displayUrl = normalizeUrl(get(mapping.displayUrlColumn));
-  const userEmail = get(mapping.userEmailColumn);
-  const companyDomain = get(mapping.companyDomainColumn);
-  const ownerEmail = get(mapping.ownerEmailColumn);
-  const tagsRaw = get(mapping.tagsColumn);
-  const sourceOrigin = get(mapping.sourceOriginColumn);
-  const sourceRecordId = get(mapping.sourceRecordIdColumn);
+  const title       = get(mapping.titleColumn);
+  const content      = get(mapping.contentColumn);
+  const ownerEmail   = get(mapping.ownerEmailColumn);
+  const creatorEmail = get(mapping.creatorEmailColumn);
+  const archivedVal  = get(mapping.archivedColumn);
+  const processedVal = get(mapping.processedColumn);
 
-  const payload = {};
-  if (title) payload.title = title;
-  if (content) payload.content = content;
-  if (displayUrl) payload.display_url = displayUrl;
+  const fields = {};
+  if (title)   fields.name    = title;
+  if (content) fields.content = content;
+  if (ownerEmail)   fields.owner   = { email: ownerEmail };
+  if (creatorEmail) fields.creator = { email: creatorEmail };
+  if (archivedVal !== '')  fields.archived  = isTruthy(archivedVal);
+  if (processedVal !== '') fields.processed = isTruthy(processedVal);
+  if (resolvedTags.length) fields.tags = resolvedTags;
 
-  // Customer relationship (user takes priority over company)
-  if (userEmail) payload.user = { email: userEmail };
-  else if (companyDomain) payload.company = { domain: companyDomain };
-
-  if (ownerEmail) payload.owner = { email: ownerEmail };
-
-  if (tagsRaw) {
-    payload.tags = tagsRaw.split(',').map((t) => t.trim()).filter(Boolean);
-  }
-
-  // Source is immutable — only set on create
-  if (isCreate && sourceOrigin && sourceRecordId) {
-    payload.source = { origin: sourceOrigin, record_id: sourceRecordId };
-  }
-
-  return payload;
+  return fields;
 }
 
 /**
- * Create a note via v1 API. Retries without owner if rejected.
- * Returns { id, ownerRejected }.
+ * POST /v2/notes. Retries with owner/creator stripped if PB rejects them
+ * (the mapped email isn't an active workspace member). A customer relationship
+ * pointing at a user/company entity created moments earlier in this same import
+ * can 404 briefly (propagation delay) — retried with backoff before being dropped.
+ * Returns { id, ownerSkipped, creatorSkipped, customerSkipped }.
  */
-async function createNote(pbFetch, withRetry, payload) {
-  let ownerRejected = false;
+async function createNoteV2(pbFetch, withRetry, { type, fields, sourceOrigin, sourceRecordId, customerRel }) {
+  let currentFields = { ...fields };
+  let currentCustomerRel = customerRel;
+  let ownerSkipped = false, creatorSkipped = false, customerSkipped = false;
+  let propagationRetries = 0;
 
-  const tryCreate = async (p) => {
-    const r = await withRetry(() => pbFetch('post', '/notes', p), 'create note');
-    return r.id || r.data?.id;
-  };
-
-  let noteId;
-  try {
-    noteId = await tryCreate(payload);
-  } catch (err) {
-    const msg = parseApiError(err);
-    if (payload.owner && (msg.toLowerCase().includes('owner') || msg.includes('User does not exist'))) {
-      const p2 = { ...payload };
-      delete p2.owner;
-      ownerRejected = true;
-      noteId = await tryCreate(p2);
-    } else {
-      throw err;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const payload = { data: { type: type || 'textNote', fields: currentFields } };
+    if (sourceOrigin && sourceRecordId) {
+      payload.data.metadata = { source: { system: sourceOrigin, recordId: sourceRecordId } };
     }
-  }
+    if (currentCustomerRel) payload.data.relationships = [currentCustomerRel];
 
-  if (!noteId) throw new Error('API did not return a note ID');
-  return { id: noteId, ownerRejected };
-}
-
-/**
- * Update a note via v1 PATCH. Retries without owner if rejected.
- * Returns { ownerRejected }.
- */
-async function updateNote(pbFetch, withRetry, noteId, payload) {
-  let ownerRejected = false;
-
-  const tryUpdate = async (p) => {
-    await withRetry(() => pbFetch('patch', `/notes/${noteId}`, { data: p }), `update note ${noteId}`);
-  };
-
-  try {
-    await tryUpdate(payload);
-  } catch (err) {
-    const msg = parseApiError(err);
-    if (payload.owner && (msg.toLowerCase().includes('owner') || msg.includes('User does not exist'))) {
-      const p2 = { ...payload };
-      delete p2.owner;
-      ownerRejected = true;
-      await tryUpdate(p2);
-    } else {
-      throw err;
-    }
-  }
-
-  return { ownerRejected };
-}
-
-/**
- * Backfill archived, processed, creator, owner via v2 PATCH.
- * Retries on 404 (v1→v2 propagation delay), then falls back to status-only.
- */
-async function backfillV2(pbFetch, withRetry, noteId, { archived, processed, creatorEmail, ownerEmail }) {
-  const ops = [];
-  if (archived !== undefined) ops.push({ op: 'set', path: 'archived', value: archived });
-  if (processed !== undefined) ops.push({ op: 'set', path: 'processed', value: processed });
-  if (creatorEmail) ops.push({ op: 'set', path: 'creator', value: { email: creatorEmail } });
-  if (ownerEmail) ops.push({ op: 'set', path: 'owner', value: { email: ownerEmail } });
-  if (!ops.length) return;
-
-  const patch = async (patchOps) => {
-    await pbFetch('patch', `/v2/notes/${noteId}`, { data: { patch: patchOps } });
-  };
-
-  // Retry up to 3× on 404 (propagation delay from v1 to v2)
-  for (let attempt = 0; attempt <= 3; attempt++) {
     try {
-      await patch(ops);
-      return;
+      const r = await withRetry(() => pbFetch('post', '/v2/notes', payload), 'create note');
+      const id = r.data?.id || r.id;
+      if (!id) throw new Error('API did not return a note ID');
+      return { id, ownerSkipped, creatorSkipped, customerSkipped };
     } catch (err) {
-      const msg = String(err.message || err);
-      if ((err.status === 404 || msg.includes('404')) && attempt < 3) {
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      const field = extractFailedFieldPath(err);
+      const msg = String(err.message || '');
+
+      if (field === 'owner' && currentFields.owner) {
+        const { owner, ...rest } = currentFields; currentFields = rest; ownerSkipped = true; continue;
+      }
+      if (field === 'creator' && currentFields.creator) {
+        const { creator, ...rest } = currentFields; currentFields = rest; creatorSkipped = true; continue;
+      }
+      if (currentCustomerRel && /not found/i.test(msg)) {
+        if (propagationRetries < 3) {
+          propagationRetries++;
+          await new Promise((r) => setTimeout(r, 1500 * propagationRetries));
+          continue;
+        }
+        currentCustomerRel = null;
+        customerSkipped = true;
         continue;
       }
-      // If creator/owner caused the failure, retry with status-only ops
-      if (creatorEmail || ownerEmail) {
-        const statusOps = ops.filter((o) => o.path === 'archived' || o.path === 'processed');
-        if (statusOps.length) {
-          try { await patch(statusOps); } catch (_) {}
-        }
+      throw err;
+    }
+  }
+  throw new Error('Note create failed after owner/creator/customer fallback retries');
+}
+
+/**
+ * PATCH /v2/notes/{id} with the same owner/creator fallback as create.
+ * The customer relationship (if resolved) is written separately via
+ * setNoteCustomer — it isn't part of the fields PATCH body.
+ * Returns { ownerSkipped, creatorSkipped }.
+ */
+async function updateNoteV2(pbFetch, withRetry, noteId, fields) {
+  let currentFields = { ...fields };
+  let ownerSkipped = false, creatorSkipped = false;
+
+  if (!Object.keys(currentFields).length) return { ownerSkipped, creatorSkipped };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await withRetry(
+        () => pbFetch('patch', `/v2/notes/${noteId}`, { data: { fields: currentFields } }),
+        `update note ${noteId}`
+      );
+      return { ownerSkipped, creatorSkipped };
+    } catch (err) {
+      const field = extractFailedFieldPath(err);
+      if (field === 'owner' && currentFields.owner) {
+        const { owner, ...rest } = currentFields; currentFields = rest; ownerSkipped = true; continue;
       }
-      return; // Non-fatal — log but don't throw
+      if (field === 'creator' && currentFields.creator) {
+        const { creator, ...rest } = currentFields; currentFields = rest; creatorSkipped = true; continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('Note update failed after owner/creator fallback retries');
+}
+
+/**
+ * PUT the customer relationship (user or company target) on an existing note.
+ * Retries with backoff on "not found" — the target may have been created
+ * moments earlier in this same import and not yet be referenceable.
+ */
+async function setNoteCustomer(pbFetch, withRetry, noteId, target) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      await withRetry(
+        () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, { data: { target } }),
+        `set customer on note ${noteId}`
+      );
+      return;
+    } catch (err) {
+      if (/not found/i.test(String(err.message || '')) && attempt < 3) {
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        continue;
+      }
+      throw err;
     }
   }
 }
@@ -445,7 +450,7 @@ async function buildMigrationCache(pbFetch, withRetry, fieldName = 'original_uui
 // ---------------------------------------------------------------------------
 
 router.post('/export', pbAuth, async (req, res) => {
-  const { pbFetch, withRetry } = res.locals.pbClient;
+  const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
   const sse = startSSE(res);
   const { createdFrom, createdTo } = req.body || {};
 
@@ -466,21 +471,13 @@ router.post('/export', pbAuth, async (req, res) => {
     }
 
     sse.progress(`Fetched ${notes.length} notes. Building user cache…`, 40);
-    const userCache = await buildUserCache(pbFetch, withRetry);
+    const userCache = await buildIdToEmailMap(fetchAllPages, 'fetch users for note export');
 
-    sse.progress(`User cache: ${userCache.size} users. Building company cache…`, 50);
-    const companyCache = await buildCompanyCache(pbFetch, withRetry);
+    sse.progress(`User cache: ${Object.keys(userCache).length} users. Building company cache…`, 55);
+    const companyCache = await buildIdToDomainMap(fetchAllPages, 'fetch companies for note export');
 
-    sse.progress(`Company cache: ${companyCache.size} companies. Enriching source data from v1…`, 60);
-    let sourceMap = null;
-    try {
-      sourceMap = await buildV1SourceMap(pbFetch, withRetry);
-    } catch (err) {
-      sse.progress('Warning: v1 source enrichment failed, source fields may be incomplete.', 75);
-    }
-
-    sse.progress('Building CSV…', 85);
-    const rows = notes.map((note) => buildNoteRow(note, userCache, companyCache, sourceMap));
+    sse.progress(`Company cache: ${Object.keys(companyCache).length} companies. Building CSV…`, 85);
+    const rows = notes.map((note) => buildNoteRow(note, userCache, companyCache));
 
     const csv = generateCSV(rows, CSV_FIELDS, CSV_FIELDS);
     const filename = buildExportFilename(createdFrom, createdTo);
@@ -581,7 +578,7 @@ router.post('/import/preview', pbAuth, async (req, res) => {
 // ---------------------------------------------------------------------------
 
 router.post('/import/run', pbAuth, async (req, res) => {
-  const { pbFetch, withRetry } = res.locals.pbClient;
+  const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
 
   const { csvText, mapping, migrationMode, migrationFieldName } = req.body;
   if (!csvText || !mapping) return res.status(400).json({ error: 'Missing csvText or mapping' });
@@ -607,7 +604,25 @@ router.post('/import/run', pbAuth, async (req, res) => {
       }
     }
 
-    // Auto-generate source_record_ids for rows that need them
+    // Resolve caches for customer relationships + tags (only fetched when the relevant column is mapped)
+    let userEmailToId = {};
+    let companyDomainToId = {};
+    let tagCache = new Map();
+
+    if (mapping.userEmailColumn) {
+      sse.progress('Fetching users for customer lookup…', 6);
+      userEmailToId = await buildEmailToIdMap(fetchAllPages, 'fetch users for note import');
+    }
+    if (mapping.companyDomainColumn) {
+      sse.progress('Fetching companies for customer lookup…', 7);
+      companyDomainToId = await buildDomainToIdMap(fetchAllPages, 'fetch companies for note import');
+    }
+    if (mapping.tagsColumn) {
+      sse.progress('Fetching known tag values…', 8);
+      tagCache = await fetchFieldValues('tags', pbFetch, withRetry);
+    }
+
+    // Auto-generate source_record_ids for rows that need them (create only — source is immutable)
     const sourceCounters = {};
 
     for (let i = 0; i < rows.length; i++) {
@@ -615,7 +630,7 @@ router.post('/import/run', pbAuth, async (req, res) => {
 
       const row = rows[i];
       const rowNum = i + 1;
-      const pct = 5 + Math.round((i / rows.length) * 90);
+      const pct = 8 + Math.round((i / rows.length) * 87);
       sse.progress(`Processing row ${rowNum}/${rows.length}…`, pct);
 
       try {
@@ -627,8 +642,6 @@ router.post('/import/run', pbAuth, async (req, res) => {
         if (sourceOrigin && !sourceRecordId) {
           sourceCounters[sourceOrigin] = (sourceCounters[sourceOrigin] || 0) + 1;
           sourceRecordId = `${sourceOrigin}-${sourceCounters[sourceOrigin]}`;
-          // Inject back into row for payload building
-          if (mapping.sourceRecordIdColumn) row[mapping.sourceRecordIdColumn] = sourceRecordId;
         }
 
         // Determine action
@@ -640,53 +653,71 @@ router.post('/import/run', pbAuth, async (req, res) => {
           targetNoteId = pbId;
         }
 
-        const payload = buildV1Payload(row, mapping, action === 'CREATE');
+        // Resolve customer relationship (user email takes priority over company domain),
+        // creating the user/company entity if the email/domain isn't known yet.
+        const userEmail     = cell(row, mapping.userEmailColumn);
+        const companyDomain = cell(row, mapping.companyDomainColumn);
+        let customerTarget = null;
+        if (userEmail) {
+          const id = await resolveOrCreateUser(pbFetch, withRetry, userEmailToId, userEmail);
+          customerTarget = { id, type: 'user' };
+        } else if (companyDomain) {
+          const id = await resolveOrCreateCompany(pbFetch, withRetry, companyDomainToId, companyDomain);
+          customerTarget = { id, type: 'company' };
+        }
+
+        // Resolve tags, creating any that don't exist yet
+        const tagsRaw = cell(row, mapping.tagsColumn);
+        const tagNames = tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [];
+        const resolvedTags = tagNames.length ? await resolveTags(pbFetch, withRetry, tagCache, tagNames) : [];
+
+        const fields = buildNoteFieldsV2(row, mapping, resolvedTags);
+        const title = fields.name || '';
+
         let noteId;
-        let ownerRejected = false;
+        let ownerSkipped = false, creatorSkipped = false, customerSkipped = false;
 
         if (action === 'CREATE') {
-          const r = await createNote(pbFetch, withRetry, payload);
+          const r = await createNoteV2(pbFetch, withRetry, {
+            fields,
+            sourceOrigin, sourceRecordId,
+            customerRel: customerTarget ? { type: 'customer', target: customerTarget } : null,
+          });
           noteId = r.id;
-          ownerRejected = r.ownerRejected;
+          ownerSkipped = r.ownerSkipped;
+          creatorSkipped = r.creatorSkipped;
+          customerSkipped = r.customerSkipped;
           result.created++;
-          sse.log('success', `Row ${rowNum}: Created note "${payload.title}"`, { uuid: noteId, row: rowNum });
+          sse.log('success', `Row ${rowNum}: Created note "${title}"`, { uuid: noteId, row: rowNum });
         } else {
-          if (Object.keys(payload).length === 0) {
+          noteId = targetNoteId;
+          if (!Object.keys(fields).length && !customerTarget) {
             result.skipped++;
-            noteId = targetNoteId;
-            sse.log('warn', `Row ${rowNum}: No updatable fields mapped — v1 PATCH skipped`, { uuid: noteId, row: rowNum });
+            sse.log('warn', `Row ${rowNum}: No updatable fields mapped — update skipped`, { uuid: noteId, row: rowNum });
           } else {
-            const r = await updateNote(pbFetch, withRetry, targetNoteId, payload);
-            noteId = targetNoteId;
-            ownerRejected = r.ownerRejected;
+            if (Object.keys(fields).length) {
+              const r = await updateNoteV2(pbFetch, withRetry, targetNoteId, fields);
+              ownerSkipped = r.ownerSkipped;
+              creatorSkipped = r.creatorSkipped;
+            }
+            if (customerTarget) {
+              try {
+                await setNoteCustomer(pbFetch, withRetry, targetNoteId, customerTarget);
+              } catch (custErr) {
+                customerSkipped = true;
+                sse.log('warn', `Row ${rowNum}: Could not set customer — ${parseApiError(custErr)}`, { uuid: noteId, row: rowNum });
+              }
+            }
             result.updated++;
-            sse.log('success', `Row ${rowNum}: Updated note "${payload.title || noteId}"`, { uuid: noteId, row: rowNum });
+            sse.log('success', `Row ${rowNum}: Updated note "${title || noteId}"`, { uuid: noteId, row: rowNum });
           }
         }
 
+        if (ownerSkipped)    sse.log('warn', `Row ${rowNum}: Owner email is not an active workspace member — owner skipped`, { uuid: noteId, row: rowNum });
+        if (creatorSkipped)  sse.log('warn', `Row ${rowNum}: Creator email is not an active workspace member — creator skipped`, { uuid: noteId, row: rowNum });
+        if (customerSkipped) sse.log('warn', `Row ${rowNum}: Customer relationship could not be attached — skipped`, { uuid: noteId, row: rowNum });
+
         if (sse.isAborted()) { result.stopped = true; break; }
-
-        // v2 backfill (archived, processed, creator, owner if rejected by v1)
-        const archivedVal = cell(row, mapping.archivedColumn);
-        const processedVal = cell(row, mapping.processedColumn);
-        const creatorEmail = cell(row, mapping.creatorEmailColumn);
-        const ownerEmail = cell(row, mapping.ownerEmailColumn);
-
-        const needsBackfill =
-          archivedVal !== '' ||
-          processedVal !== '' ||
-          creatorEmail ||
-          (ownerRejected && ownerEmail);
-
-        if (needsBackfill) {
-          await backfillV2(pbFetch, withRetry, noteId, {
-            archived: archivedVal !== '' ? isTruthy(archivedVal) : undefined,
-            processed: processedVal !== '' ? isTruthy(processedVal) : undefined,
-            creatorEmail: creatorEmail || null,
-            ownerEmail: ownerRejected && ownerEmail ? ownerEmail : null,
-          });
-          if (sse.isAborted()) { result.stopped = true; break; }
-        }
 
         // Hierarchy linking
         const linkedEntitiesRaw = cell(row, mapping.linkedEntitiesColumn);

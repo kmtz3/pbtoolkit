@@ -1,14 +1,18 @@
 const express = require('express');
 const { createClient } = require('../lib/pbClient');
 const { parseApiError } = require('../lib/errorUtils');
+const { buildEmailToIdMap } = require('../lib/userCache');
+const { fetchFieldValues, createFieldValue } = require('../lib/fieldValues');
 const router = express.Router();
 
 /**
  * POST /api/feedback
  *
  * Primary path: creates a Productboard v2 note (requires PB token via session or header).
- *   - Module → tag, plus a fixed "🐞 Bug report" tag
- *   - Email (optional) → matched as note user
+ *   - Module → tag, plus a fixed "🐞 Bug report" tag (created as field values if new, then
+ *     set atomically on note create)
+ *   - Email (optional) → resolved to a v2 user entity (created if not found), linked via
+ *     the note's create-time relationships array
  *   - Report fields → formatted HTML content
  *
  * Fallback: sends via Brevo transactional email if no PB token is available.
@@ -31,42 +35,81 @@ router.post('/', async (req, res) => {
   const pbToken = process.env.PB_FEEDBACK_TOKEN;
   if (pbToken) {
     const useEu = process.env.PB_FEEDBACK_EU === 'true';
-    const { pbFetch, withRetry } = createClient(pbToken, useEu);
+    const { pbFetch, withRetry, fetchAllPages } = createClient(pbToken, useEu);
 
     try {
       const noteContent = buildNoteHtml({ module, description, expectedBehavior, stepsToReproduce, email: safeEmail });
+
+      // Tags are a shared field-value resource (field id "tags") — a note create
+      // fails with selectOption.notFound if a tag name doesn't already exist as a
+      // value, so look up/create both tag values before creating the note.
+      const tagNames = ['🐞 Bug report', module];
+      const tagCache = await fetchFieldValues('tags', pbFetch, withRetry).catch(() => new Map());
+      const resolvedTags = [];
+      for (const name of tagNames) {
+        const key = name.toLowerCase().trim();
+        if (!tagCache.has(key)) {
+          try {
+            const created = await createFieldValue('tags', name, pbFetch, withRetry);
+            tagCache.set(key, created);
+          } catch (tagErr) {
+            console.warn(`Failed to create tag "${name}":`, tagErr.message);
+            continue;
+          }
+        }
+        resolvedTags.push({ name: tagCache.get(key).name });
+      }
 
       const fields = {
         name: `🐞 Bug Report — ${module}`,
         content: noteContent,
       };
+      if (resolvedTags.length) fields.tags = resolvedTags;
 
-      const payload = { data: { type: 'textNote', fields } };
-
-      const result = await withRetry(() => pbFetch('post', '/v2/notes', payload), 'create feedback note');
-      const noteId = result.id || result.data?.id;
-
-      if (noteId) {
-        // Add tags via v1 endpoint — POST /notes/{id}/tags/{name} auto-creates
-        // tags that don't exist yet. No v2 tag creation endpoint exists.
-        // TODO: switch to v2 when a tag creation endpoint becomes available.
-        const tagNames = ['🐞 Bug report', module];
-        for (const tag of tagNames) {
-          try {
-            await pbFetch('post', `/notes/${noteId}/tags/${encodeURIComponent(tag)}`);
-          } catch (tagErr) {
-            console.warn(`Failed to add tag "${tag}" to note ${noteId}:`, tagErr.message);
+      // Resolve the reporter's email to a v2 user entity, creating one if it
+      // doesn't exist yet — v2 relationships need a UUID, not a bare email.
+      let customerRel = null;
+      if (safeEmail) {
+        try {
+          const emailToId = await buildEmailToIdMap(fetchAllPages, 'fetch users for feedback note');
+          let userId = emailToId[safeEmail.toLowerCase()];
+          if (!userId) {
+            const created = await withRetry(
+              () => pbFetch('post', '/v2/entities', { data: { type: 'user', fields: { email: safeEmail, name: safeEmail } } }),
+              `create user ${safeEmail}`
+            );
+            userId = created.data?.id || created.id;
           }
+          if (userId) customerRel = { type: 'customer', target: { id: userId, type: 'user' } };
+        } catch (userErr) {
+          console.warn(`Failed to resolve user "${safeEmail}" for feedback note:`, userErr.message);
         }
+      }
 
-        // Link user by email via v1 PATCH — v2 relationships require a UUID,
-        // but v1 accepts { email } and auto-matches to existing users/companies.
-        if (safeEmail) {
-          try {
-            await pbFetch('patch', `/notes/${noteId}`, { data: { user: { email: safeEmail, name: safeEmail } } });
-          } catch (userErr) {
-            console.warn(`Failed to link user "${safeEmail}" to note ${noteId}:`, userErr.message);
+      // A user entity created moments ago can briefly 404 when referenced in a note's
+      // relationships — retry with backoff, then fall back to creating without the
+      // customer link rather than losing the whole report.
+      let noteId = null;
+      let currentCustomerRel = customerRel;
+      let propagationRetries = 0;
+      while (noteId === null) {
+        const payload = { data: { type: 'textNote', fields } };
+        if (currentCustomerRel) payload.data.relationships = [currentCustomerRel];
+        try {
+          const result = await withRetry(() => pbFetch('post', '/v2/notes', payload), 'create feedback note');
+          noteId = result.id || result.data?.id;
+          if (!noteId) throw new Error('API did not return a note ID');
+        } catch (err) {
+          if (currentCustomerRel && /not found/i.test(String(err.message || ''))) {
+            if (propagationRetries < 3) {
+              propagationRetries++;
+              await new Promise((r) => setTimeout(r, 1500 * propagationRetries));
+              continue;
+            }
+            currentCustomerRel = null; // give up on the customer link, try once more without it
+            continue;
           }
+          throw err;
         }
       }
 

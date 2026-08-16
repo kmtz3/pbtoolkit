@@ -3,6 +3,11 @@
 /**
  * Notes import tests — TDD for Bug 1 (empty PATCH payload) and Bug 2 (abort mid-row).
  *
+ * v1 is retired — all note create/update goes through /v2/notes now (no separate
+ * v1-create-then-v2-backfill step). Bug 2 verifies the equivalent behaviour in the
+ * v2-only flow: aborting mid-row stops the hierarchy-linking step that runs after
+ * the note write from firing.
+ *
  * Uses a local mock PB API server to intercept outgoing pbFetch calls.
  * Set PB_API_BASE_URL env var BEFORE requiring the app so pbClient picks it up.
  */
@@ -135,28 +140,28 @@ test('Bug 1: UPDATE row with no mapped fields — PATCH not sent, skipped:1, err
   assert.equal(complete.errors,  0,     `Expected errors:0, got ${complete.errors}`);
 });
 
-// ─── Test B: Bug 2 — abort mid-row stops backfill ───────────────────────────
+// ─── Test B: Bug 2 — abort mid-row stops hierarchy linking ──────────────────
 
-test('Bug 2: aborting SSE connection mid-row stops v2 backfill from running', (t, done) => {
+test('Bug 2: aborting SSE connection mid-row stops hierarchy linking from running', (t, done) => {
   clearCalls();
   clearOverrides();
 
-  // Make v1 PATCH slow so we can abort while it's in flight
-  setOverride('PATCH', `/notes/${UUID_UPDATE}`, 204, {});
-  // Make the mock server delay v1 PATCH responses by 300ms
+  const LINKED_ENTITY = 'ffffffff-0000-0000-0000-000000000001';
   const DELAY_MS = 300;
 
+  // Make the mock server delay the v2 note PATCH by 300ms, so we can abort while
+  // it's in flight, then record whether the hierarchy-link POST fires afterward.
   const slowMockServer = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
       const parsed = body ? (() => { try { return JSON.parse(body); } catch (_) { return {}; } })() : {};
 
-      if (req.method === 'PATCH' && !req.url.startsWith('/v2/')) {
-        calls.v1Patch.push({ path: req.url, body: parsed });
-        setTimeout(() => { res.writeHead(204); res.end(); }, DELAY_MS);
-      } else if (req.method === 'PATCH' && req.url.startsWith('/v2/')) {
+      if (req.method === 'PATCH' && req.url.startsWith(`/v2/notes/${UUID_UPDATE}`)) {
         calls.v2Patch.push({ path: req.url, body: parsed });
+        setTimeout(() => { res.writeHead(204); res.end(); }, DELAY_MS);
+      } else if (req.method === 'POST' && req.url.includes('/relationships')) {
+        calls.other.push({ method: 'POST', path: req.url, body: parsed });
         res.writeHead(204); res.end();
       } else {
         res.writeHead(204); res.end();
@@ -168,9 +173,10 @@ test('Bug 2: aborting SSE connection mid-row stops v2 backfill from running', (t
     const slowPort = slowMockServer.address().port;
     process.env.PB_API_BASE_URL = `http://127.0.0.1:${slowPort}`;
 
-    // CSV: one UPDATE row with archived=TRUE so backfillV2 will be triggered
-    const csvText = `PB Note ID,Title,Archived\n${UUID_UPDATE},Test Note,TRUE`;
-    const mapping  = { pbIdColumn: 'PB Note ID', titleColumn: 'Title', archivedColumn: 'Archived' };
+    // CSV: one UPDATE row with a title change + a linked entity, so hierarchy
+    // linking runs after the note PATCH completes (if not aborted first).
+    const csvText = `PB Note ID,Title,Linked Entities\n${UUID_UPDATE},Test Note,${LINKED_ENTITY}`;
+    const mapping  = { pbIdColumn: 'PB Note ID', titleColumn: 'Title', linkedEntitiesColumn: 'Linked Entities' };
     const bodyStr  = JSON.stringify({ csvText, mapping });
 
     const serverForTest = app.listen(0, '127.0.0.1', () => {
@@ -189,7 +195,7 @@ test('Bug 2: aborting SSE connection mid-row stops v2 backfill from running', (t
       });
 
       req.on('response', (res) => {
-        // Destroy the SSE connection 50ms after it opens (during v1 PATCH 300ms delay)
+        // Destroy the SSE connection 50ms after it opens (during the 300ms PATCH delay)
         setTimeout(() => req.destroy(), 50);
       });
       req.on('error', () => {}); // ignore ECONNRESET from destroy
@@ -197,7 +203,7 @@ test('Bug 2: aborting SSE connection mid-row stops v2 backfill from running', (t
       req.end();
     });
 
-    // Wait long enough for v1 PATCH to complete (300ms) + v2 PATCH if it runs (+100ms)
+    // Wait long enough for the v2 PATCH to complete (300ms) + linking if it runs (+100ms)
     setTimeout(() => {
       serverForTest.close(() => {
         slowMockServer.close(() => {
@@ -205,18 +211,16 @@ test('Bug 2: aborting SSE connection mid-row stops v2 backfill from running', (t
           process.env.PB_API_BASE_URL = `http://127.0.0.1:${mockPort}`;
 
           try {
-            assert.equal(calls.v1Patch.length, 1,
-              `Expected 1 v1 PATCH (already in flight), got ${calls.v1Patch.length}`);
-            // BEFORE FIX: v2Patch.length === 1 (backfill ran despite abort) → FAIL
-            // AFTER FIX:  v2Patch.length === 0 (backfill skipped after abort) → PASS
-            assert.equal(calls.v2Patch.length, 0,
-              `Expected 0 v2 PATCH (backfill should be skipped after abort), got ${calls.v2Patch.length}`);
+            assert.equal(calls.v2Patch.length, 1,
+              `Expected 1 v2 PATCH (already in flight), got ${calls.v2Patch.length}`);
+            assert.equal(calls.other.length, 0,
+              `Expected 0 linking calls (should be skipped after abort), got ${calls.other.length}`);
             done();
           } catch (err) {
             done(err);
           }
         });
       });
-    }, DELAY_MS + 150); // v1 PATCH delay + margin
+    }, DELAY_MS + 150); // PATCH delay + margin
   });
 });

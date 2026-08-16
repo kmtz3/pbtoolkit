@@ -1,13 +1,12 @@
 'use strict';
 
 /**
- * Notes export tests — source field migration and type rename.
+ * Notes export tests — source field (v2-only) and type rename.
  *
  * Tests:
- * - buildNoteRow reads metadata.source.system/recordId (not fields.source)
+ * - buildNoteRow reads metadata.source.system/recordId (the only source of truth — v1 retired)
  * - buildNoteRow returns new note type names (textNote, opportunityNote, conversationNote)
- * - Falls back to fields.source for backward compat (deprecated)
- * - Falls back to v1 sourceMap when metadata.source and fields.source both empty
+ * - Notes with no metadata.source produce empty source columns (no fields.source or v1 fallback)
  */
 
 const { test, before, after } = require('node:test');
@@ -59,7 +58,7 @@ const mockV2Notes = [
     createdAt: '2026-03-02T00:00:00Z',
     updatedAt: '2026-03-02T00:00:00Z',
     fields: {
-      name: 'Note with fields.source only',
+      name: 'Note with deprecated fields.source only',
       content: 'Content 2',
       source: { origin: 'hubspot', id: 'hs-200' },
       archived: false,
@@ -84,11 +83,6 @@ const mockV2Notes = [
   },
 ];
 
-// v1 notes for source enrichment fallback (NOTE_UUID_3 only)
-const mockV1Notes = [
-  { id: NOTE_UUID_3, source: { origin: 'intercom', record_id: 'ic-300' } },
-];
-
 before(async () => {
   mockServer = http.createServer((req, res) => {
     let body = '';
@@ -98,13 +92,6 @@ before(async () => {
       if (req.method === 'GET' && req.url.startsWith('/v2/notes')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ data: mockV2Notes, links: { next: null } }));
-        return;
-      }
-
-      // v1 notes list (source enrichment)
-      if (req.method === 'GET' && req.url.startsWith('/notes')) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ data: mockV1Notes, pageCursor: null }));
         return;
       }
 
@@ -152,7 +139,7 @@ test('notes export: reads source from metadata.source.system/recordId (new v2 fo
   assert.ok(note1Line.includes('sf-100'), 'Note 1 source_record_id should be sf-100 (from metadata.source.recordId)');
 });
 
-test('notes export: falls back to fields.source for notes without metadata.source', async () => {
+test('notes export: does not fall back to deprecated fields.source (v1 retired, metadata.source only)', async () => {
   const res = await request(app)
     .post('/api/notes/export')
     .set('x-pb-token', 'test-token')
@@ -163,14 +150,15 @@ test('notes export: falls back to fields.source for notes without metadata.sourc
   const csv = complete.csv;
   const lines = csv.split('\n');
 
-  // Note 2: has fields.source.origin='hubspot', fields.source.id='hs-200' but empty metadata.source
-  const note2Line = lines.find((l) => l.includes('Note with fields.source only'));
+  // Note 2: has deprecated fields.source.origin='hubspot' but empty metadata.source —
+  // should NOT be read since v1 sunset; source columns should be empty.
+  const note2Line = lines.find((l) => l.includes('Note with deprecated fields.source only'));
   assert.ok(note2Line, 'Should have Note 2 row');
-  assert.ok(note2Line.includes('hubspot'), 'Note 2 should fall back to fields.source.origin');
-  assert.ok(note2Line.includes('hs-200'), 'Note 2 should fall back to fields.source.id');
+  assert.ok(!note2Line.includes('hubspot'), 'Note 2 should NOT read deprecated fields.source.origin');
+  assert.ok(!note2Line.includes('hs-200'), 'Note 2 should NOT read deprecated fields.source.id');
 });
 
-test('notes export: falls back to v1 sourceMap when both metadata and fields empty', async () => {
+test('notes export: note with no metadata.source has empty source columns (no v1 fallback)', async () => {
   const res = await request(app)
     .post('/api/notes/export')
     .set('x-pb-token', 'test-token')
@@ -181,11 +169,12 @@ test('notes export: falls back to v1 sourceMap when both metadata and fields emp
   const csv = complete.csv;
   const lines = csv.split('\n');
 
-  // Note 3: no metadata.source, no fields.source → should use v1 sourceMap
+  // Note 3: no metadata.source — no v1 API to fall back to anymore, columns are just empty
   const note3Line = lines.find((l) => l.includes('Note with no source'));
   assert.ok(note3Line, 'Should have Note 3 row');
-  assert.ok(note3Line.includes('intercom'), 'Note 3 should fall back to v1 sourceMap');
-  assert.ok(note3Line.includes('ic-300'), 'Note 3 should fall back to v1 sourceMap recordId');
+  const cols = note3Line.split(',');
+  assert.equal(cols[10], '', 'Note 3 source_origin should be empty');
+  assert.equal(cols[11], '', 'Note 3 source_record_id should be empty');
 });
 
 test('notes export: uses new note type names (textNote, opportunityNote, conversationNote)', async () => {
@@ -203,7 +192,7 @@ test('notes export: uses new note type names (textNote, opportunityNote, convers
   const note1Line = lines.find((l) => l.includes('Note with metadata source'));
   assert.ok(note1Line.includes('textNote'), 'Note 1 should have textNote type');
 
-  const note2Line = lines.find((l) => l.includes('Note with fields.source only'));
+  const note2Line = lines.find((l) => l.includes('Note with deprecated fields.source only'));
   assert.ok(note2Line.includes('opportunityNote'), 'Note 2 should have opportunityNote type');
 
   const note3Line = lines.find((l) => l.includes('Note with no source'));
