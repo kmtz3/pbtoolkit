@@ -677,7 +677,7 @@ router.post('/run', pbAuth, async (req, res) => {
   // Archive only applies when we're keeping the duplicate (instead of deleting it).
   const shouldArchive = keepDuplicates === true && archiveDuplicates === true;
 
-  let notesRelinked = 0, usersRelinked = 0, entitiesRelinked = 0, deleted = 0, kept = 0, archived = 0, errors = 0;
+  let notesRelinked = 0, usersRelinked = 0, deleted = 0, kept = 0, archived = 0, errors = 0;
   const actionLog = [];
 
   // Accept both new { duplicates: [{id}] } and legacy { duplicateIds: [string] } formats
@@ -708,10 +708,8 @@ router.post('/run', pbAuth, async (req, res) => {
           notesFound:         0,
           notesRelinked:      0,
           usersRelinked:      0,
-          entitiesRelinked:   0,
           noteIds:            [],
           userIds:            [],
-          entityRelinks:      [],
           deleted:            false,
           kept:               false,
           archived:           false,
@@ -930,121 +928,22 @@ router.post('/run', pbAuth, async (req, res) => {
             } while (cursor && !shouldStop());
           }
 
-          // ── Step 3.5: Relink the duplicate's own entity relationships ────
-          // Covers link / isBlockedBy / isBlocking / parent / child to features,
-          // components, initiatives, etc. Done LAST (after notes/users) because
-          // relinking a note attached to a feature does NOT also relink that
-          // feature → without this step the feature stays linked to the deleted
-          // or archived duplicate, causing the UI discrepancy users see.
-          //
-          // In all modes:
-          //   1. POST the same relationship on the target company (409 = already
-          //      linked, treated as success).
-          //   2. In keep/archive mode, DELETE the relationship from the duplicate
-          //      so the leftover company doesn't show stale links. In delete
-          //      mode the relationship is removed when the duplicate is deleted.
-          if (!shouldStop() && !relinkFailed) {
-            let entityRels = [];
-            try {
-              entityRels = await fetchCompanyEntityRelationships(pbFetch, withRetry, dupId);
-            } catch (err) {
-              const msg = parseApiError(err);
-              sse.log('error', `Failed to list relationships for ${dupId}: ${msg}`, { uuid: dupId });
-              relinkFailed = true;
-              errors++;
-              entry.error = `list relationships failed: ${msg}`;
-            }
-
-            for (const rel of entityRels) {
-              if (shouldStop()) break;
-              const { type: relType, targetId: relTargetId, targetType: relTargetType } = rel;
-
-              // Step 3.5a: recreate the relationship on the target side.
-              // Some pairs (e.g. company ↔ feature `link`) only accept POST from
-              // one direction — POSTing on the other returns
-              //   validation.failed "Relationship between X and Y in direction
-              //   Nondirectional is not allowed."
-              // Strategy: try POST on the target company first; on a directional
-              // validation error, retry by POSTing on the OTHER entity side
-              // (the feature/component/etc.) pointing at the target company.
-              // POSTing an already-existing link returns 201 (idempotent), so we
-              // don't need special 409 handling.
-              let created = false;
-              // pbClient packs the response body into err.message verbatim
-              // (see src/lib/pbClient.js line 108), so we can grep for the
-              // exact phrase Productboard returns.
-              const isDirectionalErr = (err) => /direction\s+Nondirectional\s+is not allowed/i.test(String(err?.message || ''));
-
-              try {
-                await withRetry(
-                  () => pbFetch('post', `/v2/entities/${dr.primaryId}/relationships`, {
-                    data: { type: relType, target: { id: relTargetId } },
-                  }),
-                  `relink ${relType} ${relTargetId} on target`
-                );
-                created = true;
-                sse.log('success', `Relinked ${relType} → ${relTargetType || 'entity'} ${relTargetId} (on target company)`, { uuid: relTargetId });
-              } catch (relinkErr) {
-                if (relinkErr?.status === 409) {
-                  // Defensive: API currently returns 201 on duplicate, but treat 409 as already-linked.
-                  created = true;
-                  sse.log('info', `${relType} → ${relTargetId} already linked on target, skipping create`, { uuid: relTargetId });
-                } else if (isDirectionalErr(relinkErr)) {
-                  // Retry from the other entity's side.
-                  try {
-                    await withRetry(
-                      () => pbFetch('post', `/v2/entities/${relTargetId}/relationships`, {
-                        data: { type: relType, target: { id: dr.primaryId } },
-                      }),
-                      `relink ${relType} on ${relTargetType || 'entity'} side`
-                    );
-                    created = true;
-                    sse.log('success', `Relinked ${relType} ← ${relTargetType || 'entity'} ${relTargetId} (on ${relTargetType || 'entity'} side; company side rejected as directional)`, { uuid: relTargetId });
-                  } catch (retryErr) {
-                    const msg = parseApiError(retryErr);
-                    sse.log('error', `Relink failed (both directions) — ${relType} ${relTargetId}: ${msg}`, { uuid: relTargetId });
-                    relinkFailed = true;
-                    errors++;
-                    entry.error = `entity relink failed: ${msg}`;
-                  }
-                } else {
-                  const msg = parseApiError(relinkErr);
-                  sse.log('error', `Relink failed — ${relType} ${relTargetId}: ${msg}`, { uuid: relTargetId });
-                  relinkFailed = true;
-                  errors++;
-                  entry.error = `entity relink failed: ${msg}`;
-                }
-              }
-
-              if (created) {
-                entry.entitiesRelinked++;
-                entry.entityRelinks.push({ type: relType, targetId: relTargetId, targetType: relTargetType || null });
-                entitiesRelinked++;
-              }
-
-              // Step 3.5b: in keep/archive mode, remove the relationship from
-              // the duplicate so the leftover company doesn't show stale links.
-              if (created && keepDuplicates) {
-                try {
-                  await withRetry(
-                    () => pbFetch('delete', `/v2/entities/${dupId}/relationships/${encodeURIComponent(relType)}/${encodeURIComponent(relTargetId)}`),
-                    `unlink ${relType} ${relTargetId} from duplicate`
-                  );
-                  sse.log('info', `Removed ${relType} → ${relTargetId} from duplicate`, { uuid: relTargetId });
-                } catch (unlinkErr) {
-                  // 404 = relationship already gone — treat as success.
-                  const status = unlinkErr?.status;
-                  if (status === 404 || /404/.test(String(unlinkErr?.message || ''))) {
-                    // already gone, no-op
-                  } else {
-                    const msg = parseApiError(unlinkErr);
-                    sse.log('warn', `Could not remove ${relType} → ${relTargetId} from duplicate: ${msg}`, { uuid: relTargetId });
-                    // Non-fatal: the link exists on target; this is just leftover cleanup.
-                  }
-                }
-              }
-            }
-          }
+          // NOTE: there used to be a "Step 3.5" here that tried to directly recreate
+          // the duplicate's non-note/user relationships (link to features, components,
+          // etc.) on the target company via POST /v2/entities/{id}/relationships.
+          // Removed 2026-09-05 — live-tested and confirmed this direct write is
+          // rejected by the API in BOTH directions with "Relationship between
+          // organizations and features in direction Nondirectional is not allowed",
+          // even when the exact relationship already exists on the target. These
+          // company↔hierarchy-entity "link" relationships are a derived/computed
+          // rollup from the notes (and users) attributed to that company — they are
+          // never directly writable. Confirmed live: POSTing a note's own link
+          // relationship (with that note's customer set to the target company)
+          // causes the target company to pick up the corresponding link automatically.
+          // Since Steps 1–3 above already relink every note and user off the
+          // duplicate and onto the target, the target's company-level links
+          // re-derive on their own — no explicit action needed, and none is possible
+          // via the public API for this relationship type.
 
           // ── Step 4: Finalize — delete duplicate, or keep (and optionally archive) ─
           // Only runs when every relink for this duplicate succeeded.
@@ -1097,7 +996,7 @@ router.post('/run', pbAuth, async (req, res) => {
 
     const stopped = shouldStop();
     sse.progress(stopped ? 'Stopped.' : 'Merge complete.', 100);
-    sse.complete({ notesRelinked, usersRelinked, entitiesRelinked, deleted, kept, archived, errors, stopped, actionLog });
+    sse.complete({ notesRelinked, usersRelinked, deleted, kept, archived, errors, stopped, actionLog });
 
   } catch (err) {
     console.error('[companiesDuplicateCleanup/run]', err);

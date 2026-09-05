@@ -759,7 +759,7 @@
 
   // ── Render results summary ─────────────────────────────────
   function renderResults(data) {
-    const { notesRelinked = 0, usersRelinked = 0, entitiesRelinked = 0, deleted = 0, kept = 0, archived = 0, errors = 0, stopped = false } = data;
+    const { notesRelinked = 0, usersRelinked = 0, deleted = 0, kept = 0, archived = 0, errors = 0, stopped = false } = data;
     const summaryEl = dc$('dc-results-summary');
     if (!summaryEl) return;
 
@@ -780,7 +780,6 @@
     const parts = [];
     if (notesRelinked)    parts.push(`${notesRelinked} note${notesRelinked !== 1 ? 's' : ''} relinked`);
     if (usersRelinked)    parts.push(`${usersRelinked} user${usersRelinked !== 1 ? 's' : ''} updated`);
-    if (entitiesRelinked) parts.push(`${entitiesRelinked} entit${entitiesRelinked !== 1 ? 'ies' : 'y'} relinked`);
     if (deleted)       parts.push(`${deleted} compan${deleted !== 1 ? 'ies' : 'y'} deleted`);
     if (kept)          parts.push(`${kept} compan${kept !== 1 ? 'ies' : 'y'} kept`);
     if (archived)      parts.push(`${archived} archived`);
@@ -1482,7 +1481,7 @@
 
   // ── Render results summary ─────────────────────────────────
   function dcmRenderResults(data) {
-    const { notesRelinked = 0, usersRelinked = 0, entitiesRelinked = 0, deleted = 0, kept = 0, archived = 0, errors = 0, stopped = false } = data;
+    const { notesRelinked = 0, usersRelinked = 0, deleted = 0, kept = 0, archived = 0, errors = 0, stopped = false } = data;
     const summaryEl = dcm$('dcm-results-summary');
     if (!summaryEl) return;
 
@@ -1502,7 +1501,6 @@
     const parts = [];
     if (notesRelinked)    parts.push(`${notesRelinked} note${notesRelinked !== 1 ? 's' : ''} relinked`);
     if (usersRelinked)    parts.push(`${usersRelinked} user${usersRelinked !== 1 ? 's' : ''} updated`);
-    if (entitiesRelinked) parts.push(`${entitiesRelinked} entit${entitiesRelinked !== 1 ? 'ies' : 'y'} relinked`);
     if (deleted)       parts.push(`${deleted} compan${deleted !== 1 ? 'ies' : 'y'} deleted`);
     if (kept)          parts.push(`${kept} compan${kept !== 1 ? 'ies' : 'y'} kept`);
     if (archived)      parts.push(`${archived} archived`);
