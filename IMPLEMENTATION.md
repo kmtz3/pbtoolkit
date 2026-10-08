@@ -70,7 +70,7 @@ pbtoolkit/
 │       ├── feedback.js        # POST /api/feedback (bug report → PB note or Brevo email fallback)
 │       ├── notesMerge.js      # POST /api/notes-merge/scan + /run + /scan-empty + /delete-empty (SSE)
 │       ├── companiesDuplicateCleanup.js # GET /api/companies-duplicate-cleanup/origins + POST /scan + /preview-csv + /run (SSE)
-│       └── fieldValueDelete.js # GET /api/tag-values/fields + POST /api/tag-values/values + POST /api/tag-values/delete/* (SSE)
+│       └── fieldValueDelete.js # GET /api/field-values/fields + POST /api/field-values/values + POST /api/field-values/delete/* (SSE)
 ├── src/services/
 │   ├── teamCache.js           # shared team+member session cache (used by teamMembership + membersTeamsMgmt)
 │   └── entities/
@@ -97,7 +97,7 @@ pbtoolkit/
 │   ├── users-app.js           # Users module frontend JS
 │   ├── notes-merge-app.js     # Merge Duplicate Notes module frontend JS
 │   ├── companies-duplicate-cleanup-app.js # Merge Duplicate Companies module frontend JS
-│   ├── tag-values-app.js      # Manage Values module frontend JS
+│   ├── field-values-app.js    # Manage Values module frontend JS
 │   ├── views/                 # HTML partials, one per module (lazy-loaded into #view-area)
 │   │   ├── companies.html
 │   │   ├── notes.html
@@ -109,7 +109,7 @@ pbtoolkit/
 │   │   ├── notes-merge.html
 │   │   ├── users.html
 │   │   ├── companies-duplicate-cleanup.html
-│   │   └── tag-values.html
+│   │   └── field-values.html
 │   ├── csv-utils.js           # Frontend CSV utilities (papaparse wrappers for browser)
 │   └── style.css              # CSS custom properties design system
 ├── Dockerfile

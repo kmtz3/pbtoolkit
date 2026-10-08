@@ -12,7 +12,7 @@
                 <summary>How to use</summary>
                 <ul>
                   <li><strong>Filter</strong> — optionally narrow by date range or "past N days/weeks/months" before exporting.</li>
-                  <li><strong>Export</strong> — click "Export notes" to fetch all matching notes (v2 API + v1 source enrichment).</li>
+                  <li><strong>Export</strong> — click "Export notes" to fetch all matching notes via the v2 API.</li>
                   <li><strong>Stop</strong> — use the "Stop" button to cancel a running export.</li>
                   <li><strong>Download</strong> — the CSV downloads automatically when complete; click "Download CSV" to grab it again.</li>
                 </ul>
@@ -24,7 +24,7 @@
               <div id="notes-export-idle">
                 <div class="alert alert-info mb-16">
                   <span class="alert-icon">ℹ️</span>
-                  <span>Fetches notes via the v2 API (relationships included inline), then enriches any missing source origin/record ID from the v1 API. Large workspaces may take a few minutes.</span>
+                  <span>Fetches notes via the v2 API, with relationships and source origin/record ID (<code>metadata.source</code>) included inline. Large workspaces may take a few minutes.</span>
                 </div>
                 <p class="text-sm text-muted">
                   <strong>Columns exported:</strong> PB Note ID, Type, Title, Content, Display URL, User Email, Company Domain, Owner Email, Creator Email, Tags, Source Origin, Source Record ID, Archived, Processed, Created At, Updated At, Linked Entities.
@@ -130,7 +130,7 @@
             <div class="panel-body">
               <div class="alert alert-info mb-16">
                 <span class="alert-icon">ℹ️</span>
-                <span>Notes are created via the v1 API (which supports linking by user email or company domain). Status fields (archived/processed) and creator/owner are applied via a v2 backfill step after creation.</span>
+                <span>Each row is written in a single v2 call: new notes are created with one <code>POST</code> (fields, owner/creator, archived/processed, tags, source, and customer relationship together); rows with a <code>pb_id</code> are updated with one <code>PATCH</code> (plus a customer update when a user/company is mapped). User emails and company domains are matched to existing users/companies — or created if not found — and linked as the note's customer.</span>
               </div>
               <div class="dropzone" id="notes-dropzone">
                 <span class="dropzone-icon">📄</span>

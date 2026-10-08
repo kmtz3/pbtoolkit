@@ -7,6 +7,9 @@
  * POST /api/field-values/delete/by-csv     → delete values whose name appears in a CSV column (SSE)
  * POST /api/field-values/delete/by-diff    → delete values whose name does NOT appear in a CSV column (SSE)
  * POST /api/field-values/delete/by-ids     → delete specific values by { id, name } pairs (SSE)
+ * POST /api/field-values/create            → create one or more values on a field (JSON)
+ * PATCH /api/field-values/rename           → rename a single value in place (JSON)
+ * POST /api/field-values/delete/one        → delete a single value without SSE (JSON, live editor)
  *
  * All deletions use ?force=true so the value is removed from the field's option list
  * AND unset from every entity that currently has it assigned.
@@ -37,7 +40,11 @@ function isSelectType(displayType) {
 }
 
 function isValidFieldId(id) {
-  return UUID_RE.test(id) || id === 'tags';
+  return typeof id === 'string' && (UUID_RE.test(id) || id === 'tags');
+}
+
+function isValidValueId(id) {
+  return typeof id === 'string' && UUID_RE.test(id);
 }
 
 async function deleteValue(pbFetch, withRetry, fieldId, valueId) {
@@ -45,6 +52,34 @@ async function deleteValue(pbFetch, withRetry, fieldId, valueId) {
     () => pbFetch('delete', `/v2/entities/fields/${encodeURIComponent(fieldId)}/values/${encodeURIComponent(valueId)}?force=true`),
     `delete field value ${valueId}`
   );
+}
+
+/**
+ * Shared SSE delete loop used by every bulk-delete route.
+ * Deletes each { id, name } in `items` with force=true, honouring client abort,
+ * treating 404 as a warn-and-skip, and emitting progress as
+ * basePct + (i+1)/n * spanPct. Returns { deleted, errors }.
+ */
+async function runDeleteLoop(sse, { pbFetch, withRetry, fieldId, items, basePct = 10, spanPct = 90 }) {
+  let deleted = 0, errors = 0;
+  for (let i = 0; i < items.length; i++) {
+    if (sse.isAborted()) break;
+    const { id, name } = items[i];
+    try {
+      await deleteValue(pbFetch, withRetry, fieldId, id);
+      deleted++;
+      sse.log('success', `Deleted "${name}"`);
+    } catch (err) {
+      if (err.status === 404) {
+        sse.log('warn', `"${name}" not found — skipped`);
+      } else {
+        errors++;
+        sse.log('error', `Failed to delete "${name}": ${parseApiError(err)}`);
+      }
+    }
+    sse.progress(`Deleted ${deleted} of ${items.length}…`, basePct + Math.round((i + 1) / items.length * spanPct));
+  }
+  return { deleted, errors };
 }
 
 function collectSelectFields(entry, entityType, fieldMap) {
@@ -72,30 +107,34 @@ router.get('/fields', pbAuth, async (_req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const fieldMap = new Map();
 
-  // Entity types (feature, objective, initiative, etc.)
   try {
+    // Entity types (feature, objective, initiative, etc.)
     let url = '/v2/entities/configurations';
     while (url) {
       const r = await withRetry(() => pbFetch('get', url), 'fetch entity configurations');
       for (const entry of (r.data || [])) collectSelectFields(entry, entry.type, fieldMap);
       url = r.links?.next || null;
     }
+
+    // Company (separate endpoint — not included in the paginated list).
+    // A 404 here just means no company config — anything else is a real failure.
+    try {
+      const r = await withRetry(() => pbFetch('get', '/v2/entities/configurations/company'), 'fetch company config');
+      collectSelectFields(r.data || {}, 'company', fieldMap);
+    } catch (err) {
+      if (err.status !== 404) throw err;
+    }
+
+    const fields = [...fieldMap.values()].sort((a, b) => {
+      if (a.id === 'tags') return -1;
+      if (b.id === 'tags') return 1;
+      return a.name.localeCompare(b.name);
+    });
+    res.json({ fields });
   } catch (err) {
-    console.error('field-values/fields entity configs:', err.message);
+    console.error('field-values/fields:', err.message);
+    res.status(err.status || 500).json({ error: parseApiError(err) });
   }
-
-  // Company (separate endpoint — not included in the paginated list)
-  try {
-    const r = await withRetry(() => pbFetch('get', '/v2/entities/configurations/company'), 'fetch company config');
-    collectSelectFields(r.data || {}, 'company', fieldMap);
-  } catch (_) { /* non-fatal */ }
-
-  const fields = [...fieldMap.values()].sort((a, b) => {
-    if (a.id === 'tags') return -1;
-    if (b.id === 'tags') return 1;
-    return a.name.localeCompare(b.name);
-  });
-  res.json({ fields });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,7 +145,7 @@ router.get('/fields', pbAuth, async (_req, res) => {
 router.post('/values', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId } = req.body;
-  if (!fieldId || !isValidFieldId(fieldId)) return res.status(400).json({ error: 'Invalid or missing fieldId' });
+  if (!isValidFieldId(fieldId)) return res.status(400).json({ error: 'Invalid or missing fieldId' });
   try {
     const valMap = await fetchFieldValues(fieldId, pbFetch, withRetry);
     const values = [...valMap.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -125,7 +164,7 @@ router.post('/values', pbAuth, async (req, res) => {
 router.post('/delete/all', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId } = req.body;
-  if (!fieldId || !isValidFieldId(fieldId)) return res.status(400).json({ error: 'Invalid or missing fieldId' });
+  if (!isValidFieldId(fieldId)) return res.status(400).json({ error: 'Invalid or missing fieldId' });
 
   const sse = startSSE(res);
   try {
@@ -139,25 +178,7 @@ router.post('/delete/all', pbAuth, async (req, res) => {
     }
 
     sse.progress(`Found ${values.length} values. Deleting…`, 10);
-    let deleted = 0, errors = 0;
-
-    for (let i = 0; i < values.length; i++) {
-      if (sse.isAborted()) break;
-      const v = values[i];
-      try {
-        await deleteValue(pbFetch, withRetry, fieldId, v.id);
-        deleted++;
-        sse.log('success', `Deleted "${v.name}"`);
-      } catch (err) {
-        if (err.status === 404) {
-          sse.log('warn', `"${v.name}" not found — skipped`);
-        } else {
-          errors++;
-          sse.log('error', `Failed to delete "${v.name}": ${parseApiError(err)}`);
-        }
-      }
-      sse.progress(`Deleted ${deleted} of ${values.length}…`, 10 + Math.round((i + 1) / values.length * 90));
-    }
+    const { deleted, errors } = await runDeleteLoop(sse, { pbFetch, withRetry, fieldId, items: values });
 
     sse.complete({ total: values.length, deleted, errors, stopped: sse.isAborted() });
   } catch (err) {
@@ -175,7 +196,7 @@ router.post('/delete/all', pbAuth, async (req, res) => {
 router.post('/delete/by-csv', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, csvText, column } = req.body;
-  if (!fieldId || !isValidFieldId(fieldId) || !csvText || !column) {
+  if (!isValidFieldId(fieldId) || typeof csvText !== 'string' || !csvText || typeof column !== 'string' || !column) {
     return res.status(400).json({ error: 'Invalid or missing fieldId, csvText, or column' });
   }
 
@@ -201,25 +222,7 @@ router.post('/delete/by-csv', pbAuth, async (req, res) => {
     }
 
     sse.progress(`Matched ${toDelete.length} of ${csvNames.size} CSV names. Deleting…`, 10);
-    let deleted = 0, errors = 0;
-
-    for (let i = 0; i < toDelete.length; i++) {
-      if (sse.isAborted()) break;
-      const v = toDelete[i];
-      try {
-        await deleteValue(pbFetch, withRetry, fieldId, v.id);
-        deleted++;
-        sse.log('success', `Deleted "${v.name}"`);
-      } catch (err) {
-        if (err.status === 404) {
-          sse.log('warn', `"${v.name}" not found — skipped`);
-        } else {
-          errors++;
-          sse.log('error', `Failed to delete "${v.name}": ${parseApiError(err)}`);
-        }
-      }
-      sse.progress(`Deleted ${deleted} of ${toDelete.length}…`, 10 + Math.round((i + 1) / toDelete.length * 90));
-    }
+    const { deleted, errors } = await runDeleteLoop(sse, { pbFetch, withRetry, fieldId, items: toDelete });
 
     sse.complete({ total: toDelete.length, deleted, errors, stopped: sse.isAborted() });
   } catch (err) {
@@ -238,7 +241,7 @@ router.post('/delete/by-csv', pbAuth, async (req, res) => {
 router.post('/delete/by-diff', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, csvText, column } = req.body;
-  if (!fieldId || !isValidFieldId(fieldId) || !csvText || !column) {
+  if (!isValidFieldId(fieldId) || typeof csvText !== 'string' || !csvText || typeof column !== 'string' || !column) {
     return res.status(400).json({ error: 'Invalid or missing fieldId, csvText, or column' });
   }
 
@@ -261,25 +264,7 @@ router.post('/delete/by-diff', pbAuth, async (req, res) => {
     }
 
     sse.progress(`Keeping ${kept}, deleting ${toDelete.length}…`, 10);
-    let deleted = 0, errors = 0;
-
-    for (let i = 0; i < toDelete.length; i++) {
-      if (sse.isAborted()) break;
-      const v = toDelete[i];
-      try {
-        await deleteValue(pbFetch, withRetry, fieldId, v.id);
-        deleted++;
-        sse.log('success', `Deleted "${v.name}"`);
-      } catch (err) {
-        if (err.status === 404) {
-          sse.log('warn', `"${v.name}" not found — skipped`);
-        } else {
-          errors++;
-          sse.log('error', `Failed to delete "${v.name}": ${parseApiError(err)}`);
-        }
-      }
-      sse.progress(`Deleted ${deleted} of ${toDelete.length}…`, 10 + Math.round((i + 1) / toDelete.length * 90));
-    }
+    const { deleted, errors } = await runDeleteLoop(sse, { pbFetch, withRetry, fieldId, items: toDelete });
 
     sse.complete({ total: all.length, deleted, kept, errors, stopped: sse.isAborted() });
   } catch (err) {
@@ -297,33 +282,18 @@ router.post('/delete/by-diff', pbAuth, async (req, res) => {
 router.post('/delete/by-ids', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, values } = req.body;
-  if (!fieldId || !isValidFieldId(fieldId) || !Array.isArray(values) || !values.length) {
+  if (!isValidFieldId(fieldId) || !Array.isArray(values) || !values.length) {
     return res.status(400).json({ error: 'Invalid or missing fieldId or values' });
   }
+  if (!values.every((v) => v && typeof v === 'object' && isValidValueId(v.id))) {
+    return res.status(400).json({ error: 'Every value must have a valid UUID id' });
+  }
+  const items = values.map((v) => ({ id: v.id, name: typeof v.name === 'string' ? v.name : v.id }));
 
   const sse = startSSE(res);
   try {
-    let deleted = 0, errors = 0;
-
-    for (let i = 0; i < values.length; i++) {
-      if (sse.isAborted()) break;
-      const { id, name } = values[i];
-      try {
-        await deleteValue(pbFetch, withRetry, fieldId, id);
-        deleted++;
-        sse.log('success', `Deleted "${name}"`);
-      } catch (err) {
-        if (err.status === 404) {
-          sse.log('warn', `"${name}" not found — skipped`);
-        } else {
-          errors++;
-          sse.log('error', `Failed to delete "${name}": ${parseApiError(err)}`);
-        }
-      }
-      sse.progress(`Deleted ${deleted} of ${values.length}…`, Math.round((i + 1) / values.length * 100));
-    }
-
-    sse.complete({ total: values.length, deleted, errors, stopped: sse.isAborted() });
+    const { deleted, errors } = await runDeleteLoop(sse, { pbFetch, withRetry, fieldId, items, basePct: 0, spanPct: 100 });
+    sse.complete({ total: items.length, deleted, errors, stopped: sse.isAborted() });
   } catch (err) {
     sse.error(parseApiError(err));
   } finally {
@@ -340,21 +310,33 @@ router.post('/delete/by-ids', pbAuth, async (req, res) => {
 router.post('/create', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, names } = req.body;
-  if (!fieldId || !isValidFieldId(fieldId) || !Array.isArray(names) || !names.length) {
+  if (!isValidFieldId(fieldId) || !Array.isArray(names) || !names.length) {
     return res.status(400).json({ error: 'Invalid or missing fieldId or names' });
   }
-  const created = [], errors = [];
-  for (const name of names) {
-    const trimmed = (name || '').trim();
-    if (!trimmed) continue;
-    try {
-      const v = await createFieldValue(fieldId, trimmed, pbFetch, withRetry);
-      created.push(v);
-    } catch (err) {
-      errors.push({ name: trimmed, error: parseApiError(err) });
-    }
+  if (!names.some((n) => typeof n === 'string' && n.trim())) {
+    return res.status(400).json({ error: 'names must contain at least one non-empty string' });
   }
-  res.json({ created, errors });
+  try {
+    const created = [], errors = [];
+    for (const name of names) {
+      if (typeof name !== 'string') {
+        errors.push({ name: String(name), error: 'Name must be a string' });
+        continue;
+      }
+      const trimmed = name.trim();
+      if (!trimmed) continue;
+      try {
+        const v = await createFieldValue(fieldId, trimmed, pbFetch, withRetry);
+        created.push(v);
+      } catch (err) {
+        errors.push({ name: trimmed, error: parseApiError(err) });
+      }
+    }
+    res.json({ created, errors });
+  } catch (err) {
+    console.error('field-values/create:', err.message);
+    res.status(err.status || 500).json({ error: parseApiError(err) });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -365,7 +347,7 @@ router.post('/create', pbAuth, async (req, res) => {
 router.patch('/rename', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, valueId, name } = req.body;
-  if (!fieldId || !isValidFieldId(fieldId) || !valueId || !(name || '').trim()) {
+  if (!isValidFieldId(fieldId) || !isValidValueId(valueId) || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'Invalid or missing fieldId, valueId, or name' });
   }
   try {
@@ -384,7 +366,7 @@ router.patch('/rename', pbAuth, async (req, res) => {
 router.post('/delete/one', pbAuth, async (req, res) => {
   const { pbFetch, withRetry } = res.locals.pbClient;
   const { fieldId, valueId } = req.body;
-  if (!fieldId || !isValidFieldId(fieldId) || !valueId) {
+  if (!isValidFieldId(fieldId) || !isValidValueId(valueId)) {
     return res.status(400).json({ error: 'Invalid or missing fieldId or valueId' });
   }
   try {
@@ -396,3 +378,4 @@ router.post('/delete/one', pbAuth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.runDeleteLoop = runDeleteLoop;

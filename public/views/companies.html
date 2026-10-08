@@ -408,12 +408,12 @@
           <div class="panel" id="sfm-step-upload">
             <div class="panel-header">
               <h2 class="panel-title">Salesforce Instance Migration</h2>
-              <div class="panel-subtitle">Swap Salesforce source record IDs on companies — patches both the v1 <code>sourceRecordId</code> and v2 <code>metadata.source.recordId</code> fields.</div>
+              <div class="panel-subtitle">Swap Salesforce source record IDs on companies — patches the company's <code>metadata.source.recordId</code> field.</div>
               <details class="howto">
                 <summary>How to use</summary>
                 <ul>
                   <li><strong>CSV format</strong> — your CSV must have a PB company UUID column and a New Salesforce ID column. An Old Salesforce ID column is optional.</li>
-                  <li><strong>What it patches</strong> — for each row, sets <code>sourceRecordId</code> (v1) and <code>metadata.source.recordId</code> (v2) to the new Salesforce ID. Both source system fields are set to <code>salesforce</code>. All other company data is left unchanged.</li>
+                  <li><strong>What it patches</strong> — for each row, sets <code>metadata.source.recordId</code> to the new Salesforce ID and <code>metadata.source.system</code> to <code>salesforce</code>. All other company data is left unchanged.</li>
                   <li><strong>Old ID archival</strong> — if you map an Old Salesforce ID column and enable "Move old ID to a text field", the old value is written to a text custom field of your choice for reference.</li>
                   <li><strong>Preview first</strong> — use the Preview step to check which rows will be migrated before running.</li>
                 </ul>
@@ -458,7 +458,7 @@
 
               <div class="mb-16">
                 <label class="label-bold">New Salesforce ID <span class="badge badge-danger">required</span>
-                  <span class="info-icon" data-tip="The Salesforce Account ID from the new instance. Written to both v1 and v2 source fields.">i</span>
+                  <span class="info-icon" data-tip="The Salesforce Account ID from the new instance. Written to the company's metadata.source.recordId field.">i</span>
                 </label>
                 <div class="text-sm text-muted mb-4">Column containing the new Salesforce Account ID</div>
                 <select id="sfm-new-id-col" style="width:100%;max-width:320px;padding:6px 8px;border:1px solid var(--c-border);border-radius:6px;font-size:14px"></select>

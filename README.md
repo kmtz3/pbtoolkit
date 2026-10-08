@@ -103,10 +103,9 @@ Fetches all companies and generates a downloadable CSV.
 | Company Name | `company.name` |
 | Domain | `company.domain` |
 | Description | `company.description` |
-| Source Origin *(v1 — deprecated)* | `company.sourceOrigin` (v1 API) |
-| Source Record ID *(v1 — deprecated)* | `company.sourceRecordId` (v1 API) |
-| Source System *(v2)* | `metadata.source.system` |
-| Source Record ID *(v2)* | `metadata.source.recordId` |
+| source_origin | `metadata.source.system` |
+| source_record_id | `metadata.source.recordId` |
+| source_url | `metadata.source.url` |
 | *(one column per custom field)* | `entity.fields` |
 
 Custom field values are fetched in parallel batches of 5. Progress is streamed in real time. Output filename: `companies-YYYY-MM-DD.csv`.
@@ -157,7 +156,7 @@ Uploads a CSV and creates or updates notes. Match logic:
 2. Match by `source[recordId]` (external ID) if present
 3. Create new note if no match found
 
-Owner assignment is attempted first; if rejected, the note is created without an owner and the owner is backfilled via the v2 API (with retry for v1→v2 propagation lag).
+Each new note is created with a single `POST /v2/notes` (fields, tags, source and customer included); existing notes are updated with one `PATCH`. If Productboard rejects the owner or creator (e.g. not an active member), the note is created without it and a warning is logged. Customer users/companies are looked up and created if missing, with a short retry for v2 propagation delay. Display URL is stored as `metadata.source.url` and can only be set on create.
 
 ### Delete notes by CSV
 
@@ -188,7 +187,6 @@ A two-step flow: **Scan → Preview → Run**.
 | Date range | Limit scan to notes created within a date range (optional; leave blank to scan all notes) |
 | Loose match | Match on content + customer only, ignoring title differences |
 | Target selection | Which note to keep: newest (default), oldest, or most metadata (most tags + product links) |
-| Transfer followers | Also transfer existing followers from secondary notes (costs one extra API call per secondary note during scan) |
 
 **Matching logic:** Notes are grouped by `title + content + customer entity`. Notes with no content or no customer relationship are excluded. Groups of 100+ notes are flagged but not auto-merged.
 
@@ -203,14 +201,13 @@ A two-step flow: **Scan → Preview → Run**.
 2. Merge tags from secondaries (idempotent `addItems`)
 3. Merge product hierarchy links (POST relationships, 422 = already linked → skip)
 4. Reconcile state (processed > unprocessed > archived — highest priority wins)
-5. Add secondary owners as followers (v1 endpoint)
-6. Transfer existing followers from secondaries (only when Transfer followers is enabled)
-7. Preserve user customer relationship if target has company-only and a secondary has a user
-8. Delete secondary notes
+5. Add secondary owners as followers on the target (owner-cycling: the target owner is set to each secondary owner in turn ~3s apart, then restored)
+6. Preserve user customer relationship if target has company-only and a secondary has a user
+7. Delete secondary notes
 
 A **Stop** button is available during run. An **audit log** (downloadable) captures every operation per group.
 
-> **Note:** Steps 5 and 6 use the v1 `/notes/{id}/user-followers` endpoints. These will need updating when Productboard retires v1 (~6 months from 2026-04-03). See comments in `src/routes/notesMerge.js`.
+> **Note:** Productboard v2 has no follower-write or follower-read API, so only secondary-note *owners* can be carried over as followers — other followers on secondary notes are not transferred.
 
 ### Find Empty Notes
 

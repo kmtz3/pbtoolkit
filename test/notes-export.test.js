@@ -198,3 +198,23 @@ test('notes export: uses new note type names (textNote, opportunityNote, convers
   const note3Line = lines.find((l) => l.includes('Note with no source'));
   assert.ok(note3Line.includes('conversationNote'), 'Note 3 should have conversationNote type');
 });
+
+test('notes export: display_url is read from metadata.source.url', async () => {
+  const res = await request(app)
+    .post('/api/notes/export')
+    .set('x-pb-token', 'test-token')
+    .set('Content-Type', 'application/json')
+    .send({});
+
+  const complete = parseCompleteEvent(res.text);
+  const lines = complete.csv.split('\n');
+  const header = lines[0].split(',');
+  const iUrl = header.indexOf('display_url');
+  assert.ok(iUrl >= 0, 'CSV should have display_url column');
+
+  const note1Line = lines.find((l) => l.includes('Note with metadata source'));
+  assert.ok(note1Line.includes('https://sf.example.com/sf-100'), 'Note 1 display_url should come from metadata.source.url');
+
+  const note3Line = lines.find((l) => l.includes('Note with no source'));
+  assert.equal(note3Line.split(',')[iUrl], '', 'Note 3 (no metadata.source) should have empty display_url');
+});

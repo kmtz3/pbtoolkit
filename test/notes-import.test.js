@@ -224,3 +224,112 @@ test('Bug 2: aborting SSE connection mid-row stops hierarchy linking from runnin
     }, DELAY_MS + 150); // PATCH delay + margin
   });
 });
+
+// ─── Audit fixes: type / display URL / customer validation / tag warnings ───
+
+const NEW_NOTE_ID = '99999999-0000-0000-0000-000000000001';
+
+function parseLogEvents(text) {
+  const logs = [];
+  for (const chunk of text.split('\n\n')) {
+    const lines = chunk.trim().split('\n');
+    const dataLine = lines.find((l) => l.startsWith('data:'));
+    if (lines.includes('event: log') && dataLine) logs.push(JSON.parse(dataLine.slice(5).trim()));
+  }
+  return logs;
+}
+
+const notePosts = () => calls.other.filter((c) => c.method === 'POST' && c.path === '/v2/notes');
+
+async function runImport(csvText, mapping) {
+  return request(app)
+    .post('/api/notes/import/run')
+    .set('x-pb-token', 'test-token')
+    .set('Content-Type', 'application/json')
+    .send({ csvText, mapping });
+}
+
+test('CREATE passes the mapped note type to POST /v2/notes (not always textNote)', async () => {
+  clearCalls();
+  clearOverrides();
+  setOverride('POST', '/v2/notes', 200, { data: { id: NEW_NOTE_ID } });
+
+  const content = JSON.stringify([{ externalId: '1', content: 'Hi', authorType: 'customer', timestamp: '2024-01-01T00:00:00Z' }]);
+  const csvText = `Title,Type,Content\nConvo,conversationNote,"${content.replace(/"/g, '""')}"\nPlain,,hello`;
+  const res = await runImport(csvText, { titleColumn: 'Title', typeColumn: 'Type', contentColumn: 'Content' });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.created, 2, res.text);
+  const posts = notePosts();
+  assert.equal(posts.length, 2);
+  assert.equal(posts[0].body.data.type, 'conversationNote');
+  assert.ok(Array.isArray(posts[0].body.data.fields.content), 'conversationNote JSON content should be sent as an array');
+  assert.equal(posts[1].body.data.type, 'textNote', 'empty type cell falls back to textNote');
+  assert.equal(posts[1].body.data.fields.content, 'hello');
+});
+
+test('CREATE sends display URL as metadata.source.url; UPDATE warns it is ignored', async () => {
+  clearCalls();
+  clearOverrides();
+  setOverride('POST', '/v2/notes', 200, { data: { id: NEW_NOTE_ID } });
+
+  const csvText = [
+    'PB Note ID,Title,Display URL,Source Origin,Source Record ID',
+    ',With url,https://example.com/t/1,,',
+    ',With source,https://example.com/t/2,zendesk,zd-2',
+    `${UUID_UPDATE},Updated,https://example.com/t/3,,`,
+  ].join('\n');
+  const res = await runImport(csvText, {
+    pbIdColumn: 'PB Note ID', titleColumn: 'Title', displayUrlColumn: 'Display URL',
+    sourceOriginColumn: 'Source Origin', sourceRecordIdColumn: 'Source Record ID',
+  });
+
+  const posts = notePosts();
+  assert.equal(posts.length, 2, res.text);
+  assert.deepEqual(posts[0].body.data.metadata, { source: { url: 'https://example.com/t/1' } });
+  assert.deepEqual(posts[1].body.data.metadata, {
+    source: { system: 'zendesk', recordId: 'zd-2', url: 'https://example.com/t/2' },
+  });
+
+  const patch = calls.v2Patch.find((p) => p.path === `/v2/notes/${UUID_UPDATE}`);
+  assert.ok(patch, 'update row should still PATCH fields');
+  assert.equal(patch.body.data.metadata, undefined, 'PATCH must not carry metadata');
+  const logs = parseLogEvents(res.text);
+  assert.ok(logs.some((l) => l.level === 'warn' && /display_url is create-only/.test(l.message)), 'expected create-only warning');
+});
+
+test('invalid user_email / company_domain: warn and skip customer, no user/company created', async () => {
+  clearCalls();
+  clearOverrides();
+  setOverride('POST', '/v2/notes', 200, { data: { id: NEW_NOTE_ID } });
+  setOverride('GET', '/v2/entities?type[]=user', 200, { data: [], links: {} });
+  setOverride('GET', '/v2/entities?type[]=company', 200, { data: [], links: {} });
+
+  const csvText = 'Title,User Email,Company Domain\nA,not-an-email,\nB,,not a domain';
+  const res = await runImport(csvText, { titleColumn: 'Title', userEmailColumn: 'User Email', companyDomainColumn: 'Company Domain' });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.created, 2, res.text);
+  assert.equal(complete.errors, 0);
+  assert.ok(!calls.other.some((c) => c.method === 'POST' && c.path === '/v2/entities'), 'no junk user/company entity should be created');
+  for (const p of notePosts()) assert.equal(p.body.data.relationships, undefined);
+  const warns = parseLogEvents(res.text).filter((l) => l.level === 'warn').map((l) => l.message);
+  assert.ok(warns.some((m) => /Invalid user_email/.test(m)));
+  assert.ok(warns.some((m) => /Invalid company_domain/.test(m)));
+});
+
+test('tag create failure is reported as a per-row warning, note still created', async () => {
+  clearCalls();
+  clearOverrides();
+  setOverride('POST', '/v2/notes', 200, { data: { id: NEW_NOTE_ID } });
+  setOverride('GET', '/v2/entities/fields/tags/values', 200, { data: [], links: {} });
+  setOverride('POST', '/v2/entities/fields/tags/values', 422, { errors: [{ detail: 'bad tag' }] });
+
+  const res = await runImport('Title,Tags\nA,newtag', { titleColumn: 'Title', tagsColumn: 'Tags' });
+
+  const complete = parseCompleteEvent(res.text);
+  assert.equal(complete.created, 1, res.text);
+  assert.equal(notePosts()[0].body.data.fields.tags, undefined);
+  const warns = parseLogEvents(res.text).filter((l) => l.level === 'warn');
+  assert.ok(warns.some((l) => /Could not create tag "newtag"/.test(l.message)), JSON.stringify(warns));
+});

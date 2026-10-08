@@ -170,12 +170,12 @@ const NOTES_FIELDS = [
   { id: 'notes-map-user-email',     label: 'User Email',         key: 'userEmailColumn',      required: false },
   { id: 'notes-map-company-domain', label: 'Company Domain',     key: 'companyDomainColumn',  required: false, hint: 'Used when user_email is not set' },
   { id: 'notes-map-owner-email',    label: 'Owner Email',        key: 'ownerEmailColumn',     required: false },
-  { id: 'notes-map-creator-email',  label: 'Creator Email',      key: 'creatorEmailColumn',   required: false, hint: 'Set via v2 backfill after creation' },
+  { id: 'notes-map-creator-email',  label: 'Creator Email',      key: 'creatorEmailColumn',   required: false, hint: 'Must be an active workspace member — skipped otherwise' },
   { id: 'notes-map-tags',           label: 'Tags',               key: 'tagsColumn',           required: false, hint: 'Comma-separated list' },
   { id: 'notes-map-source-origin',  label: 'Source Origin',      key: 'sourceOriginColumn',   required: false },
   { id: 'notes-map-source-record',  label: 'Source Record ID',   key: 'sourceRecordIdColumn', required: false },
-  { id: 'notes-map-archived',       label: 'Archived',           key: 'archivedColumn',       required: false, hint: 'TRUE/FALSE — set via v2 backfill' },
-  { id: 'notes-map-processed',      label: 'Processed',          key: 'processedColumn',      required: false, hint: 'TRUE/FALSE — set via v2 backfill' },
+  { id: 'notes-map-archived',       label: 'Archived',           key: 'archivedColumn',       required: false, hint: 'TRUE/FALSE' },
+  { id: 'notes-map-processed',      label: 'Processed',          key: 'processedColumn',      required: false, hint: 'TRUE/FALSE' },
   { id: 'notes-map-linked-ents',    label: 'Linked Entities',    key: 'linkedEntitiesColumn', required: false, hint: 'Comma-separated feature/component UUIDs' },
 ];
 

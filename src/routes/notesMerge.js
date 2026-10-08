@@ -35,6 +35,7 @@ const { extractCursor } = require('../lib/pbClient');
 const { startSSE } = require('../lib/sse');
 const { parseApiError } = require('../lib/errorUtils');
 const { pbAuth } = require('../middleware/pbAuth');
+const { UUID_RE } = require('../lib/constants');
 const { buildIdToDomainMap } = require('../lib/domainCache');
 const { buildIdToEmailMap } = require('../lib/userCache');
 
@@ -110,6 +111,43 @@ function selectTarget(notes, targetMode) {
     if ((n.createdAt || '') === (best.createdAt || '') && (n.id || '') > (best.id || '')) return n;
     return best;
   }, null);
+}
+
+const isUuid = (v) => typeof v === 'string' && UUID_RE.test(v);
+
+/**
+ * Validate the client-supplied merge groups before any API call. Every ID that
+ * ends up in a request path or relationship target must be a UUID.
+ * Returns an error string, or null when valid.
+ */
+function validateMergeGroups(groups) {
+  if (!Array.isArray(groups)) return 'groups must be an array';
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    const where = `groups[${i}]`;
+    if (!g || typeof g !== 'object') return `${where} must be an object`;
+    const { target, secondaries } = g;
+    if (!target || !isUuid(target.id)) return `${where}.target.id must be a valid UUID`;
+    if (target.customer_id != null && target.customer_id !== '' && !isUuid(target.customer_id)) {
+      return `${where}.target.customer_id must be a valid UUID`;
+    }
+    if (target.product_links != null && (!Array.isArray(target.product_links) || !target.product_links.every(isUuid))) {
+      return `${where}.target.product_links must be an array of UUIDs`;
+    }
+    if (!Array.isArray(secondaries) || !secondaries.length) return `${where}.secondaries must be a non-empty array`;
+    for (let j = 0; j < secondaries.length; j++) {
+      const sec = secondaries[j];
+      const sw = `${where}.secondaries[${j}]`;
+      if (!sec || !isUuid(sec.id)) return `${sw}.id must be a valid UUID`;
+      if (sec.customer_id != null && sec.customer_id !== '' && !isUuid(sec.customer_id)) {
+        return `${sw}.customer_id must be a valid UUID`;
+      }
+      if (sec.product_links != null && (!Array.isArray(sec.product_links) || !sec.product_links.every(isUuid))) {
+        return `${sw}.product_links must be an array of UUIDs`;
+      }
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,9 +313,12 @@ router.post('/scan', pbAuth, async (req, res) => {
 // ---------------------------------------------------------------------------
 
 router.post('/run', pbAuth, async (req, res) => {
+  const { groups = [] } = req.body || {};
+  const invalid = validateMergeGroups(groups);
+  if (invalid) return res.status(400).json({ error: invalid });
+
   const sse = startSSE(res);
   const { pbFetch, withRetry } = res.locals.pbClient;
-  const { groups = [] } = req.body || {};
 
   const runId    = `${new Date().toISOString().slice(0, 10)}-${Math.random().toString(36).slice(2, 8)}`;
   const auditLog = [];
@@ -383,6 +424,8 @@ router.post('/run', pbAuth, async (req, res) => {
             }
             cycled++;
             sse.log('info', `Transferring followers on ${target.id}… (${cycled}/${followerEmailSet.size})`);
+            // Space owner PATCHes ~3s apart, including before the restore step —
+            // the follow-on-owner-change may be processed async, so don't shorten.
             await new Promise((r) => setTimeout(r, 3000));
           }
 
@@ -534,9 +577,13 @@ router.post('/scan-empty', pbAuth, async (req, res) => {
 // ---------------------------------------------------------------------------
 
 router.post('/delete-empty', pbAuth, async (req, res) => {
+  const { notes = [] } = req.body || {};
+  if (!Array.isArray(notes) || !notes.every((n) => n && isUuid(n.id))) {
+    return res.status(400).json({ error: 'notes must be an array of { id } with valid UUIDs' });
+  }
+
   const sse = startSSE(res);
   const { pbFetch, withRetry } = res.locals.pbClient;
-  const { notes = [] } = req.body || {};
 
   let deleted = 0, errors = 0;
 
@@ -572,3 +619,4 @@ router.post('/delete-empty', pbAuth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.validateMergeGroups = validateMergeGroups;
