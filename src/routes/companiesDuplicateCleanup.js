@@ -71,7 +71,7 @@ function setCachedOrigins(token, origins) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /origins — return distinct non-null sourceOrigin values across v2 + v1
+// GET /origins — return distinct non-null sourceOrigin values (v2 only — v1 retired)
 // ---------------------------------------------------------------------------
 
 router.get('/origins', pbAuth, async (req, res) => {
@@ -85,8 +85,7 @@ router.get('/origins', pbAuth, async (req, res) => {
 
   const { pbFetch, withRetry } = res.locals.pbClient;
   try {
-    const originsSet    = new Set();
-    const missingV2Ids  = new Set(); // company IDs where v2 source is null — need v1 fallback
+    const originsSet = new Set();
 
     // v2: metadata.source.system
     let cursor = null;
@@ -98,33 +97,9 @@ router.get('/origins', pbAuth, async (req, res) => {
       for (const c of (r.data || [])) {
         const sys = c.metadata?.source?.system;
         if (sys) originsSet.add(sys);
-        else if (c.id) missingV2Ids.add(c.id);
       }
       cursor = extractCursor(r.links?.next);
     } while (cursor);
-
-    // v1 fallback: sourceOrigin for companies whose v2 source was null.
-    // Stops as soon as all missing IDs have been back-filled (mirrors /scan behaviour).
-    if (missingV2Ids.size > 0) {
-      let offset = 0;
-      let filled = 0;
-      const PAGE = 100;
-      while (filled < missingV2Ids.size) {
-        const r = await withRetry(
-          () => pbFetch('get', `/companies?pageLimit=${PAGE}&pageOffset=${offset}`),
-          `fetch v1 companies for origins offset=${offset}`
-        );
-        const batch = r.data || [];
-        for (const c of batch) {
-          if (c.id && missingV2Ids.has(c.id) && c.sourceOrigin) {
-            originsSet.add(c.sourceOrigin);
-            filled++;
-          }
-        }
-        if (batch.length < PAGE) break;
-        offset += PAGE;
-      }
-    }
 
     const origins = [...originsSet].sort();
     setCachedOrigins(token, origins);
@@ -164,10 +139,10 @@ router.get('/origins', pbAuth, async (req, res) => {
 //   origin company (preferring 'salesforce'); if all are null, first in list.
 //   The frontend allows the user to swap the target.
 //
-// Source origin strategy (v2-first, v1-fallback):
-//   1. Fetch all companies from v2 entities → domain + id + metadata.source.system
-//   2. If any company has metadata.source.system = null, fetch v1 /companies for those
-//      ids only and back-fill sourceOrigin from v1 (covers the legacy metadata migration gap)
+// Source origin strategy (v2-only — v1 retired):
+//   Fetch all companies from v2 entities → domain + id + metadata.source.system/recordId.
+//   A null metadata.source just means the company has no recorded source; there is no
+//   fallback to backfill it from anymore.
 // ---------------------------------------------------------------------------
 
 // Normalize a company name for duplicate matching.
@@ -219,42 +194,7 @@ router.post('/scan', pbAuth, async (req, res) => {
       recordIdMap[c.id] = c.metadata?.source?.recordId  || null;
     }
 
-    // ── Step 2: v1 fallback for ids where v2 source is null ──────────────
-    const missingSourceIds = new Set(Object.entries(sourceMap).filter(([, v]) => v === null).map(([k]) => k));
-
-    if (missingSourceIds.size > 0 && !sse.isAborted()) {
-      sse.progress(`Fetching source origin from v1 API for ${missingSourceIds.size} compan${missingSourceIds.size === 1 ? 'y' : 'ies'}…`, 40);
-
-      // v1 doesn't support filtering by id, so paginate and collect what we need
-      let offset = 0;
-      const PAGE = 100;
-      let filled = 0;
-      while (missingSourceIds.size > filled && !sse.isAborted()) {
-        const r = await withRetry(
-          () => pbFetch('get', `/companies?pageLimit=${PAGE}&pageOffset=${offset}`),
-          `fetch v1 companies offset=${offset}`
-        );
-        const batch = r.data || [];
-        for (const c of batch) {
-          if (c.id && missingSourceIds.has(c.id)) {
-            sourceMap[c.id] = c.sourceOrigin || null;
-            // Only fall back to v1 sourceRecordId if v2 recordId was also null
-            if (!recordIdMap[c.id]) recordIdMap[c.id] = c.sourceRecordId || null;
-            filled++;
-          }
-        }
-        if (batch.length < PAGE) break;
-        offset += PAGE;
-      }
-
-      sse.log('info', `Back-filled source data for ${filled} compan${filled === 1 ? 'y' : 'ies'} from v1 API`);
-    } else if (missingSourceIds.size === 0) {
-      sse.log('info', 'All source origins resolved from v2 — v1 fallback not needed');
-    }
-
-    if (sse.isAborted()) { sse.complete({ domainRecords: [], skippedRows: [], totalDomains: 0, totalDuplicates: 0, stopped: true }); return; }
-
-    // ── Step 3: Group by domain ───────────────────────────────────────────
+    // ── Step 2: Group by domain ───────────────────────────────────────────
     sse.progress('Detecting duplicates…', 75);
 
     // Build name map from v2 fields
@@ -522,47 +462,6 @@ router.post('/preview-csv', pbAuth, async (req, res) => {
 
     if (sse.isAborted()) { sse.complete({ domainRecords: [], totalDomains: 0, totalDuplicates: 0 }); return; }
 
-    // ── Step 3.5: v1 fallback for companies where v2 source is null ──────────
-    // v2 metadata.source.system is null for companies whose source was only
-    // recorded in v1 (legacy migration gap). Paginate v1 and back-fill.
-    const missingSourceIds = new Set(
-      Object.values(companyDetails)
-        .filter(c => !c.notFound && c.sourceOrigin === null)
-        .map(c => c.id)
-    );
-
-    if (missingSourceIds.size > 0 && !sse.isAborted()) {
-      sse.progress(`Fetching source data from v1 API for ${missingSourceIds.size} compan${missingSourceIds.size !== 1 ? 'ies' : 'y'}…`, 45);
-
-      // v1 doesn't support filtering by id, so paginate and collect what we need
-      let offset = 0;
-      const PAGE = 100;
-      let filled = 0;
-      while (filled < missingSourceIds.size && !sse.isAborted()) {
-        const r = await withRetry(
-          () => pbFetch('get', `/companies?pageLimit=${PAGE}&pageOffset=${offset}`),
-          `v1 source fallback offset=${offset}`
-        );
-        const batch = r.data || [];
-        for (const c of batch) {
-          if (c.id && missingSourceIds.has(c.id)) {
-            companyDetails[c.id].sourceOrigin   = c.sourceOrigin   || null;
-            // Only use v1 sourceRecordId if v2 recordId was also null
-            if (!companyDetails[c.id].sourceRecordId) {
-              companyDetails[c.id].sourceRecordId = c.sourceRecordId || null;
-            }
-            filled++;
-          }
-        }
-        if (batch.length < PAGE) break;
-        offset += PAGE;
-      }
-
-      sse.log('info', `Back-filled source data for ${filled} compan${filled !== 1 ? 'ies' : 'y'} from v1 API`);
-    }
-
-    if (sse.isAborted()) { sse.complete({ domainRecords: [], totalDomains: 0, totalDuplicates: 0 }); return; }
-
     // ── Step 4: Fetch note + user counts for duplicates ───────────────────
     const primaryIds    = [...grouped.keys()];
     const domainRecords = [];
@@ -765,10 +664,41 @@ function resolveTarget(note) {
 
 
 // ---------------------------------------------------------------------------
+// Validate /run input before any API call (IDs go straight into URL paths,
+// including DELETE /v2/entities/{id}).
+// ---------------------------------------------------------------------------
+
+const isUuid = (v) => typeof v === 'string' && UUID_RE.test(v);
+
+/** Returns an error string for the first invalid domainRecords entry, or null. */
+function validateDomainRecords(domainRecords) {
+  if (!Array.isArray(domainRecords)) return 'domainRecords must be an array';
+  for (let i = 0; i < domainRecords.length; i++) {
+    const dr = domainRecords[i];
+    const where = `domainRecords[${i}]`;
+    if (!dr || typeof dr !== 'object') return `${where} must be an object`;
+    if (!isUuid(dr.primaryId)) return `${where}.primaryId must be a valid UUID`;
+    const dupIds = dr.duplicates != null
+      ? (Array.isArray(dr.duplicates) ? dr.duplicates.map(d => d?.id) : null)
+      : (dr.duplicateIds ?? []);
+    if (!Array.isArray(dupIds)) return `${where}.duplicates must be an array`;
+    for (let j = 0; j < dupIds.length; j++) {
+      if (!isUuid(dupIds[j])) return `${where} duplicate[${j}] id must be a valid UUID`;
+      if (dupIds[j].toLowerCase() === dr.primaryId.toLowerCase()) return `${where} duplicate[${j}] cannot be the primary company`;
+    }
+  }
+  return null;
+}
+
+
+// ---------------------------------------------------------------------------
 // POST /run  (SSE)
 // ---------------------------------------------------------------------------
 
 router.post('/run', pbAuth, async (req, res) => {
+  const invalid = validateDomainRecords((req.body || {}).domainRecords ?? []);
+  if (invalid) return res.status(400).json({ error: invalid });
+
   const token = res.locals.pbToken;
   _stopRequests.delete(token);
   const sse = startSSE(res);
@@ -778,7 +708,7 @@ router.post('/run', pbAuth, async (req, res) => {
   // Archive only applies when we're keeping the duplicate (instead of deleting it).
   const shouldArchive = keepDuplicates === true && archiveDuplicates === true;
 
-  let notesRelinked = 0, usersRelinked = 0, entitiesRelinked = 0, deleted = 0, kept = 0, archived = 0, errors = 0;
+  let notesRelinked = 0, usersRelinked = 0, deleted = 0, kept = 0, archived = 0, errors = 0;
   const actionLog = [];
 
   // Accept both new { duplicates: [{id}] } and legacy { duplicateIds: [string] } formats
@@ -809,10 +739,8 @@ router.post('/run', pbAuth, async (req, res) => {
           notesFound:         0,
           notesRelinked:      0,
           usersRelinked:      0,
-          entitiesRelinked:   0,
           noteIds:            [],
           userIds:            [],
-          entityRelinks:      [],
           deleted:            false,
           kept:               false,
           archived:           false,
@@ -852,58 +780,14 @@ router.post('/run', pbAuth, async (req, res) => {
 
             try {
               if (targetType === 'user') {
-                // ── WORKAROUND for PB API bug (IS-8968) — remove once PB fix ships ──────
-                //
-                // BUG: when a user's parent company changes, PB's notes/search index does
-                // not reliably re-derive the note's company. Re-PUTting the same user as
-                // customer (the intuitive fix) is a no-op — the search index ignores it.
-                // Tracked in: https://productboard.atlassian.net/browse/IS-8968
-                // ETA for PB fix: ~week of 2026-05-22
-                //
-                // REVERT INSTRUCTIONS (once IS-8968 is resolved and deployed):
-                //   Delete Steps 2a, 2b, and 2c entirely and replace with these two calls:
-                //
-                //     // Relink user to target company
-                //     if (!relinkUserIds.has(targetId)) {
-                //       await withRetry(
-                //         () => pbFetch('put', `/v2/entities/${targetId}/relationships/parent`, {
-                //           data: { target: { id: dr.primaryId }, type: 'company' },
-                //         }),
-                //         `relink user ${targetId} to target company`
-                //       );
-                //       sse.log('success', `Relinked user ${targetId} → target company (via note ${noteId})`, { uuid: targetId });
-                //       relinkUserIds.add(targetId);
-                //       entry.usersRelinked++;
-                //       entry.userIds.push(targetId);
-                //       usersRelinked++;
-                //     }
-                //     // Relink note customer to same user (PB should now auto-resolve company)
-                //     await withRetry(
-                //       () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
-                //         data: { target: { type: 'user', id: targetId } },
-                //       }),
-                //       `refresh note ${noteId} customer attribution`
-                //     );
-                //     sse.log('success', `Relinked note ${noteId} → user ${targetId}`, { uuid: noteId });
-                //     entry.noteIds.push(noteId);
-                //     entry.notesRelinked++;
-                //     notesRelinked++;
-                //
-                // ────────────────────────────────────────────────────────────────────────
+                // PB API bug IS-8968 (notes/search index not re-deriving company from a
+                // user-parent change) is fixed, but re-derivation is EVENTUALLY consistent:
+                // seconds on 2026-09-11, ~3–7 minutes on 2026-10-08 (looks like a periodic
+                // PB re-index). The end state is always correct; re-PUTting or the old 3-step
+                // clear/reparent/reattribute workaround did not speed it up. See git history
+                // before bae8ea7 if IS-8968 regresses to never resolving.
 
-                // Step 2a: break the stale denormalized source link FIRST, before touching
-                // the user. PUT note → company must happen before the user parent moves —
-                // doing the user PUT first leaves the note stuck under source even with the
-                // intermediate company PUT. (Live testing 2026-05-15, IS-8968.)
-                await withRetry(
-                  () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
-                    data: { target: { type: 'company', id: dr.primaryId } },
-                  }),
-                  `clear stale source link on note ${noteId}`
-                );
-                sse.log('info', `Cleared stale source link on note ${noteId} → target company`, { uuid: noteId });
-
-                // Step 2b: re-parent the user — once per user, even if they're the
+                // Relink user to target company — once per user, even if they're the
                 // customer on multiple notes attributed to this duplicate.
                 if (!relinkUserIds.has(targetId)) {
                   await withRetry(
@@ -921,41 +805,14 @@ router.post('/run', pbAuth, async (req, res) => {
                   sse.log('info', `User ${targetId} already relinked — re-attributing note ${noteId} only`, { uuid: targetId });
                 }
 
-                // Step 2c: reattribute note back to the user so PB re-derives company from
-                // the user's current (target) parent. The note-search index lags behind the
-                // user-parent update, so the note can bounce back to source on the first PUT.
-                // Verify after each attempt and retry until the note clears from the source
-                // index. (Live testing 2026-05-15: resolves in 1–2 attempts consistently.)
-                const MAX_REATTRIB_ATTEMPTS = 3;
-                let reattribDone = false;
-                for (let ra = 0; ra < MAX_REATTRIB_ATTEMPTS; ra++) {
-                  if (ra > 0) {
-                    await new Promise(r => setTimeout(r, 500));
-                    sse.log('info', `Retrying note ${noteId} reattribution (attempt ${ra + 1}/${MAX_REATTRIB_ATTEMPTS})…`, { uuid: noteId });
-                  }
-                  await withRetry(
-                    () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
-                      data: { target: { type: 'user', id: targetId } },
-                    }),
-                    `reattribute note ${noteId} to user (attempt ${ra + 1})`
-                  );
-                  // 1000ms: empirically the minimum for the note-search index to reflect
-                  // the user-parent change. 600ms was too short (triggered retry on ~every note).
-                  await new Promise(r => setTimeout(r, 1000));
-                  const verifyR = await withRetry(
-                    () => pbFetch('post', '/v2/notes/search', {
-                      data: { filter: { relationships: { customer: [{ id: dupId }] } } },
-                    }),
-                    `verify note ${noteId} cleared from source`
-                  );
-                  const stillOnSource = (verifyR.data || []).some(n => n.id === noteId);
-                  if (!stillOnSource) { reattribDone = true; break; }
-                }
-                if (reattribDone) {
-                  sse.log('info', `Reattributed note ${noteId} → user ${targetId} under target company`, { uuid: noteId });
-                } else {
-                  sse.log('warn', `Note ${noteId} reattributed to user but still visible under source after ${MAX_REATTRIB_ATTEMPTS} attempts — may resolve with time`, { uuid: noteId });
-                }
+                // Relink note customer to same user (PB now auto-resolves company)
+                await withRetry(
+                  () => pbFetch('put', `/v2/notes/${noteId}/relationships/customer`, {
+                    data: { target: { type: 'user', id: targetId } },
+                  }),
+                  `refresh note ${noteId} customer attribution`
+                );
+                sse.log('success', `Relinked note ${noteId} → user ${targetId}`, { uuid: noteId });
                 entry.noteIds.push(noteId);
                 entry.notesRelinked++;
                 notesRelinked++;
@@ -1031,121 +888,22 @@ router.post('/run', pbAuth, async (req, res) => {
             } while (cursor && !shouldStop());
           }
 
-          // ── Step 3.5: Relink the duplicate's own entity relationships ────
-          // Covers link / isBlockedBy / isBlocking / parent / child to features,
-          // components, initiatives, etc. Done LAST (after notes/users) because
-          // relinking a note attached to a feature does NOT also relink that
-          // feature → without this step the feature stays linked to the deleted
-          // or archived duplicate, causing the UI discrepancy users see.
-          //
-          // In all modes:
-          //   1. POST the same relationship on the target company (409 = already
-          //      linked, treated as success).
-          //   2. In keep/archive mode, DELETE the relationship from the duplicate
-          //      so the leftover company doesn't show stale links. In delete
-          //      mode the relationship is removed when the duplicate is deleted.
-          if (!shouldStop() && !relinkFailed) {
-            let entityRels = [];
-            try {
-              entityRels = await fetchCompanyEntityRelationships(pbFetch, withRetry, dupId);
-            } catch (err) {
-              const msg = parseApiError(err);
-              sse.log('error', `Failed to list relationships for ${dupId}: ${msg}`, { uuid: dupId });
-              relinkFailed = true;
-              errors++;
-              entry.error = `list relationships failed: ${msg}`;
-            }
-
-            for (const rel of entityRels) {
-              if (shouldStop()) break;
-              const { type: relType, targetId: relTargetId, targetType: relTargetType } = rel;
-
-              // Step 3.5a: recreate the relationship on the target side.
-              // Some pairs (e.g. company ↔ feature `link`) only accept POST from
-              // one direction — POSTing on the other returns
-              //   validation.failed "Relationship between X and Y in direction
-              //   Nondirectional is not allowed."
-              // Strategy: try POST on the target company first; on a directional
-              // validation error, retry by POSTing on the OTHER entity side
-              // (the feature/component/etc.) pointing at the target company.
-              // POSTing an already-existing link returns 201 (idempotent), so we
-              // don't need special 409 handling.
-              let created = false;
-              // pbClient packs the response body into err.message verbatim
-              // (see src/lib/pbClient.js line 108), so we can grep for the
-              // exact phrase Productboard returns.
-              const isDirectionalErr = (err) => /direction\s+Nondirectional\s+is not allowed/i.test(String(err?.message || ''));
-
-              try {
-                await withRetry(
-                  () => pbFetch('post', `/v2/entities/${dr.primaryId}/relationships`, {
-                    data: { type: relType, target: { id: relTargetId } },
-                  }),
-                  `relink ${relType} ${relTargetId} on target`
-                );
-                created = true;
-                sse.log('success', `Relinked ${relType} → ${relTargetType || 'entity'} ${relTargetId} (on target company)`, { uuid: relTargetId });
-              } catch (relinkErr) {
-                if (relinkErr?.status === 409) {
-                  // Defensive: API currently returns 201 on duplicate, but treat 409 as already-linked.
-                  created = true;
-                  sse.log('info', `${relType} → ${relTargetId} already linked on target, skipping create`, { uuid: relTargetId });
-                } else if (isDirectionalErr(relinkErr)) {
-                  // Retry from the other entity's side.
-                  try {
-                    await withRetry(
-                      () => pbFetch('post', `/v2/entities/${relTargetId}/relationships`, {
-                        data: { type: relType, target: { id: dr.primaryId } },
-                      }),
-                      `relink ${relType} on ${relTargetType || 'entity'} side`
-                    );
-                    created = true;
-                    sse.log('success', `Relinked ${relType} ← ${relTargetType || 'entity'} ${relTargetId} (on ${relTargetType || 'entity'} side; company side rejected as directional)`, { uuid: relTargetId });
-                  } catch (retryErr) {
-                    const msg = parseApiError(retryErr);
-                    sse.log('error', `Relink failed (both directions) — ${relType} ${relTargetId}: ${msg}`, { uuid: relTargetId });
-                    relinkFailed = true;
-                    errors++;
-                    entry.error = `entity relink failed: ${msg}`;
-                  }
-                } else {
-                  const msg = parseApiError(relinkErr);
-                  sse.log('error', `Relink failed — ${relType} ${relTargetId}: ${msg}`, { uuid: relTargetId });
-                  relinkFailed = true;
-                  errors++;
-                  entry.error = `entity relink failed: ${msg}`;
-                }
-              }
-
-              if (created) {
-                entry.entitiesRelinked++;
-                entry.entityRelinks.push({ type: relType, targetId: relTargetId, targetType: relTargetType || null });
-                entitiesRelinked++;
-              }
-
-              // Step 3.5b: in keep/archive mode, remove the relationship from
-              // the duplicate so the leftover company doesn't show stale links.
-              if (created && keepDuplicates) {
-                try {
-                  await withRetry(
-                    () => pbFetch('delete', `/v2/entities/${dupId}/relationships/${encodeURIComponent(relType)}/${encodeURIComponent(relTargetId)}`),
-                    `unlink ${relType} ${relTargetId} from duplicate`
-                  );
-                  sse.log('info', `Removed ${relType} → ${relTargetId} from duplicate`, { uuid: relTargetId });
-                } catch (unlinkErr) {
-                  // 404 = relationship already gone — treat as success.
-                  const status = unlinkErr?.status;
-                  if (status === 404 || /404/.test(String(unlinkErr?.message || ''))) {
-                    // already gone, no-op
-                  } else {
-                    const msg = parseApiError(unlinkErr);
-                    sse.log('warn', `Could not remove ${relType} → ${relTargetId} from duplicate: ${msg}`, { uuid: relTargetId });
-                    // Non-fatal: the link exists on target; this is just leftover cleanup.
-                  }
-                }
-              }
-            }
-          }
+          // NOTE: there used to be a "Step 3.5" here that tried to directly recreate
+          // the duplicate's non-note/user relationships (link to features, components,
+          // etc.) on the target company via POST /v2/entities/{id}/relationships.
+          // Removed 2026-09-05 — live-tested and confirmed this direct write is
+          // rejected by the API in BOTH directions with "Relationship between
+          // organizations and features in direction Nondirectional is not allowed",
+          // even when the exact relationship already exists on the target. These
+          // company↔hierarchy-entity "link" relationships are a derived/computed
+          // rollup from the notes (and users) attributed to that company — they are
+          // never directly writable. Confirmed live: POSTing a note's own link
+          // relationship (with that note's customer set to the target company)
+          // causes the target company to pick up the corresponding link automatically.
+          // Since Steps 1–3 above already relink every note and user off the
+          // duplicate and onto the target, the target's company-level links
+          // re-derive on their own — no explicit action needed, and none is possible
+          // via the public API for this relationship type.
 
           // ── Step 4: Finalize — delete duplicate, or keep (and optionally archive) ─
           // Only runs when every relink for this duplicate succeeded.
@@ -1198,7 +956,7 @@ router.post('/run', pbAuth, async (req, res) => {
 
     const stopped = shouldStop();
     sse.progress(stopped ? 'Stopped.' : 'Merge complete.', 100);
-    sse.complete({ notesRelinked, usersRelinked, entitiesRelinked, deleted, kept, archived, errors, stopped, actionLog });
+    sse.complete({ notesRelinked, usersRelinked, deleted, kept, archived, errors, stopped, actionLog });
 
   } catch (err) {
     console.error('[companiesDuplicateCleanup/run]', err);
@@ -1210,3 +968,4 @@ router.post('/run', pbAuth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.validateDomainRecords = validateDomainRecords;

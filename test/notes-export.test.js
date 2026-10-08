@@ -1,13 +1,12 @@
 'use strict';
 
 /**
- * Notes export tests — source field migration and type rename.
+ * Notes export tests — source field (v2-only) and type rename.
  *
  * Tests:
- * - buildNoteRow reads metadata.source.system/recordId (not fields.source)
+ * - buildNoteRow reads metadata.source.system/recordId (the only source of truth — v1 retired)
  * - buildNoteRow returns new note type names (textNote, opportunityNote, conversationNote)
- * - Falls back to fields.source for backward compat (deprecated)
- * - Falls back to v1 sourceMap when metadata.source and fields.source both empty
+ * - Notes with no metadata.source produce empty source columns (no fields.source or v1 fallback)
  */
 
 const { test, before, after } = require('node:test');
@@ -18,6 +17,7 @@ const request = require('supertest');
 const NOTE_UUID_1 = 'nnnnnnnn-0000-0000-0000-000000000001';
 const NOTE_UUID_2 = 'nnnnnnnn-0000-0000-0000-000000000002';
 const NOTE_UUID_3 = 'nnnnnnnn-0000-0000-0000-000000000003';
+const NOTE_UUID_4 = '44444444-4444-4444-4444-444444444444';
 
 function parseCompleteEvent(text) {
   for (const chunk of text.split('\n\n')) {
@@ -59,7 +59,7 @@ const mockV2Notes = [
     createdAt: '2026-03-02T00:00:00Z',
     updatedAt: '2026-03-02T00:00:00Z',
     fields: {
-      name: 'Note with fields.source only',
+      name: 'Note with deprecated fields.source only',
       content: 'Content 2',
       source: { origin: 'hubspot', id: 'hs-200' },
       archived: false,
@@ -82,11 +82,21 @@ const mockV2Notes = [
     metadata: { source: {} },
     relationships: { data: [], links: { next: null } },
   },
-];
-
-// v1 notes for source enrichment fallback (NOTE_UUID_3 only)
-const mockV1Notes = [
-  { id: NOTE_UUID_3, source: { origin: 'intercom', record_id: 'ic-300' } },
+  {
+    // PB stamps API-created notes with this placeholder source (no recordId)
+    id: NOTE_UUID_4,
+    type: 'textNote',
+    createdAt: '2026-03-04T00:00:00Z',
+    updatedAt: '2026-03-04T00:00:00Z',
+    fields: {
+      name: 'Note created via public API',
+      content: 'Content 4',
+      archived: false,
+      processed: false,
+    },
+    metadata: { source: { system: 'public_api' } },
+    relationships: { data: [], links: { next: null } },
+  },
 ];
 
 before(async () => {
@@ -98,13 +108,6 @@ before(async () => {
       if (req.method === 'GET' && req.url.startsWith('/v2/notes')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ data: mockV2Notes, links: { next: null } }));
-        return;
-      }
-
-      // v1 notes list (source enrichment)
-      if (req.method === 'GET' && req.url.startsWith('/notes')) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ data: mockV1Notes, pageCursor: null }));
         return;
       }
 
@@ -152,7 +155,7 @@ test('notes export: reads source from metadata.source.system/recordId (new v2 fo
   assert.ok(note1Line.includes('sf-100'), 'Note 1 source_record_id should be sf-100 (from metadata.source.recordId)');
 });
 
-test('notes export: falls back to fields.source for notes without metadata.source', async () => {
+test('notes export: does not fall back to deprecated fields.source (v1 retired, metadata.source only)', async () => {
   const res = await request(app)
     .post('/api/notes/export')
     .set('x-pb-token', 'test-token')
@@ -163,14 +166,15 @@ test('notes export: falls back to fields.source for notes without metadata.sourc
   const csv = complete.csv;
   const lines = csv.split('\n');
 
-  // Note 2: has fields.source.origin='hubspot', fields.source.id='hs-200' but empty metadata.source
-  const note2Line = lines.find((l) => l.includes('Note with fields.source only'));
+  // Note 2: has deprecated fields.source.origin='hubspot' but empty metadata.source —
+  // should NOT be read since v1 sunset; source columns should be empty.
+  const note2Line = lines.find((l) => l.includes('Note with deprecated fields.source only'));
   assert.ok(note2Line, 'Should have Note 2 row');
-  assert.ok(note2Line.includes('hubspot'), 'Note 2 should fall back to fields.source.origin');
-  assert.ok(note2Line.includes('hs-200'), 'Note 2 should fall back to fields.source.id');
+  assert.ok(!note2Line.includes('hubspot'), 'Note 2 should NOT read deprecated fields.source.origin');
+  assert.ok(!note2Line.includes('hs-200'), 'Note 2 should NOT read deprecated fields.source.id');
 });
 
-test('notes export: falls back to v1 sourceMap when both metadata and fields empty', async () => {
+test('notes export: note with no metadata.source has empty source columns (no v1 fallback)', async () => {
   const res = await request(app)
     .post('/api/notes/export')
     .set('x-pb-token', 'test-token')
@@ -181,11 +185,12 @@ test('notes export: falls back to v1 sourceMap when both metadata and fields emp
   const csv = complete.csv;
   const lines = csv.split('\n');
 
-  // Note 3: no metadata.source, no fields.source → should use v1 sourceMap
+  // Note 3: no metadata.source — no v1 API to fall back to anymore, columns are just empty
   const note3Line = lines.find((l) => l.includes('Note with no source'));
   assert.ok(note3Line, 'Should have Note 3 row');
-  assert.ok(note3Line.includes('intercom'), 'Note 3 should fall back to v1 sourceMap');
-  assert.ok(note3Line.includes('ic-300'), 'Note 3 should fall back to v1 sourceMap recordId');
+  const cols = note3Line.split(',');
+  assert.equal(cols[10], '', 'Note 3 source_origin should be empty');
+  assert.equal(cols[11], '', 'Note 3 source_record_id should be empty');
 });
 
 test('notes export: uses new note type names (textNote, opportunityNote, conversationNote)', async () => {
@@ -203,9 +208,47 @@ test('notes export: uses new note type names (textNote, opportunityNote, convers
   const note1Line = lines.find((l) => l.includes('Note with metadata source'));
   assert.ok(note1Line.includes('textNote'), 'Note 1 should have textNote type');
 
-  const note2Line = lines.find((l) => l.includes('Note with fields.source only'));
+  const note2Line = lines.find((l) => l.includes('Note with deprecated fields.source only'));
   assert.ok(note2Line.includes('opportunityNote'), 'Note 2 should have opportunityNote type');
 
   const note3Line = lines.find((l) => l.includes('Note with no source'));
   assert.ok(note3Line.includes('conversationNote'), 'Note 3 should have conversationNote type');
+});
+
+test('notes export: display_url is read from metadata.source.url', async () => {
+  const res = await request(app)
+    .post('/api/notes/export')
+    .set('x-pb-token', 'test-token')
+    .set('Content-Type', 'application/json')
+    .send({});
+
+  const complete = parseCompleteEvent(res.text);
+  const lines = complete.csv.split('\n');
+  const header = lines[0].split(',');
+  const iUrl = header.indexOf('display_url');
+  assert.ok(iUrl >= 0, 'CSV should have display_url column');
+
+  const note1Line = lines.find((l) => l.includes('Note with metadata source'));
+  assert.ok(note1Line.includes('https://sf.example.com/sf-100'), 'Note 1 display_url should come from metadata.source.url');
+
+  const note3Line = lines.find((l) => l.includes('Note with no source'));
+  assert.equal(note3Line.split(',')[iUrl], '', 'Note 3 (no metadata.source) should have empty display_url');
+});
+
+test('notes export: PB placeholder source (public_api, no recordId) exports empty source columns', async () => {
+  const res = await request(app)
+    .post('/api/notes/export')
+    .set('x-pb-token', 'test-token')
+    .set('Content-Type', 'application/json')
+    .send({});
+
+  const complete = parseCompleteEvent(res.text);
+  const lines = complete.csv.split('\n');
+  const header = lines[0].split(',');
+  const iOrigin = header.indexOf('source_origin');
+  const iRecord = header.indexOf('source_record_id');
+  const line = lines.find((l) => l.includes('Note created via public API'));
+  assert.ok(line, 'Should have the public_api note row');
+  assert.equal(line.split(',')[iOrigin], '', 'public_api placeholder should not be exported as source_origin');
+  assert.equal(line.split(',')[iRecord], '');
 });

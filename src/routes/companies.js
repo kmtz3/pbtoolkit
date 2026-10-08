@@ -321,7 +321,7 @@ router.post('/import/preview', pbAuth, async (req, res) => {
 
 /**
  * POST /api/import/run
- * Runs the import (create/patch companies via v2 + v1 source) with SSE progress.
+ * Runs the import (create/patch companies via v2) with SSE progress.
  * Body: { csvText: string, mapping: Mapping, options: { multiSelectMode, bypassEmptyCells, bypassHtmlFormatter } }
  */
 router.post('/import/run', pbAuth, async (req, res) => {
@@ -705,171 +705,11 @@ router.post('/companies/delete/all', pbAuth, async (_req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// --- SOURCE MIGRATION ---
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * POST /api/companies/source-migration/v1-to-v2
- * Copies v1 sourceOrigin + sourceRecordId into v2 metadata.source for every
- * company that has v1 source data. Overwrites any existing v2 metadata.source.
- * 404 on PATCH (company not in v2) is logged as a warning and skipped.
- */
-router.post('/companies/source-migration/v1-to-v2', pbAuth, async (_req, res) => {
-  const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
-  const sse = startSSE(res);
-
-  try {
-    sse.progress('Fetching companies from v1…', 5);
-    const v1Companies = await fetchAllPages('/companies', 'fetch v1 companies for source migration');
-    const total = v1Companies.length;
-    sse.progress(`Fetched ${total} companies`, 20);
-
-    if (total === 0) {
-      sse.complete({ total: 0, migrated: 0, skippedEmpty: 0, skippedNotFound: 0, errors: 0 });
-      return;
-    }
-
-    let migrated = 0;
-    let skippedEmpty = 0;
-    let skippedNotFound = 0;
-    let errors = 0;
-
-    for (let i = 0; i < v1Companies.length; i++) {
-      if (sse.isAborted()) break;
-      const c = v1Companies[i];
-      const pct = 20 + Math.round(((i + 1) / total) * 78);
-
-      const sourceOrigin   = c.sourceOrigin   || '';
-      const sourceRecordId = c.sourceRecordId || '';
-
-      if (!sourceOrigin && !sourceRecordId) {
-        skippedEmpty++;
-        sse.progress(`Processing ${i + 1} of ${total}…`, pct);
-        continue;
-      }
-
-      try {
-        await withRetry(
-          () => pbFetch('patch', `/v2/entities/${c.id}`, {
-            data: {
-              metadata: {
-                source: {
-                  system:   sourceOrigin   || null,
-                  recordId: sourceRecordId || null,
-                },
-              },
-            },
-          }),
-          `patch company ${c.id} v2 source`
-        );
-        migrated++;
-        sse.log('success', `Migrated ${c.id}`, `${sourceOrigin} / ${sourceRecordId}`);
-      } catch (err) {
-        if (err.status === 404) {
-          skippedNotFound++;
-          sse.log('warn', `Company ${c.id} not found in v2 — skipped`, '');
-        } else {
-          errors++;
-          sse.log('error', `Failed to migrate ${c.id}: ${parseApiError(err)}`, '');
-        }
-      }
-
-      sse.progress(`Migrated ${migrated} of ${total}…`, pct);
-    }
-
-    sse.complete({ total, migrated, skippedEmpty, skippedNotFound, errors });
-  } catch (err) {
-    sse.error(parseApiError(err));
-  } finally {
-    sse.done();
-  }
-});
-
-/**
- * POST /api/companies/source-migration/v2-to-v1
- * Copies v2 metadata.source.system + recordId back into
- * v1 sourceOrigin + sourceRecordId for every company that has v2 source data.
- * Note: the v1 API may treat these fields as read-only for some companies;
- * any error is logged per-company rather than failing the whole run.
- * 404 on PATCH (company not in v1) is logged as a warning and skipped.
- */
-router.post('/companies/source-migration/v2-to-v1', pbAuth, async (_req, res) => {
-  const { pbFetch, withRetry, fetchAllPages } = res.locals.pbClient;
-  const sse = startSSE(res);
-
-  try {
-    sse.progress('Fetching companies from v2…', 5);
-    const v2Companies = await fetchAllPages('/v2/entities?type[]=company', 'fetch v2 companies for source migration');
-    const total = v2Companies.length;
-    sse.progress(`Fetched ${total} companies`, 20);
-
-    if (total === 0) {
-      sse.complete({ total: 0, migrated: 0, skippedEmpty: 0, skippedNotFound: 0, errors: 0 });
-      return;
-    }
-
-    let migrated = 0;
-    let skippedEmpty = 0;
-    let skippedNotFound = 0;
-    let errors = 0;
-
-    for (let i = 0; i < v2Companies.length; i++) {
-      if (sse.isAborted()) break;
-      const entity = v2Companies[i];
-      const pct = 20 + Math.round(((i + 1) / total) * 78);
-
-      const sourceSystem   = entity.metadata?.source?.system   || '';
-      const sourceRecordId = entity.metadata?.source?.recordId || '';
-
-      if (!sourceSystem && !sourceRecordId) {
-        skippedEmpty++;
-        sse.progress(`Processing ${i + 1} of ${total}…`, pct);
-        continue;
-      }
-
-      try {
-        await withRetry(
-          () => pbFetch('patch', `/companies/${entity.id}`, {
-            data: {
-              source: {
-                origin:    sourceSystem   || null,
-                record_id: sourceRecordId || null,
-              },
-            },
-          }),
-          `patch company ${entity.id} v1 source`
-        );
-        migrated++;
-        sse.log('success', `Migrated ${entity.id}`, `${sourceSystem} / ${sourceRecordId}`);
-      } catch (err) {
-        if (err.status === 404) {
-          skippedNotFound++;
-          sse.log('warn', `Company ${entity.id} not found in v1 — skipped`, '');
-        } else {
-          errors++;
-          sse.log('error', `Failed to migrate ${entity.id}: ${parseApiError(err)}`, '');
-        }
-      }
-
-      sse.progress(`Migrated ${migrated} of ${total}…`, pct);
-    }
-
-    sse.complete({ total, migrated, skippedEmpty, skippedNotFound, errors });
-  } catch (err) {
-    sse.error(parseApiError(err));
-  } finally {
-    sse.done();
-  }
-});
-
 /**
  * POST /api/companies/sf-migration/run
  * SSE endpoint: swaps the Salesforce source record ID on companies.
- * For each CSV row, patches:
- *   - v1: sourceOrigin = 'salesforce', sourceRecordId = newSfId
- *   - v2: metadata.source = { system: 'salesforce', recordId: newSfId }
- *         + optionally: patch[{ op:'set', path:textFieldId, value:oldSfId }]
+ * For each CSV row, patches v2 metadata.source = { system: 'salesforce', recordId: newSfId }
+ *   + optionally: patch[{ op:'set', path:textFieldId, value:oldSfId }]
  * Only source fields (and the optional text field) are written — all other
  * company data is left unchanged.
  *
@@ -936,22 +776,6 @@ router.post('/companies/sf-migration/run', pbAuth, async (req, res) => {
         continue;
       }
 
-      let v1Ok = false;
-      let v2Ok = false;
-
-      // v1 PATCH — source.origin + source.record_id
-      try {
-        await withRetry(
-          () => pbFetch('patch', `/companies/${uuid}`, {
-            data: { source: { origin: 'salesforce', record_id: newSfId } },
-          }),
-          `sf-migration v1 patch ${uuid}`
-        );
-        v1Ok = true;
-      } catch (err) {
-        sse.log('error', `Row ${i + 1}: v1 patch failed for ${uuid} — ${parseApiError(err)}`, { uuid, row: i + 1 });
-      }
-
       // v2 PATCH — metadata.source + optional text field for old ID
       try {
         const v2Data = {
@@ -964,18 +788,10 @@ router.post('/companies/sf-migration/run', pbAuth, async (req, res) => {
           () => pbFetch('patch', `/v2/entities/${uuid}`, { data: v2Data }),
           `sf-migration v2 patch ${uuid}`
         );
-        v2Ok = true;
-      } catch (err) {
-        sse.log('error', `Row ${i + 1}: v2 patch failed for ${uuid} — ${parseApiError(err)}`, { uuid, row: i + 1 });
-      }
-
-      if (v1Ok && v2Ok) {
         migrated++;
-      } else if (v1Ok || v2Ok) {
-        partial++;
-        sse.log('warn', `Row ${i + 1}: Partial update for ${uuid} (v1:${v1Ok ? 'ok' : 'fail'} v2:${v2Ok ? 'ok' : 'fail'})`, { uuid, row: i + 1 });
-      } else {
+      } catch (err) {
         errors++;
+        sse.log('error', `Row ${i + 1}: patch failed for ${uuid} — ${parseApiError(err)}`, { uuid, row: i + 1 });
       }
 
       lastCompletedRow = i + 1;

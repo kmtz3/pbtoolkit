@@ -9,7 +9,6 @@
   // ── Module state ─────────────────────────────────────────
   let _scanData          = null;  // { groups, partialMatchGroups, stats } from last scan
   let _looseMatch        = false; // whether loose match was enabled for the last scan
-  let _transferFollowers = false; // whether transferFollowers was enabled for the last scan
   let _auditLog    = null;  // audit log from last run
   let _scanCtrl    = null;  // AbortController for scan SSE
   let _runCtrl     = null;  // AbortController for run SSE
@@ -78,15 +77,13 @@
     const createdFrom = nm$('nm-date-from')?.value ? nm$('nm-date-from').value + 'T00:00:00.000Z' : '';
     const createdTo   = nm$('nm-date-to')?.value   ? nm$('nm-date-to').value   + 'T23:59:59.999Z' : '';
     const looseMatch        = nm$('nm-loose-match')?.checked || false;
-    const transferFollowers = nm$('nm-transfer-followers')?.checked || false;
     const targetMode        = document.querySelector('input[name="nm-target-mode"]:checked')?.value || 'newest';
     _looseMatch        = looseMatch;
-    _transferFollowers = transferFollowers;
 
     nmGo('scanning');
     setProgress('nm', 'Starting scan…', 0);
 
-    _scanCtrl = subscribeSSE('/api/notes-merge/scan', { createdFrom, createdTo, looseMatch, targetMode, transferFollowers }, {
+    _scanCtrl = subscribeSSE('/api/notes-merge/scan', { createdFrom, createdTo, looseMatch, targetMode }, {
       onProgress({ message, percent }) {
         setProgress('nm', message, percent ?? 0);
       },
@@ -459,22 +456,11 @@
     const mergedState = allStates.reduce((best, s) => (NM_STATE_PRIORITY[s] ?? 99) < (NM_STATE_PRIORITY[best] ?? 99) ? s : best);
     const stateChanged = mergedState !== (target.state || 'unprocessed');
 
-    // Followers diff: compare target's existing followers against what will be added
-    // Target's existing_followers are always fetched during scan.
-    // Secondary existing_followers only fetched when transferFollowers=true.
-    const existingTargetFollowers = new Set(target.existing_followers || []);
+    // Followers: secondary owners will be added as followers on the target via
+    // owner-cycling (no v2 API can read a note's existing follower list, so we can't
+    // show which are already following — only what will be newly added).
     const targetOwner = target.owner_email || '';
-    const incomingEmails = new Set(secondaries.map(s => s.owner_email).filter(e => e && e !== targetOwner));
-    if (_transferFollowers) {
-      for (const s of secondaries) {
-        for (const email of (s.existing_followers || [])) {
-          if (email && email !== targetOwner) incomingEmails.add(email);
-        }
-      }
-    }
-    // Split incoming: already on target (no-op, show muted) vs genuinely new (show purple)
-    const alreadyFollowing = [...incomingEmails].filter(e =>  existingTargetFollowers.has(e));
-    const newFollowers     = [...incomingEmails].filter(e => !existingTargetFollowers.has(e));
+    const newFollowers = [...new Set(secondaries.map(s => s.owner_email).filter(e => e && e !== targetOwner))];
 
     // Customer: upgrade from company to user if a secondary has a user rel
     let newCustomerLabel = null;
@@ -504,11 +490,9 @@
       ? `${esc(target.state || 'unprocessed')} → ${purple(esc(mergedState))}`
       : esc(mergedState);
 
-    const followersHtml = [
-      ...[...existingTargetFollowers].map(e => esc(e)),
-      ...alreadyFollowing.map(e => muted(esc(e))),
-      ...newFollowers.map(e => purple(`+ ${esc(e)}`)),
-    ].join(', ') || '<span style="color:var(--c-muted)">none</span>';
+    const followersHtml = newFollowers.length
+      ? newFollowers.map(e => purple(`+ ${esc(e)}`)).join(', ')
+      : '<span style="color:var(--c-muted)">none</span>';
 
     return `
       <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--c-ok,#22c55e);margin-bottom:6px;">TARGET — POST-MERGE PREVIEW</div>
@@ -604,17 +588,6 @@
       ownerHtml += ` <span style="font-size:10px;color:var(--c-muted);">(→ follower)</span>`;
     }
 
-    // Followers row (secondary only) — only shown when "Transfer followers" was enabled,
-    // since followers are not transferred otherwise. Rendered at the bottom to match target card order.
-    let followersRow = '';
-    if (isSecondary && _transferFollowers) {
-      const fl = note.existing_followers || [];
-      const followersVal = fl.length > 0
-        ? fl.map(e => esc(e)).join(', ') + ` <span style="font-size:10px;color:var(--c-muted);">(→ target)</span>`
-        : '<span style="color:var(--c-muted)">none</span>';
-      followersRow = nmRow('Followers', followersVal);
-    }
-
     // Content: same content in exact mode; technically the secondary note body is discarded
     // but content matched so it's identical to target — show as muted
     const contentStyle = isSecondary
@@ -638,7 +611,6 @@
       ${nmRow('Source',   sourceHtml)}
       ${nmRow('State',    esc(note.state))}
       ${nmRow('Created',  esc(note.created_at ? note.created_at.slice(0, 10) : '—'))}
-      ${followersRow}
     `;
   }
 
@@ -650,14 +622,14 @@
       'group_id', 'role', 'note_id', 'title', 'content_preview',
       'customer_email', 'customer_company', 'owner_email',
       'tags', 'product_links', 'source_origin', 'source_record_id',
-      'state', 'created_at', 'existing_followers',
+      'state', 'created_at',
     ];
 
     const rows = [];
     _scanData.groups.forEach((group) => {
-      rows.push({ ...group.target,     group_id: group.groupId, role: 'Target',    tags: (group.target.tags || []).join(', '),     product_links: (group.target.product_links || []).join(', '),     existing_followers: (group.target.existing_followers || []).join(', ')     });
+      rows.push({ ...group.target,     group_id: group.groupId, role: 'Target',    tags: (group.target.tags || []).join(', '),     product_links: (group.target.product_links || []).join(', ')     });
       group.secondaries.forEach(s => {
-        rows.push({ ...s,              group_id: group.groupId, role: 'Secondary', tags: (s.tags || []).join(', '),                product_links: (s.product_links || []).join(', '),                existing_followers: (s.existing_followers || []).join(', ')                });
+        rows.push({ ...s,              group_id: group.groupId, role: 'Secondary', tags: (s.tags || []).join(', '),                product_links: (s.product_links || []).join(', ')                });
       });
     });
 
@@ -709,7 +681,7 @@
     nmGo('running');
     setProgress('nm-run', 'Starting…', 0);
 
-    _runCtrl = subscribeSSE('/api/notes-merge/run', { groups: _lastMergedGroups, transferFollowers: _transferFollowers }, {
+    _runCtrl = subscribeSSE('/api/notes-merge/run', { groups: _lastMergedGroups }, {
       onProgress({ message, percent }) {
         setProgress('nm-run', message, percent ?? 0);
       },

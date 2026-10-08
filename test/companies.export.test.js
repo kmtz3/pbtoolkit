@@ -5,7 +5,7 @@
  *
  * Asserts POST /api/export:
  * - Uses POST /v2/entities/search for company list (with inline custom fields)
- * - Fetches GET /companies/{id} (v1) per company for source enrichment
+ * - Makes NO v1 calls (v1 retired) — source columns come from v2 metadata.source
  * - SSE complete event has { csv, filename, count }
  * - Old GET /companies/{id}/custom-fields/{fieldId}/value calls are NOT made
  */
@@ -66,7 +66,7 @@ const mockV2EntitiesResponse = {
         [FIELD_UUID_MRR]:  50000,
         [FIELD_UUID_TIER]: 'enterprise',
       },
-      metadata: { source: { system: 'salesforce', recordId: 'sf-001', url: null } },
+      metadata: { source: { system: 'salesforce', recordId: 'sf-001', url: 'https://sf.example.com/sf-001' } },
     },
     {
       id: COMPANY_UUID_2,
@@ -78,15 +78,6 @@ const mockV2EntitiesResponse = {
       },
       metadata: { source: { system: null, recordId: null, url: null } },
     },
-  ],
-  links: { next: null },
-};
-
-// GET /companies response — v1 paginated list for source enrichment
-const mockV1CompaniesList = {
-  data: [
-    { id: COMPANY_UUID_1, domain: 'acme.com', sourceOrigin: 'salesforce', sourceRecordId: 'sf-001' },
-    { id: COMPANY_UUID_2, domain: 'beta.io',  sourceOrigin: null,         sourceRecordId: null     },
   ],
   links: { next: null },
 };
@@ -115,13 +106,6 @@ before(async () => {
       if (req.method === 'GET' && req.url.startsWith('/v2/entities')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(mockV2EntitiesResponse));
-        return;
-      }
-
-      // GET /companies — v1 paginated list for source enrichment
-      if (req.method === 'GET' && req.url.startsWith('/companies')) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(mockV1CompaniesList));
         return;
       }
 
@@ -180,7 +164,7 @@ test('POST /api/export: uses v2 search, does NOT call old custom-field value end
   );
 });
 
-test('POST /api/export: fetches v1 source per company for source enrichment', async () => {
+test('POST /api/export: makes no v1 API calls (v1 retired)', async () => {
   clearCalls();
 
   await request(app)
@@ -189,11 +173,8 @@ test('POST /api/export: fetches v1 source per company for source enrichment', as
     .set('Content-Type', 'application/json')
     .send({});
 
-  // v1 GET /companies list called for source enrichment (paginated, not per-company)
-  assert.ok(
-    calls.get.some((p) => p.startsWith('/companies')),
-    'Should have called GET /companies for v1 source enrichment'
-  );
+  const nonV2 = [...calls.get, ...calls.post].filter((p) => !p.startsWith('/v2/'));
+  assert.deepEqual(nonV2, [], `Expected only /v2/ calls, got non-v2: ${nonV2.join(', ')}`);
 });
 
 test('POST /api/export: CSV includes standard fields, custom fields, and source columns', async () => {
@@ -221,10 +202,10 @@ test('POST /api/export: CSV includes standard fields, custom fields, and source 
   assert.ok(csv.includes('Tier'), 'CSV should have Tier column');
   // Data values
   assert.ok(csv.includes('Acme Corp'), 'CSV should include company name');
-  assert.ok(csv.includes('salesforce'), 'CSV should include source origin from v1 enrichment');
+  assert.ok(csv.includes('salesforce'), 'CSV should include source origin from v2 metadata.source');
 });
 
-test('POST /api/export: v2 source columns populated from metadata.source (system/recordId)', async () => {
+test('POST /api/export: source columns populated from v2 metadata.source (system/recordId/url)', async () => {
   clearCalls();
 
   const res = await request(app)
@@ -236,15 +217,23 @@ test('POST /api/export: v2 source columns populated from metadata.source (system
   const complete = parseCompleteEvent(res.text);
   assert.ok(complete?.csv, 'Should have CSV content');
 
-  const csv = complete.csv;
-  // Column headers should use snake_case naming
-  assert.ok(csv.includes('source_system'), 'CSV should have source_system column');
-  assert.ok(csv.includes('source_record_id_v2'), 'CSV should have source_record_id_v2 column');
+  const lines = complete.csv.split('\n').map((l) => l.replace(/\r$/, ''));
+  const header = lines[0].split(',');
+  const iOrigin = header.indexOf('source_origin');
+  const iRecord = header.indexOf('source_record_id');
+  const iUrl    = header.indexOf('source_url');
+  assert.ok(iOrigin >= 0 && iRecord >= 0 && iUrl >= 0, `Missing source columns in header: ${lines[0]}`);
+  assert.ok(!header.includes('source_system'), 'Legacy source_system column should not exist');
+  assert.ok(!header.includes('source_record_id_v2'), 'Legacy source_record_id_v2 column should not exist');
 
-  // Acme Corp row should have v2 source data from metadata.source.system/recordId
-  const lines = csv.split('\n');
-  const acmeLine = lines.find((l) => l.includes('Acme Corp'));
-  assert.ok(acmeLine, 'Should have Acme Corp row');
-  assert.ok(acmeLine.includes('salesforce'), 'Acme row should include salesforce from v2 metadata.source.system');
-  assert.ok(acmeLine.includes('sf-001'), 'Acme row should include sf-001 from v2 metadata.source.recordId');
+  const acme = lines.find((l) => l.includes('Acme Corp')).split(',');
+  assert.equal(acme[iOrigin], 'salesforce');
+  assert.equal(acme[iRecord], 'sf-001');
+  assert.equal(acme[iUrl], 'https://sf.example.com/sf-001');
+
+  // Null metadata.source values export as empty strings
+  const beta = lines.find((l) => l.includes('Beta Inc')).split(',');
+  assert.equal(beta[iOrigin], '');
+  assert.equal(beta[iRecord], '');
+  assert.equal(beta[iUrl], '');
 });

@@ -31,6 +31,10 @@ function startSSE(res) {
     if (aborted) return;
     try { res.write(':\n\n'); } catch { aborted = true; clearInterval(heartbeat); }
   }, 5000);
+  // Never let the heartbeat alone keep the process alive (the HTTP server does that
+  // in production); otherwise a stream that is never closed — e.g. a mocked res in
+  // tests — leaves an open handle and `node --test` never exits.
+  if (typeof heartbeat.unref === 'function') heartbeat.unref();
 
   const send = (event, data) => {
     if (aborted) return;
@@ -60,7 +64,7 @@ function startSSE(res) {
     checkpoint: (row) => send('checkpoint', { row }),
 
     /** End the SSE stream */
-    done: () => res.end(),
+    done: () => { clearInterval(heartbeat); res.end(); },
 
     /** Returns true if the client disconnected or the socket was destroyed */
     isAborted: () => aborted || res.socket?.destroyed === true,

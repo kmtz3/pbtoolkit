@@ -312,7 +312,7 @@ const DEFAULT_VIEWS = {
 };
 
 const TOOL_VIEWS = {
-  companies:         ['export', 'import', 'companies-delete-csv', 'companies-delete-all', 'companies-source-migration', 'users-export', 'users-import', 'users-delete-csv', 'users-delete-all'],
+  companies:         ['export', 'import', 'companies-delete-csv', 'companies-delete-all', 'users-export', 'users-import', 'users-delete-csv', 'users-delete-all'],
   notes:             ['notes-export', 'notes-import', 'notes-delete-csv', 'notes-delete-all', 'notes-migrate'],
   entities:          ['entities-templates', 'entities-export', 'entities-import', 'entities-delete'],
   'member-activity': ['member-activity-export'],
@@ -393,9 +393,14 @@ function buildPath(tool, view) {
   return '/' + tool + '/' + viewToSegment(tool, view);
 }
 
+// Legacy tool slugs → current slug (old bookmarks / shared links keep working;
+// navigateTo() then rewrites the URL to the canonical path).
+const TOOL_ALIASES = { 'tag-values': 'field-values' };
+
 function parsePath(pathname) {
   const segments = pathname.replace(/\/+$/, '').split('/').filter(Boolean);
-  const toolSlug = segments[0] || null;
+  const rawSlug = segments[0] || null;
+  const toolSlug = (rawSlug && TOOL_ALIASES[rawSlug]) || rawSlug;
   const viewSegment = segments[1] || null;
   if (!toolSlug || !VALID_TOOLS.has(toolSlug)) return { tool: null, view: null };
   const view = viewSegment
@@ -727,7 +732,7 @@ function showView(view, { updateUrl = false } = {}) {
 
   [
     'export', 'import',
-    'companies-delete-csv', 'companies-delete-all', 'companies-source-migration', 'companies-sf-migration',
+    'companies-delete-csv', 'companies-delete-all', 'companies-sf-migration',
     'notes-export', 'notes-import', 'notes-delete-csv', 'notes-delete-all', 'notes-migrate',
     'entities-templates', 'entities-export', 'entities-import', 'entities-delete',
     'member-activity-export',

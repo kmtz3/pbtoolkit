@@ -3,7 +3,7 @@
 This file exists to orient Claude at the start of every session.
 Read it before making any file writes or path assumptions.
 
-Last audited: 2026-04-10. Updated for Merge Duplicate Companies module (companies-duplicate-cleanup) + Merge from CSV submodule.
+Last audited: 2026-08-16. Updated for Productboard v1 API retirement — all v1 usage removed from the app.
 
 ---
 
@@ -90,11 +90,13 @@ PBToolkit/                         ← project root (git repo)
 │   ├── csvParser.test.js
 │   ├── domainCache.test.js
 │   ├── feedback.test.js
+│   ├── fieldValueDelete.test.js
 │   ├── fieldFormat.test.js
 │   ├── memberActivity.metadata.test.js
 │   ├── membersTeamsMgmt.test.js
 │   ├── notes-export.test.js
 │   ├── notes-import.test.js
+│   ├── notesMerge.test.js
 │   ├── pbAuth.test.js
 │   ├── sse.test.js
 │   ├── invertSelection.test.js
@@ -119,7 +121,9 @@ PBToolkit/                         ← project root (git repo)
 │   │   ├── errorUtils.js          ← shared helpers: parseApiError()
 │   │   ├── fieldFormat.js         ← shared custom-field formatting for v2 entity imports
 │   │   ├── fieldValues.js         ← field value helpers: fetchFieldValues(), createFieldValue(), renameFieldValue()
-│   │   └── domainCache.js         ← shared company domain cache (domain→id and id→domain lookups)
+│   │   ├── domainCache.js         ← shared company domain cache (domain→id and id→domain lookups)
+│   │   ├── noteWrite.js           ← shared v2 note-write helpers (notes.js + feedback.js): createNoteV2() with propagation retry, resolveTags(), resolveOrCreateUser/Company(), buildNoteSource()
+│   │   └── userCache.js           ← shared user cache (email→id and id→email lookups) — mirrors domainCache.js
 │   ├── middleware/
 │   │   └── pbAuth.js              ← Express middleware: validates x-pb-token, attaches pbClient to res.locals
 │   ├── routes/
@@ -133,7 +137,7 @@ PBToolkit/                         ← project root (git repo)
 │   │   ├── teamsCrud.js           ← GET /api/teams-crud/export + POST /api/teams-crud/preview + POST /api/teams-crud/import (SSE) + POST /api/teams-crud/delete/by-csv (SSE) + POST /api/teams-crud/delete/all (SSE)
 │   │   ├── membersTeamsMgmt.js    ← GET /api/members-teams-mgmt/load + PATCH/POST/DELETE team & member ops (live editor)
 │   │   ├── users.js               ← GET/POST /api/users/* (export, import/preview, import/run, delete)
-│   │   ├── feedback.js            ← POST /api/feedback (bug report → PB note or Brevo email fallback)
+│   │   ├── feedback.js            ← POST /api/feedback (bug report → PB note or Brevo email fallback; unauthenticated — strict input validation, module allowlist, 5/hour/IP rate limit, 100kb body cap)
 │   │   ├── notesMerge.js          ← POST /api/notes-merge/scan + /run + /scan-empty + /delete-empty (SSE)
 │   │   ├── companiesDuplicateCleanup.js ← GET /api/companies-duplicate-cleanup/origins + POST /scan + /preview-csv + /run (SSE)
 │   │   └── fieldValueDelete.js    ← GET /api/field-values/fields + POST /api/field-values/values + POST /api/field-values/delete/* (SSE)
@@ -153,9 +157,9 @@ PBToolkit/                         ← project root (git repo)
 └── public/                        ← served as static files
     ├── index.html                 ← shell only — module views loaded as partials (~453 lines)
     ├── app.js                     ← shared utilities: auth, DOM helpers, SSE, makeLogAppender, renderImportComplete, loadPartial() (~1133 lines)
-    ├── companies-app.js           ← companies module frontend JS; exposes initCompaniesModule() (~1344 lines)
+    ├── companies-app.js           ← companies module frontend JS; exposes initCompaniesModule() (~1240 lines)
     ├── notes-app.js               ← notes module frontend JS; exposes initNotesModule() (~804 lines)
-    ├── notes-merge-app.js         ← merge duplicate notes module frontend JS; exposes initNotesMergeModule() (~1295 lines)
+    ├── notes-merge-app.js         ← merge duplicate notes module frontend JS; exposes initNotesMergeModule() (~1265 lines)
     ├── entities-app.js            ← entities module frontend JS; exposes initEntitiesModule() (~1913 lines)
     ├── member-activity-app.js     ← member activity module frontend JS; exposes initMemberActivityModule() (~322 lines)
     ├── team-membership-app.js     ← team membership module frontend JS; exposes initTeamMembershipModule() (~639 lines)
@@ -163,7 +167,7 @@ PBToolkit/                         ← project root (git repo)
     ├── members-teams-mgmt-app.js  ← live team editor frontend JS; exposes initMembersTeamsMgmtModule() (~696 lines)
     ├── users-app.js               ← users module frontend JS; exposes initUsersModule() (~810 lines)
     ├── companies-duplicate-cleanup-app.js ← merge duplicate companies frontend JS; exposes initCompaniesDuplicateCleanupModule() — contains two submodules: dc (merge by scan) and dcm (merge from CSV)
-    ├── tag-values-app.js          ← manage values module frontend JS; exposes initTagValuesModule() (~961 lines)
+    ├── field-values-app.js        ← manage values module frontend JS; exposes initFieldValuesModule()
     ├── views/                     ← HTML partials, one per submodule group (lazy-loaded into #view-area on first navigation)
     │   ├── companies.html
     │   ├── notes.html
@@ -175,7 +179,7 @@ PBToolkit/                         ← project root (git repo)
     │   ├── members-teams-mgmt.html
     │   ├── users.html
     │   ├── companies-duplicate-cleanup.html
-    │   └── tag-values.html
+    │   └── field-values.html
     ├── csv-utils.js               ← frontend CSV utilities (papaparse wrappers for browser)
     ├── privacy.html               ← GDPR privacy policy page (served at /privacy)
     └── style.css                  ← CSS custom properties design system
@@ -208,7 +212,7 @@ A single module may combine multiple backend route files and frontend JS files u
 | Notes | `/api/notes` | `routes/notes.js` |
 | Merge Duplicate Notes | `/api/notes-merge` | `routes/notesMerge.js` + `public/notes-merge-app.js` |
 | Merge Duplicate Companies | `/api/companies-duplicate-cleanup` | `routes/companiesDuplicateCleanup.js` + `public/companies-duplicate-cleanup-app.js` — two submodules: **Merge by scan** (`dc` prefix) and **Merge from CSV** (`dcm` prefix). CSV submodule uses `POST /preview-csv` (SSE) to fetch counts, then reuses `POST /run` for the merge. |
-| Manage Values | `/api/field-values` | `routes/fieldValueDelete.js` + `public/tag-values-app.js` — five submodules: **Live editor** (create/rename/delete values interactively), **Delete by pick** (checkbox selection), **Delete all**, **Delete from CSV**, **Delete by diff** (keep only CSV values). Supported field types: Tags, MultiSelect, SingleSelect. |
+| Manage Values | `/api/field-values` | `routes/fieldValueDelete.js` + `public/field-values-app.js` — five submodules: **Live editor** (create/rename/delete values interactively), **Delete by pick** (checkbox selection), **Delete all**, **Delete from CSV**, **Delete by diff** (keep only CSV values). Supported field types: Tags, MultiSelect, SingleSelect. |
 | Entities | `/api/entities` | `routes/entities.js` + `services/entities/*` |
 | Member Activity | `/api/member-activity` | `routes/memberActivity.js` + `public/member-activity-app.js` |
 | Teams | `/api/teams-crud`, `/api/team-membership`, `/api/members-teams-mgmt` | `routes/teamsCrud.js` + `routes/teamMembership.js` + `routes/membersTeamsMgmt.js` + `services/teamCache.js` |
@@ -237,9 +241,7 @@ Phases tracked in `implementation_notes/plan-entity-importer.md`:
 
 - **Token**: all API routes use the `pbAuth` middleware (`src/middleware/pbAuth.js`) which validates the token and attaches `res.locals.pbClient`. Token resolution order: session token (`req.session?.pbToken`, OAuth path) → `x-pb-token` header (manual token path). EU flag resolution: `req.session?.useEu` → `x-pb-eu: 'true'` header. Migration complete — no manual token extraction remains.
 - **PB API body wrapping**: POST (create) → no wrapper; PATCH (update) → `{ data: { ... } }`; PUT (custom field) → `{ data: { type, value } }`. Never set a field to `null` to clear — use DELETE.
-- **Pagination**: Two strategies used depending on API version:
-  - Offset-based (v1/companies): `pageLimit=100&pageOffset=N`; check `response.data.length < limit` to detect last page.
-  - Cursor-based (v2/entities/notes/analytics): check `response.links?.next`; use `extractCursor()` helper in the route file.
+- **Pagination**: v1 is fully retired for this workspace (v1 paths return 410 Gone or 404 Not Found — confirmed 2026-08-14 / 2026-10-08) — all pagination is now cursor-based (v2/entities/notes/analytics): check `response.links?.next`; use `extractCursor()` helper in the route file. `paginateOffset()` (v1 offset pagination) has been removed from `pbClient.js`.
 - **SSE**: always call `sse.done()` in a `finally` block. Listen on `res.on('close')` for abort — NOT `req.on('close')` (req close fires as soon as the request body is consumed).
 - **Frontend state**: `token` + `useEu` live in `sessionStorage`; `buildHeaders()` sets the right headers.
 - **localStorage**: mapping state persists for companies (`companies-mapping` key), notes (`notes-mapping` key), users (`users-mapping` key), teams-crud (`teams-crud-mapping` key), and entities (`ent-mapping-{entityType}` key).
@@ -278,9 +280,16 @@ See `plan-codebase-improvement.md` for the full prioritized improvement plan (ge
 - ~~**notes-app.js missing `pb:connected` handler**~~ — ✅ **Resolved**: added handler calling `resetNotesExport()`.
 - ~~**relationWriter.js section 2 inconsistency**~~ — ✅ **Resolved**: switched to `_postLinkRaw` pattern.
 - ~~**Companies domain cache UUID key quirk**~~ — ✅ **Resolved** (2026-04-03): PB fixed the API — `domain` is now a standard key in list responses. UUID discovery loop and individual GET calls removed from `domainCache.js`.
-
-### V1 and v2 company lists are separate
-- Companies created via `POST /v2/entities` (PBToolkit import) do NOT appear in v1 `GET /companies`. Always use `GET /v2/entities?type[]=company` (cursor-paginated) for domain caches — covers both legacy v1-created and v2-created companies.
+- ~~**V1 API dependencies**~~ — ✅ **Resolved** (2026-08-16): Productboard API v1 was fully retired for this workspace (v1 paths return 410 Gone or 404 Not Found, confirmed live). All v1 usage has been removed:
+  - `companiesDuplicateCleanup.js` — dropped the v1 `/companies` fallback in `/origins`, `/scan`, `/preview-csv` (this was the active bug breaking "connect token").
+  - `companies.js` — removed the dead "Source Migration" submodule (v1↔v2 sync, both directions were 100% broken) and its UI; `sf-migration/run` no longer attempts a dead v1 patch.
+  - `notes.js` — note create/update rewritten to a single atomic `POST`/`PATCH /v2/notes` call (v1 create/update was silently broken — imports could not create or update notes at all). User/company customer relationships and note tags are resolved via lookup-or-create against v2 (see `lib/noteWrite.js`, `lib/userCache.js`, `lib/domainCache.js`, `lib/fieldValues.js`). Display URL maps to `metadata.source.url` (create-only — v2 PATCH has no `metadata`).
+  - `notesMerge.js` — same user/company/source fixes; follower transfer reimplemented via **owner-cycling** (PATCH the target note's `owner` field through each new follower's email, then restore/clear it) since v2 has no follower-write API. There is now no v2 way to read a note's *existing* follower list, so only secondary-note owners (not their other followers) can be transferred — the `transferFollowers` checkbox/expanded behavior was removed from the UI.
+  - `feedback.js` — tags are created via the shared field-values API (note tags share the same "tags" field-value resource as entity custom fields) and included atomically on note create. The reporter's email is included in the note body only — v2 has no user-by-email filter, and anonymous input must not create workspace users (changed 2026-10-08 after security audit).
+  - `pbClient.js` — removed `paginateOffset()` and the `X-Version: 1` header branch (dead code — nothing calls a non-`/v2/` path anymore).
+  - A freshly-created v2 entity can briefly 404 when referenced in a relationship on a different resource (e.g. a just-created user referenced in a note's customer relationship) — this is a genuine v2 propagation delay, not a v1 issue. All the new create/update paths retry with backoff (~1.5s increments, a few attempts) before giving up on that one relationship, rather than failing the whole row.
+- ~~**companiesDuplicateCleanup.js: Step 3.5 entity-relink always failed on company↔feature links**~~ — ✅ **Resolved** (2026-09-05): removed the old "Step 3.5" that tried to directly `POST` the duplicate's non-note/user relationships (link to features, components, products, etc.) onto the target company. Live-tested and confirmed the API rejects this write in **both directions** — `Relationship between organizations and features in direction Nondirectional is not allowed` — even when that exact relationship already exists on the target, which caused every merge involving a company↔feature `link` to fail and skip deletion. Root cause: this relationship is a derived/computed rollup from the notes (and users) attributed to the company — it is never directly writable. Confirmed live: `PUT`-ing a note's `customer` relationship (whether reattributing a user-type note through the note-reattribution step, or a single `PUT` for a direct company-customer note) forces the derived link to recompute on the new company. Since Steps 1–3 already relink every note and user off the duplicate and onto the target, the target's company-level links now re-derive on their own with no extra step. `entitiesRelinked`/`entityRelinks` tracking and the "N entities relinked" summary line were removed along with it (frontend + backend). `fetchCompanyEntityRelationships()` is still used for the read-only preview `entitiesCount` column — only the write attempt was removed.
+- ~~**companiesDuplicateCleanup.js: IS-8968 note-reattribution workaround (3-step clear/reparent/reattribute-with-retry)**~~ — ✅ **Removed** (2026-09-11), with a timing caveat. The plain "PUT user parent → target company" + "PUT note customer → same user" pair is now enough: the note's derived company always ends up on the target with no clear-link step or retry loop. **But it is eventually consistent, not instant.** On 2026-09-11 it resolved within seconds; in the 2026-10-08 live test, user-attributed notes kept showing under the source company in `POST /v2/notes/search` for **~3–7 minutes** (with the source deleted or kept), then all flipped at once — consistent with a periodic re-index on PB's side. Re-PUTting the user, or the old clear→company→user workaround, did not speed it up (the workaround bounced straight back), so the workaround stays removed. Notes whose customer is the company directly move immediately. No data loss was observed. Expect merge results / preview counts checked right after a run to show stale attribution for a few minutes. (See git history before `bae8ea7` for the removed workaround if IS-8968 ever regresses to *never* resolving.)
 
 ### Objective search endpoint quirk
 - The `/v2/entities/search` POST endpoint silently returns empty results for the `objective` type despite being documented; the exporter uses `GET /v2/entities?type[]=objective` instead.
@@ -293,8 +302,8 @@ All critical duplications (token extraction, parseApiError, cell(), UUID_RE, abo
 ## Do Not Touch (fragile areas)
 
 - **`src/lib/pbClient.js` rate limiting logic** — the token-bucket / adaptive backoff is finely tuned. Don't adjust the `minDelay`, `remaining` thresholds, or `withRetry` logic without understanding the Productboard API rate limit headers.
-- **`src/routes/notes.js` v1/v2 source-field merge** — notes export merges `source` data from both PB v1 and v2 APIs. The fallback logic (`if (!sourceOrigin && sourceMap)`) is intentional and handles notes that only have source data in v1. Removing it will silently drop source data.
 - **`src/services/entities/importCoordinator.js` two-pass relationship write** — relationships must be written in a second pass after all entities are created/patched, because the target entity must exist before the relation can be written. Don't collapse to a single pass.
+- **`notes.js`/`notesMerge.js` (+ shared `lib/noteWrite.js`) propagation-delay retries** — the retry-with-backoff wrapped around note-create-with-customer-relationship (and `notesMerge.js`'s owner-cycling, including the ~3s spacing between owner PATCHes) exists because a just-created v2 entity can briefly 404 when referenced elsewhere. Don't remove these retries as "unnecessary" — they were added after live-reproducing the failure.
 - **SSE `sse.done()` in `finally`** — this must stay in `finally` or the browser SSE connection will hang on errors. Every SSE route has this; don't remove it.
 
 ---

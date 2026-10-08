@@ -67,6 +67,9 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
     }
   },
 }));
+// Unauthenticated feedback endpoint gets a small body cap. Must be mounted BEFORE the
+// global parser — body-parser skips requests that were already parsed.
+app.use('/api/feedback', express.json({ limit: '100kb' }));
 app.use(express.json({ limit: '25mb' }));
 
 app.use(session({
@@ -167,10 +170,22 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
-// Global error handler
+// Global error handler — preserves client-error statuses from middleware
+// (e.g. body-parser's 413 payload-too-large / 400 malformed JSON).
 app.use((err, _req, res, _next) => {
-  console.error('Unhandled error:', err.message);
+  if (res.headersSent) return _next(err);
+  const status = Number(err.status || err.statusCode) || 500;
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({ error: err.expose && err.message ? err.message : 'Bad request.' });
+  }
+  console.error('Unhandled error:', err.stack || err.message);
   res.status(500).json({ error: 'Internal server error.' });
+});
+
+// Backstop: a stray async throw outside a try/catch must be logged rather than crash
+// the process. (Express 4 does not catch rejected promises from async handlers.)
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason);
 });
 
 if (require.main === module) {

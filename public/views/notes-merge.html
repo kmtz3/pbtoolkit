@@ -28,7 +28,7 @@
                   <li><strong>Tags</strong> — all unique tags from secondary notes are added to the target. Already-present tags are skipped.</li>
                   <li><strong>Product links</strong> — all product hierarchy links from secondary notes are added to the target. Already-linked entities are skipped.</li>
                   <li><strong>State</strong> — the highest-priority state across the group is applied to the target. Priority order: Processed &gt; Unprocessed &gt; Archived.</li>
-                  <li><strong>Owners → followers</strong> — each secondary note's owner is added as a follower on the target note. The target's owner is not changed. When <strong>Transfer followers</strong> is enabled at scan time, existing followers of secondary notes are also added to the target.</li>
+                  <li><strong>Owners → followers</strong> — each secondary note's owner is added as a follower on the target note (the target's owner is restored afterward). Productboard has no API to transfer a secondary note's other followers, so only owners can be carried over.</li>
                   <li><strong>Customer relationship</strong> — if the target has only a company and a secondary has a specific user from that company, the user relationship is added to the target.</li>
                   <li><strong>Source data</strong> — source origin and record ID from secondary notes are logged in the audit but cannot be transferred. They are shown in the preview table for reference.</li>
                   <li><strong>Deletion</strong> — secondary notes are deleted only after all metadata consolidation steps succeed for that group.</li>
@@ -105,17 +105,6 @@
                     </div>
                   </div>
 
-                  <!-- Transfer followers -->
-                  <div class="field">
-                    <label class="checkbox-label">
-                      <input type="checkbox" id="nm-transfer-followers">
-                      Transfer followers
-                      <span class="info-icon" data-tip="Fetches existing followers from each secondary note and adds them to the target during merge. Adds one extra API call per secondary note during scan.">i</span>
-                    </label>
-                    <div class="label-hint" style="margin-top:4px;margin-left:20px;">
-                      When enabled, existing followers of secondary notes are added to the target in addition to their owners. Followers are shown in the compare modal and included in the preview CSV.
-                    </div>
-                  </div>
 
                   <button class="btn btn-primary" id="nm-scan-btn">Scan for duplicates</button>
 
