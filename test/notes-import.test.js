@@ -333,3 +333,31 @@ test('tag create failure is reported as a per-row warning, note still created', 
   const warns = parseLogEvents(res.text).filter((l) => l.level === 'warn');
   assert.ok(warns.some((l) => /Could not create tag "newtag"/.test(l.message)), JSON.stringify(warns));
 });
+
+test('auto-generated source_record_id is unique per run (re-import does not collide); public_api placeholder is dropped', async () => {
+  clearOverrides();
+  setOverride('POST', '/v2/notes', 200, { data: { id: NEW_NOTE_ID } });
+
+  const csvText = [
+    'Title,Source Origin,Source Record ID',
+    'A,zendesk,',
+    'B,zendesk,',
+    'C,public_api,',
+  ].join('\n');
+  const mapping = { titleColumn: 'Title', sourceOriginColumn: 'Source Origin', sourceRecordIdColumn: 'Source Record ID' };
+
+  clearCalls();
+  await runImport(csvText, mapping);
+  const run1 = notePosts().map((p) => p.body.data.metadata?.source);
+  await new Promise((r) => setTimeout(r, 5)); // ensure a different run token
+  clearCalls();
+  await runImport(csvText, mapping);
+  const run2 = notePosts().map((p) => p.body.data.metadata?.source);
+
+  assert.equal(run1.length, 3);
+  assert.equal(run1[0].system, 'zendesk');
+  assert.match(run1[0].recordId, /^zendesk-[a-z0-9]+-1$/);
+  assert.match(run1[1].recordId, /^zendesk-[a-z0-9]+-2$/);
+  assert.notEqual(run1[0].recordId, run2[0].recordId, 'second run must not reuse the first run\'s generated IDs');
+  assert.equal(run1[2], undefined, 'public_api placeholder with no record ID should not be sent as a source');
+});

@@ -664,10 +664,41 @@ function resolveTarget(note) {
 
 
 // ---------------------------------------------------------------------------
+// Validate /run input before any API call (IDs go straight into URL paths,
+// including DELETE /v2/entities/{id}).
+// ---------------------------------------------------------------------------
+
+const isUuid = (v) => typeof v === 'string' && UUID_RE.test(v);
+
+/** Returns an error string for the first invalid domainRecords entry, or null. */
+function validateDomainRecords(domainRecords) {
+  if (!Array.isArray(domainRecords)) return 'domainRecords must be an array';
+  for (let i = 0; i < domainRecords.length; i++) {
+    const dr = domainRecords[i];
+    const where = `domainRecords[${i}]`;
+    if (!dr || typeof dr !== 'object') return `${where} must be an object`;
+    if (!isUuid(dr.primaryId)) return `${where}.primaryId must be a valid UUID`;
+    const dupIds = dr.duplicates != null
+      ? (Array.isArray(dr.duplicates) ? dr.duplicates.map(d => d?.id) : null)
+      : (dr.duplicateIds ?? []);
+    if (!Array.isArray(dupIds)) return `${where}.duplicates must be an array`;
+    for (let j = 0; j < dupIds.length; j++) {
+      if (!isUuid(dupIds[j])) return `${where} duplicate[${j}] id must be a valid UUID`;
+      if (dupIds[j].toLowerCase() === dr.primaryId.toLowerCase()) return `${where} duplicate[${j}] cannot be the primary company`;
+    }
+  }
+  return null;
+}
+
+
+// ---------------------------------------------------------------------------
 // POST /run  (SSE)
 // ---------------------------------------------------------------------------
 
 router.post('/run', pbAuth, async (req, res) => {
+  const invalid = validateDomainRecords((req.body || {}).domainRecords ?? []);
+  if (invalid) return res.status(400).json({ error: invalid });
+
   const token = res.locals.pbToken;
   _stopRequests.delete(token);
   const sse = startSSE(res);
@@ -750,11 +781,11 @@ router.post('/run', pbAuth, async (req, res) => {
             try {
               if (targetType === 'user') {
                 // PB API bug IS-8968 (notes/search index not re-deriving company from a
-                // user-parent change) is confirmed fixed — live-tested 2026-09-11 across
-                // 6 notes / 5 users with only the plain reparent-user call below, no note-level
-                // touch or retry needed, resolved within seconds every time. Previously this
-                // required a 3-step clear/reparent/reattribute-with-retry workaround; see git
-                // history if IS-8968 regresses and the workaround needs to come back.
+                // user-parent change) is fixed, but re-derivation is EVENTUALLY consistent:
+                // seconds on 2026-09-11, ~3–7 minutes on 2026-10-08 (looks like a periodic
+                // PB re-index). The end state is always correct; re-PUTting or the old 3-step
+                // clear/reparent/reattribute workaround did not speed it up. See git history
+                // before bae8ea7 if IS-8968 regresses to never resolving.
 
                 // Relink user to target company — once per user, even if they're the
                 // customer on multiple notes attributed to this duplicate.
@@ -937,3 +968,4 @@ router.post('/run', pbAuth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.validateDomainRecords = validateDomainRecords;

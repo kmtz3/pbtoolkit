@@ -17,6 +17,7 @@ const request = require('supertest');
 const NOTE_UUID_1 = 'nnnnnnnn-0000-0000-0000-000000000001';
 const NOTE_UUID_2 = 'nnnnnnnn-0000-0000-0000-000000000002';
 const NOTE_UUID_3 = 'nnnnnnnn-0000-0000-0000-000000000003';
+const NOTE_UUID_4 = '44444444-4444-4444-4444-444444444444';
 
 function parseCompleteEvent(text) {
   for (const chunk of text.split('\n\n')) {
@@ -79,6 +80,21 @@ const mockV2Notes = [
       processed: false,
     },
     metadata: { source: {} },
+    relationships: { data: [], links: { next: null } },
+  },
+  {
+    // PB stamps API-created notes with this placeholder source (no recordId)
+    id: NOTE_UUID_4,
+    type: 'textNote',
+    createdAt: '2026-03-04T00:00:00Z',
+    updatedAt: '2026-03-04T00:00:00Z',
+    fields: {
+      name: 'Note created via public API',
+      content: 'Content 4',
+      archived: false,
+      processed: false,
+    },
+    metadata: { source: { system: 'public_api' } },
     relationships: { data: [], links: { next: null } },
   },
 ];
@@ -217,4 +233,22 @@ test('notes export: display_url is read from metadata.source.url', async () => {
 
   const note3Line = lines.find((l) => l.includes('Note with no source'));
   assert.equal(note3Line.split(',')[iUrl], '', 'Note 3 (no metadata.source) should have empty display_url');
+});
+
+test('notes export: PB placeholder source (public_api, no recordId) exports empty source columns', async () => {
+  const res = await request(app)
+    .post('/api/notes/export')
+    .set('x-pb-token', 'test-token')
+    .set('Content-Type', 'application/json')
+    .send({});
+
+  const complete = parseCompleteEvent(res.text);
+  const lines = complete.csv.split('\n');
+  const header = lines[0].split(',');
+  const iOrigin = header.indexOf('source_origin');
+  const iRecord = header.indexOf('source_record_id');
+  const line = lines.find((l) => l.includes('Note created via public API'));
+  assert.ok(line, 'Should have the public_api note row');
+  assert.equal(line.split(',')[iOrigin], '', 'public_api placeholder should not be exported as source_origin');
+  assert.equal(line.split(',')[iRecord], '');
 });

@@ -1012,3 +1012,32 @@ test('run: keepDuplicates=true does not archive when relinks failed', async () =
   const patchCalls = mockCalls.filter(c => c.method === 'PATCH' && c.path === `/v2/entities/${HB_ID}`);
   assert.equal(patchCalls.length, 0, 'No archive PATCH when relink failed');
 });
+
+// ─── /run input validation ──────────────────────────────────────────────────
+
+test('POST /run: non-UUID primaryId or duplicate id → 400 before any API call', async () => {
+  const { validateDomainRecords } = require('../src/routes/companiesDuplicateCleanup');
+  const good = '11111111-1111-1111-1111-111111111111';
+  const dup  = '22222222-2222-2222-2222-222222222222';
+  assert.equal(validateDomainRecords([{ primaryId: good, duplicates: [{ id: dup }] }]), null);
+  assert.equal(validateDomainRecords([{ primaryId: good, duplicateIds: [dup] }]), null);
+  assert.match(validateDomainRecords([{ primaryId: 'nope', duplicates: [{ id: dup }] }]), /primaryId/);
+  assert.match(validateDomainRecords([{ primaryId: good, duplicates: [{ id: '../x' }] }]), /UUID/);
+  assert.match(validateDomainRecords([{ primaryId: good, duplicateIds: [good] }]), /cannot be the primary/);
+  assert.match(validateDomainRecords([{ primaryId: good, duplicateIds: [good.toUpperCase()] }]), /cannot be the primary/);
+  assert.match(validateDomainRecords('x'), /array/);
+
+  for (const body of [
+    { domainRecords: [{ primaryId: 'not-a-uuid', duplicates: [{ id: dup }] }] },
+    { domainRecords: [{ primaryId: good, duplicates: [{ id: 'not-a-uuid' }] }] },
+    { domainRecords: 'x' },
+  ]) {
+    const res = await request(app)
+      .post('/api/companies-duplicate-cleanup/run')
+      .set('x-pb-token', 'test-token')
+      .set('Content-Type', 'application/json')
+      .send(body);
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.ok(res.body.error);
+  }
+});

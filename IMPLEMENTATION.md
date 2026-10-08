@@ -344,7 +344,7 @@ The frontend omits the `x-pb-token` header when `authMethod === 'oauth'` (token 
 
 ### Pagination
 
-Productboard API v1 was fully retired for this workspace (every v1 path now returns `410 Gone` — confirmed live 2026-08-14). All pagination is now cursor-based via `response.links?.next` and the `extractCursor()` helper in `pbClient.js`. `paginateOffset()` (the old v1 offset-pagination helper) has been removed.
+Productboard API v1 was fully retired for this workspace (v1 paths now return `410 Gone` or `404 Not Found` — confirmed live 2026-08-14 / 2026-10-08). All pagination is now cursor-based via `response.links?.next` and the `extractCursor()` helper in `pbClient.js`. `paginateOffset()` (the old v1 offset-pagination helper) has been removed.
 
 ```js
 let cursor = null;
@@ -619,7 +619,7 @@ pb-member-activity_2026-03-01_2026-03-14_role-maker_team-frontend.csv
 
 - ~~**v2 list/search returns domain under a UUID key, single GET normalises to `"domain"`**~~ — **Resolved (2026-04-03)**: PB fixed the API. `GET /v2/entities?type[]=company` now returns domain under the standard `"domain"` key. The UUID discovery loop was removed from `domainCache.js`.
 
-- ~~**V1 and v2 company lists are separate**~~ — **Moot (2026-08-16)**: Productboard API v1 was fully retired for this workspace (410 Gone on every v1 path). `GET /v2/entities?type[]=company` is now the only company list and covers everything, legacy-created or not.
+- ~~**V1 and v2 company lists are separate**~~ — **Moot (2026-08-16)**: Productboard API v1 was fully retired for this workspace (v1 paths return 410 Gone / 404). `GET /v2/entities?type[]=company` is now the only company list and covers everything, legacy-created or not.
 
 - **Source fields are v2 `metadata.source`** — `sourceOriginCol` maps to `metadata.source.system` and `sourceRecordCol` to `metadata.source.recordId`. This is the only source of truth now — v1 is retired, so there's nothing left to fall back to.
 
